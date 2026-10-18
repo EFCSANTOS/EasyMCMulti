@@ -19,6 +19,7 @@ Auth : header  Authorization: Agent-Key <secret>
 """
 import json
 import os
+import platform
 import secrets
 import subprocess
 import threading
@@ -36,8 +37,42 @@ API_BASE = "https://api.playit.gg"
 CLAIM_PAGE = "https://playit.gg/claim/{}"
 TUNNELS_URL = "https://playit.gg/account/tunnels"  # fallback manuel si la creation auto echoue
 
-_agent_path = os.path.join(paths.DATA_DIR, "playit.exe")
 _CONFIG_FILE = os.path.join(paths.DATA_DIR, "playit_config.json")
+
+
+def _agent_binary_name() -> str:
+    """Return the PlayIt agent binary that matches the current platform.
+
+    The upstream PlayIt project ships native Linux binaries and Android packages,
+    but not a universal cross-platform daemon. We therefore select the right
+    binary for the current runtime instead of hardcoding a Windows .exe.
+    """
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    if system.startswith("win"):
+        if machine in {"amd64", "x86_64", "x64"}:
+            return "playit-windows-x86_64.exe"
+        if machine in {"x86", "i386", "i686"}:
+            return "playit-windows-x86.exe"
+        raise RuntimeError(f"Unsupported Windows architecture for PlayIt: {machine!r}")
+
+    if system in {"linux", "android"}:
+        if machine in {"amd64", "x86_64", "x64"}:
+            return "playit-linux-amd64"
+        if machine in {"arm64", "aarch64"}:
+            return "playit-linux-aarch64"
+        if machine in {"armv7", "armv7l", "armhf"}:
+            return "playit-linux-armv7"
+        if machine in {"i386", "i686"}:
+            return "playit-linux-i686"
+        raise RuntimeError(f"Unsupported Linux/Android architecture for PlayIt: {machine!r}")
+
+    raise RuntimeError(f"PlayIt is not supported on platform={system!r} arch={machine!r}.")
+
+
+def _agent_path() -> str:
+    return os.path.join(paths.DATA_DIR, _agent_binary_name())
 
 
 # ---------- Config locale (secret key + adresse du tunnel) ----------
@@ -236,25 +271,39 @@ def ensure_tunnel(secret, local_port, log, timeout_sec=120):
 
 # ---------- Telechargement de l'agent (daemon) ----------
 def ensure_agent(log=print):
-    """Telecharge l'agent playit (binaire Windows x64 signe) s'il n'est pas la. Renvoie le chemin."""
-    if os.path.exists(_agent_path):
-        return _agent_path
+    """Download the PlayIt agent matching the current host platform.
+
+    Linux and Android-compatible userlands are supported via the upstream Linux
+    binaries; Android will only work when the app is running in a Linux-capable
+    environment (for example Termux/proot), not as a normal APK-only app.
+    """
+    agent_path = _agent_path()
+    if os.path.exists(agent_path):
+        if os.name != "nt":
+            os.chmod(agent_path, 0o755)
+        return agent_path
+
     paths.ensure_dirs()
     log("Recherche de l'agent playit.gg...")
     rel = requests.get(RELEASES_API, timeout=30).json()
+
+    wanted_name = _agent_binary_name().lower()
     asset = None
     for a in rel.get("assets", []):
         name = a["name"].lower()
-        if name.endswith(".exe") and "windows" in name and "x86_64" in name:
+        if name == wanted_name:
             asset = a
-            if "signed" in name:
-                break  # on prefere le binaire signe
+            break
+
     if not asset:
-        raise RuntimeError("Binaire Windows playit introuvable dans la derniere release.")
+        raise RuntimeError(f"Binaire PlayIt non pris en charge pour cette plateforme : {wanted_name}")
+
     log(f"Telechargement de {asset['name']}...")
     from .downloaders import download
-    download(asset["browser_download_url"], _agent_path, log=log)
-    return _agent_path
+    download(asset["browser_download_url"], agent_path, log=log)
+    if os.name != "nt":
+        os.chmod(agent_path, 0o755)
+    return agent_path
 
 
 # ---------- Lancement du daemon ----------
@@ -272,8 +321,9 @@ class PlayitAgent:
     def start(self, secret):
         if not secret:
             raise RuntimeError("Aucune secret key playit configuree.")
+        agent_path = _agent_path()
         self.proc = subprocess.Popen(
-            [_agent_path, "--secret", secret],
+            [agent_path, "--secret", secret],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
             creationflags=CREATE_NO_WINDOW)
