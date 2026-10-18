@@ -31,7 +31,7 @@ The new version is functional and includes:
 - status reporting for LAN/public addresses and PlayIt metadata
 - real install flow before launch instead of demo fallback
 
-The desktop Tkinter app in `launcher.py` is still present for compatibility and legacy use, but the browser-based workflow is the active migration target.
+The legacy Tkinter desktop app in `launcher.py` is kept only as a compatibility artifact and is no longer part of the normal startup path. The browser dashboard is the active and supported workflow.
 
 ---
 
