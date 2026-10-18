@@ -31,7 +31,7 @@ The new version is functional and includes:
 - status reporting for LAN/public addresses and PlayIt metadata
 - real install flow before launch instead of demo fallback
 
-The legacy Tkinter desktop app in `launcher.py` is kept only as a compatibility artifact and is no longer part of the normal startup path. The browser dashboard is the active and supported workflow.
+The browser dashboard is the active and supported workflow.
 
 ---
 
@@ -154,25 +154,11 @@ webapp/
   state.py
   websocket_manager.py
 
-launcher.py
 requirements.txt
 README.md
 run.bat
 run_debug.bat
-build.bat
 ```
-
----
-
-## Legacy desktop launcher
-
-The original desktop launcher is still available for manual local use:
-
-```bat
-python launcher.py
-```
-
-This is the older Tkinter interface and is not the primary path anymore. The new browser-based path is the recommended way to operate the server.
 
 ---
 
