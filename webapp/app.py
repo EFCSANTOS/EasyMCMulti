@@ -1583,21 +1583,23 @@ def create_app() -> FastAPI:
 
     @app.get("/login")
     def login() -> HTMLResponse:
-        with open(os.path.join(os.path.dirname(__file__), "login.html"), "r", encoding="utf-8") as handle:
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "login.html")
+        with open(template_path, "r", encoding="utf-8") as handle:
             return HTMLResponse(handle.read())
 
     @app.get("/dashboard")
     def dashboard() -> HTMLResponse:
-        with open(os.path.join(os.path.dirname(__file__), "dashboard.html"), "r", encoding="utf-8") as handle:
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")
+        with open(template_path, "r", encoding="utf-8") as handle:
             return HTMLResponse(handle.read())
 
     @app.get("/dashboard.css")
     def dashboard_css() -> FileResponse:
-        return FileResponse(os.path.join(os.path.dirname(__file__), "dashboard.css"))
+        return FileResponse(os.path.join(os.path.dirname(__file__), "static", "css", "dashboard.css"))
 
     @app.get("/dashboard.js")
     def dashboard_js() -> FileResponse:
-        return FileResponse(os.path.join(os.path.dirname(__file__), "dashboard.js"))
+        return FileResponse(os.path.join(os.path.dirname(__file__), "static", "js", "dashboard.js"))
 
     @app.get("/health")
     def health() -> dict[str, Any]:
