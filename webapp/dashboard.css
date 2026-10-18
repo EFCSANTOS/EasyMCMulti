@@ -1,0 +1,123 @@
+:root {
+  color-scheme: dark;
+  --bg: #020817;
+  --panel: #0f172a;
+  --panel-alt: #111827;
+  --border: #334155;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --primary: #38bdf8;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", sans-serif;
+  background: linear-gradient(180deg, #020817 0%, #0f172a 100%);
+  color: var(--text);
+}
+
+.wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+}
+
+h1, h2, h3 {
+  margin-top: 0;
+}
+
+.card {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.35);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.row > * {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 140px;
+}
+
+label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+input, select, button {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #0b1120;
+  color: var(--text);
+  padding: 0.7rem 0.8rem;
+  font: inherit;
+}
+
+input:focus, select:focus {
+  outline: 2px solid rgba(56, 189, 248, 0.4);
+  border-color: var(--primary);
+}
+
+button {
+  background: linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%);
+  border-color: transparent;
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 44px;
+}
+
+button.secondary {
+  background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+}
+
+button.danger {
+  background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+}
+
+.status {
+  display: block;
+  min-height: 1.5rem;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #dbeafe;
+  background: #020817;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  min-height: 180px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  .row > * {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .wrap {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+}

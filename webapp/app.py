@@ -6,8 +6,8 @@ import os
 import sys
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from core import config_store, downloaders, java_manager, modrinth, netinfo, paths, playit
@@ -1525,11 +1525,25 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     def root() -> HTMLResponse:
-        return HTMLResponse(_dashboard_html())
+        return dashboard()
+
+    @app.get("/login")
+    def login() -> HTMLResponse:
+        with open(os.path.join(os.path.dirname(__file__), "login.html"), "r", encoding="utf-8") as handle:
+            return HTMLResponse(handle.read())
 
     @app.get("/dashboard")
     def dashboard() -> HTMLResponse:
-        return HTMLResponse(_dashboard_html())
+        with open(os.path.join(os.path.dirname(__file__), "dashboard.html"), "r", encoding="utf-8") as handle:
+            return HTMLResponse(handle.read())
+
+    @app.get("/dashboard.css")
+    def dashboard_css() -> FileResponse:
+        return FileResponse(os.path.join(os.path.dirname(__file__), "dashboard.css"))
+
+    @app.get("/dashboard.js")
+    def dashboard_js() -> FileResponse:
+        return FileResponse(os.path.join(os.path.dirname(__file__), "dashboard.js"))
 
     @app.get("/health")
     def health() -> dict[str, Any]:
