@@ -6,11 +6,11 @@ import os
 import sys
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from core import config_store, downloaders, java_manager, netinfo, paths, playit
+from core import config_store, downloaders, java_manager, modrinth, netinfo, paths, playit
 from core.server_process import ServerProcess, accept_eula, update_properties
 from webapp.auth import validate_auth_settings, verify_basic_auth_header, verify_credentials
 from webapp.state import RuntimeState
@@ -187,8 +187,55 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
         <div class="status" id="playit-status-panel">PlayIt not configured.</div>
       </div>
 
-      <div class="card">        <h3>Console</h3>
-        <pre id=\"console-output\">Waiting for logs...</pre>
+      <div class="card">
+        <h3>Mods / Plugins</h3>
+        <div class="row">
+          <input id="mod-search-query" placeholder="Search Modrinth" style="flex:1; min-width: 220px;" />
+          <button id="mod-search-button" class="secondary" type="button">Search</button>
+          <button id="mod-refresh-button" class="secondary" type="button">Refresh list</button>
+        </div>
+        <div class="row" style="margin-top:0.75rem;">
+          <input id="mod-upload-input" type="file" multiple accept=".jar,application/java-archive" />
+          <button id="mod-upload-button" class="secondary" type="button">Upload jars</button>
+        </div>
+        <div class="row" style="margin-top:0.75rem;">
+          <select id="mod-search-results" size="6" style="flex:1; min-width: 300px; background:#0b1120; color:#e2e8f0; border:1px solid #475569; border-radius:8px; padding:0.5rem;"></select>
+          <button id="mod-install-button" type="button">Install selected</button>
+        </div>
+        <div class="row" style="margin-top:0.75rem;">
+          <select id="mod-installed-list" size="6" style="flex:1; min-width: 300px; background:#0b1120; color:#e2e8f0; border:1px solid #475569; border-radius:8px; padding:0.5rem;"></select>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Admin commands</h3>
+        <div class="row">
+          <input id="admin-player" placeholder="Player name" style="min-width: 180px;" />
+          <button id="admin-op" class="secondary" type="button">OP</button>
+          <button id="admin-deop" class="secondary" type="button">De-OP</button>
+          <button id="admin-kick" class="secondary" type="button">Kick</button>
+          <button id="admin-ban" class="secondary" type="button">Ban</button>
+        </div>
+        <div class="row" style="margin-top:0.75rem;">
+          <button id="admin-day" class="secondary" type="button">Day</button>
+          <button id="admin-night" class="secondary" type="button">Night</button>
+          <button id="admin-clear" class="secondary" type="button">Clear weather</button>
+          <button id="admin-rain" class="secondary" type="button">Rain</button>
+          <button id="admin-save" class="secondary" type="button">Save all</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Backups</h3>
+        <div class="row">
+          <select id="backup-list" size="5" style="flex:1; min-width: 280px; background:#0b1120; color:#e2e8f0; border:1px solid #475569; border-radius:8px; padding:0.5rem;"></select>
+          <button id="backup-restore-button" class="secondary" type="button">Restore selected</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Console</h3>
+        <pre id="console-output">Waiting for logs...</pre>
       </div>
     </div>
 
@@ -356,6 +403,57 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
         }
       }
 
+      function renderModList(items) {
+        const list = document.getElementById('mod-installed-list');
+        list.innerHTML = '';
+        for (const item of items || []) {
+          const option = document.createElement('option');
+          option.value = item.path || item.name;
+          option.textContent = item.name || item.path;
+          list.appendChild(option);
+        }
+      }
+
+      function renderModSearchResults(items) {
+        const list = document.getElementById('mod-search-results');
+        list.innerHTML = '';
+        for (const item of items || []) {
+          const option = document.createElement('option');
+          option.value = item.slug || item.title;
+          option.textContent = item.title || item.slug;
+          list.appendChild(option);
+        }
+      }
+
+      function renderBackupList(items) {
+        const list = document.getElementById('backup-list');
+        list.innerHTML = '';
+        for (const item of items || []) {
+          const option = document.createElement('option');
+          option.value = item;
+          option.textContent = item.split(/[\\/]/).pop();
+          list.appendChild(option);
+        }
+      }
+
+      async function refreshMods() {
+        try {
+          const payload = await apiRequest('/api/server/mods');
+          renderModList(payload.mods || []);
+        } catch (error) {
+          renderModList([]);
+        }
+      }
+
+      async function refreshBackups() {
+        try {
+          const payload = await apiRequest('/api/server/backups');
+          renderBackupList(payload.backups || []);
+        } catch (error) {
+          renderBackupList([]);
+        }
+      }
+
       document.getElementById('auth-form').addEventListener('submit', (event) => {
         event.preventDefault();
         state.username = document.getElementById('username').value;
@@ -488,14 +586,110 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
         }
       });
 
+      document.getElementById('mod-search-button').addEventListener('click', async () => {
+        const query = document.getElementById('mod-search-query').value.trim();
+        if (!query) return;
+        try {
+          const payload = await apiRequest('/api/modrinth/search?query=' + encodeURIComponent(query));
+          renderModSearchResults(payload.items || []);
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      document.getElementById('mod-install-button').addEventListener('click', async () => {
+        const select = document.getElementById('mod-search-results');
+        const slug = select.value;
+        if (!slug) return;
+        try {
+          await apiRequest('/api/modrinth/install', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug })
+          });
+          await refreshMods();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      document.getElementById('mod-refresh-button').addEventListener('click', async () => {
+        await refreshMods();
+      });
+
+      document.getElementById('mod-upload-button').addEventListener('click', async () => {
+        const input = document.getElementById('mod-upload-input');
+        if (!input.files || input.files.length === 0) return;
+        const form = new FormData();
+        for (const file of input.files) {
+          form.append('files', file);
+        }
+        try {
+          await apiRequest('/api/server/mods/upload', { method: 'POST', body: form });
+          input.value = '';
+          await refreshMods();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      document.getElementById('backup-restore-button').addEventListener('click', async () => {
+        const backup = document.getElementById('backup-list').value;
+        if (!backup) return;
+        try {
+          await apiRequest('/api/server/backups/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ backup_path: backup })
+          });
+          alert('Backup restored.');
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      const adminActions = {
+        'admin-op': 'op {player}',
+        'admin-deop': 'deop {player}',
+        'admin-kick': 'kick {player}',
+        'admin-ban': 'ban {player}',
+        'admin-day': 'time set day',
+        'admin-night': 'time set night',
+        'admin-clear': 'weather clear',
+        'admin-rain': 'weather rain',
+        'admin-save': 'save-all'
+      };
+      for (const [id, commandTemplate] of Object.entries(adminActions)) {
+        document.getElementById(id).addEventListener('click', async () => {
+          const player = document.getElementById('admin-player').value.trim();
+          const command = commandTemplate.includes('{player}')
+            ? commandTemplate.replace('{player}', player || 'PlayerName')
+            : commandTemplate;
+          try {
+            await apiRequest('/api/server/command', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ command })
+            });
+            await refreshConsole();
+          } catch (error) {
+            alert(error.message);
+          }
+        });
+      }
+
       refreshConfig();
       refreshStatus();
       refreshConsole();
       refreshPlayItStatus();
+      refreshMods();
+      refreshBackups();
       setInterval(() => {
         refreshStatus();
         refreshConsole();
         refreshPlayItStatus();
+        refreshMods();
+        refreshBackups();
       }, 2000);
     </script>
   </body>
@@ -814,10 +1008,91 @@ def create_app() -> FastAPI:
         config = _effective_config()
         target_dir = _server_dir_for_config(config)
         backups = []
-        for entry in os.listdir(target_dir):
-            if entry.startswith("world-backup-") and entry.endswith(".zip"):
-                backups.append(os.path.join(target_dir, entry))
+        if os.path.isdir(target_dir):
+            for entry in os.listdir(target_dir):
+                if entry.startswith("world-backup-") and entry.endswith(".zip"):
+                    backups.append(os.path.join(target_dir, entry))
         return {"backups": backups}
+
+    @app.post("/api/server/backups/restore")
+    def restore_backup(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        backup_path = str(payload.get("backup_path", "")).strip()
+        if not backup_path or not os.path.exists(backup_path):
+            raise HTTPException(status_code=400, detail="A valid backup path is required.")
+        config = _effective_config()
+        target_dir = _server_dir_for_config(config)
+        os.makedirs(target_dir, exist_ok=True)
+        world_dir = os.path.join(target_dir, "world")
+        if os.path.isdir(world_dir):
+            backup_name = f"world-backup-pre-restore-{__import__('time').strftime('%Y%m%d-%H%M%S')}"
+            os.rename(world_dir, os.path.join(target_dir, backup_name))
+        import zipfile
+        with zipfile.ZipFile(backup_path, "r") as zf:
+            zf.extractall(target_dir)
+        return {"ok": True, "message": f"Backup restored from {backup_path}"}
+
+    @app.get("/api/server/mods")
+    def list_mods(_: str = Depends(require_auth)) -> dict[str, Any]:
+        config = _effective_config()
+        target_dir = _server_dir_for_config(config)
+        mods_dir = os.path.join(target_dir, "mods")
+        plugins_dir = os.path.join(target_dir, "plugins")
+        items = []
+        for base_dir in (mods_dir, plugins_dir):
+            if not os.path.isdir(base_dir):
+                continue
+            for name in sorted(os.listdir(base_dir)):
+                if name.lower().endswith(".jar"):
+                    items.append({"name": name, "path": os.path.join(base_dir, name)})
+        return {"mods": items}
+
+    @app.post("/api/server/mods/upload")
+    def upload_mods(files: list[UploadFile] = File(default=[]), _: str = Depends(require_auth)) -> dict[str, Any]:
+        if not files:
+            raise HTTPException(status_code=400, detail="No mod files were uploaded.")
+        config = _effective_config()
+        target_dir = _server_dir_for_config(config)
+        mod_target = os.path.join(target_dir, "mods") if str(config.get("loader", "vanilla")) in {"forge", "fabric", "neoforge"} else os.path.join(target_dir, "plugins")
+        os.makedirs(mod_target, exist_ok=True)
+        saved = []
+        for upload in files:
+            name = os.path.basename(upload.filename or "")
+            if not name.lower().endswith(".jar"):
+                continue
+            dest = os.path.join(mod_target, name)
+            with open(dest, "wb") as handle:
+                while True:
+                    chunk = upload.file.read(65536)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+            saved.append(dest)
+        return {"ok": True, "saved": saved}
+
+    @app.get("/api/modrinth/search")
+    def modrinth_search(query: str, _: str = Depends(require_auth)) -> dict[str, Any]:
+        term = (query or "").strip()
+        if not term:
+            raise HTTPException(status_code=400, detail="A Modrinth search query is required.")
+        config = _effective_config()
+        loader = str(config.get("loader", "vanilla"))
+        version = str(config.get("version", "1.21.7"))
+        items = modrinth.search(term, loader, version, limit=10)
+        return {"items": items}
+
+    @app.post("/api/modrinth/install")
+    def modrinth_install(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        slug = str(payload.get("slug", "")).strip()
+        if not slug:
+            raise HTTPException(status_code=400, detail="A Modrinth project slug is required.")
+        config = _effective_config()
+        target_dir = _server_dir_for_config(config)
+        loader = str(config.get("loader", "vanilla"))
+        version = str(config.get("version", "1.21.7"))
+        target_folder = os.path.join(target_dir, "mods") if loader in {"forge", "fabric", "neoforge"} else os.path.join(target_dir, "plugins")
+        os.makedirs(target_folder, exist_ok=True)
+        installed = modrinth.install(slug, loader, version, target_folder, log=append_console_line)
+        return {"ok": True, "filename": installed}
 
     @app.get("/api/playit/status")
     def playit_status(_: str = Depends(require_auth)) -> dict[str, Any]:

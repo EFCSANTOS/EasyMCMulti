@@ -38,6 +38,8 @@ def test_dashboard_mentions_legacy_management_controls():
     assert response.status_code == 200
     assert "Restart server" in response.text
     assert "Backup world" in response.text
+    assert "Mods / Plugins" in response.text
+    assert "Admin commands" in response.text
 
 
 def test_dashboard_uses_runtime_auth_defaults(monkeypatch):
