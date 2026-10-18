@@ -1,4 +1,4 @@
-"""MZ Minecraft Server Launcher.
+"""EZ Minecraft Server Launcher.
 
 Interface a onglets pour auto-heberger un serveur Minecraft
 (vanilla / paper / fabric / forge / neoforge) :
@@ -71,7 +71,7 @@ CONSOLE_FG = "#9FB4C8"
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("MZ Minecraft Server Launcher")
+        root.title("EZ Minecraft Server Launcher")
         # Taille adaptee a l'ecran avec de bonnes marges sur tous les cotes (l'appli
         # ne touche jamais les bords). Le contenu des onglets est scrollable : rien
         # ne peut sortir de l'ecran, meme sur un petit ecran.
@@ -203,7 +203,7 @@ class App:
     def _build_ui(self):
         header = ttk.Frame(self.root, padding=(16, 12))
         header.pack(fill="x")
-        ttk.Label(header, text="MZ", style="Accent.TLabel").pack(side="left")
+        ttk.Label(header, text="EZ", style="Accent.TLabel").pack(side="left")
         ttk.Label(header, text=" Minecraft Server", style="Title.TLabel").pack(side="left")
         self.head_status = ttk.Label(header, text="", style="Muted.TLabel")
         self.head_status.pack(side="right")
@@ -493,7 +493,7 @@ class App:
         ov = self._overlay()
         wrap = tk.Frame(ov, bg=BG)
         wrap.place(relx=0.5, rely=0.46, anchor="center", width=720)
-        tk.Label(wrap, text="MZ", bg=BG, fg=ACCENT,
+        tk.Label(wrap, text="EZ", bg=BG, fg=ACCENT,
                  font=("Segoe UI Semibold", 24)).pack(side="top", anchor="w")
         tk.Label(wrap, text="Minecraft Server", bg=BG, fg=FG,
                  font=("Segoe UI Semibold", 24)).pack(anchor="w")
@@ -1815,7 +1815,7 @@ class App:
     def _test_mail(self):
         def work():
             try:
-                mailer.send(crash_reporter.DEV_EMAIL, "MZ Launcher - test",
+                mailer.send(crash_reporter.DEV_EMAIL, "EZ Launcher - test",
                             "This is a test e-mail: automatic crash reports are working.")
                 self.ui(lambda: self._info("Test successful", "The test e-mail was sent successfully."))
             except Exception as e:

@@ -1,8 +1,8 @@
 import importlib
 import os
 
-os.environ["MZ_WEBAPP_USERNAME"] = "admin"
-os.environ["MZ_WEBAPP_PASSWORD"] = "s3cret-pass"
+os.environ["EZ_WEBAPP_USERNAME"] = "admin"
+os.environ["EZ_WEBAPP_PASSWORD"] = "s3cret-pass"
 
 from fastapi.testclient import TestClient
 
@@ -23,7 +23,7 @@ def test_health_endpoint():
 def test_dashboard_serves_html():
     response = client.get("/", auth=("admin", "s3cret-pass"))
     assert response.status_code == 200
-    assert "MZ Minecraft Server" in response.text
+    assert "EZ Minecraft Server" in response.text
     assert "Dashboard" in response.text
 
 

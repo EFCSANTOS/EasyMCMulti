@@ -1,5 +1,5 @@
 # Données runtime générées par le launcher (Java téléchargé, serveurs, mondes)
-MZ_Server_Data/
+EZ_Server_Data/
 
 # Build PyInstaller
 build/

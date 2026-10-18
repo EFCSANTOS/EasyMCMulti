@@ -8,20 +8,20 @@ from fastapi.security import HTTPBasicCredentials
 
 
 def validate_auth_settings() -> None:
-    username = os.getenv("MZ_WEBAPP_USERNAME", "").strip()
-    password = os.getenv("MZ_WEBAPP_PASSWORD", "").strip()
+    username = os.getenv("EZ_WEBAPP_USERNAME", "").strip()
+    password = os.getenv("EZ_WEBAPP_PASSWORD", "").strip()
     if not username or not password:
         raise RuntimeError(
-            "Authentication is required. Set MZ_WEBAPP_USERNAME and MZ_WEBAPP_PASSWORD before starting the web app."
+            "Authentication is required. Set EZ_WEBAPP_USERNAME and EZ_WEBAPP_PASSWORD before starting the web app."
         )
 
 
 def get_expected_credentials() -> tuple[str, str]:
-    username = os.getenv("MZ_WEBAPP_USERNAME", "").strip()
-    password = os.getenv("MZ_WEBAPP_PASSWORD", "").strip()
+    username = os.getenv("EZ_WEBAPP_USERNAME", "").strip()
+    password = os.getenv("EZ_WEBAPP_PASSWORD", "").strip()
     if not username or not password:
         raise RuntimeError(
-            "Authentication is required. Set MZ_WEBAPP_USERNAME and MZ_WEBAPP_PASSWORD before starting the web app."
+            "Authentication is required. Set EZ_WEBAPP_USERNAME and EZ_WEBAPP_PASSWORD before starting the web app."
         )
     return username, password
 

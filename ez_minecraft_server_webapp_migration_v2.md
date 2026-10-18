@@ -1,12 +1,12 @@
-# MZ Minecraft Server Launcher — Webapp Migration Plan (v2)
+# EZ Minecraft Server Launcher — Webapp Migration Plan (v2)
 
 ## 1. Objective
 
-Transform the existing **MZ Minecraft Server Launcher** into an English-language web application that lets authorized users manage the Minecraft server from any device on the same local network (LAN).
+Transform the existing **EZ Minecraft Server Launcher** into an English-language web application that lets authorized users manage the Minecraft server from any device on the same local network (LAN).
 
 The web application should replace the Tkinter interface while reusing the repository's existing `core/` functionality wherever practical. It must preserve playit.gg support and provide a safe foundation for multi-client management.
 
-Repository: https://github.com/MatheoZimmer/mz-minecraft-serveur
+Repository: https://github.com/MatheoZimmer/ez-minecraft-serveur
 
 > **Implementation rule:** Inspect the actual repository before connecting routes to core functions. The names and signatures in this plan are targets, not guarantees. Do not assume example methods such as `download_server()`, `backup_world()`, `current_address()`, or `ServerProcess.is_alive()` exist until verified.
 
@@ -38,7 +38,7 @@ Repository: https://github.com/MatheoZimmer/mz-minecraft-serveur
 ## 3. Proposed project structure
 
 ```text
-mz-minecraft-serveur/
+ez-minecraft-serveur/
 ├── launcher.py                 # Existing desktop entry point, if retained
 ├── core/                       # Existing business logic
 ├── webapp/

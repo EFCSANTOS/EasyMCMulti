@@ -32,7 +32,7 @@ DASHBOARD_HTML = """<!doctype html>
   <head>
     <meta charset=\"utf-8\" />
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-    <title>MZ Minecraft Server Dashboard</title>
+    <title>EZ Minecraft Server Dashboard</title>
     <style>
       body { font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 2rem; }
       .wrap { max-width: 980px; margin: 0 auto; }
@@ -51,7 +51,7 @@ DASHBOARD_HTML = """<!doctype html>
   </head>
   <body>
     <div class=\"wrap\">
-      <h1>MZ Minecraft Server</h1>
+      <h1>EZ Minecraft Server</h1>
       <h2>Dashboard</h2>
 
       <div class=\"card\">
@@ -352,7 +352,7 @@ def _server_is_installed(target_dir: str, loader: str) -> bool:
 
 def create_app() -> FastAPI:
     validate_auth_settings()
-    app = FastAPI(title="MZ Minecraft Server Launcher", version="0.1.0")
+    app = FastAPI(title="EZ Minecraft Server Launcher", version="0.1.0")
     runtime = RuntimeState()
     app.state.runtime = runtime
     app.state.console_manager = WebSocketManager()
@@ -412,7 +412,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, Any]:
-        return {"status": "ok", "service": "mz-server-webapp"}
+        return {"status": "ok", "service": "ez-server-webapp"}
 
     @app.get("/api/status")
     def status(_: str = Depends(require_auth)) -> dict[str, Any]:

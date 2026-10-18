@@ -70,7 +70,7 @@ Grosse vague de fonctionnalités.
   `core/sysinfo.py`.
 - **Rapport de crash automatique** (`core/crash_reporter.py`) : à toute exception non gérée,
   génère un rapport structuré (système, état, dernières lignes console, traceback),
-  l'enregistre dans `MZ_Server_Data/crash_reports/` et ouvre le client mail vers le dev.
+  l'enregistre dans `EZ_Server_Data/crash_reports/` et ouvre le client mail vers le dev.
 
 ### Corrigé
 - Dérivation MC depuis NeoForge compatible nouveau versioning Minecraft (`26.x`).

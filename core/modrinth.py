@@ -7,7 +7,7 @@ import requests
 from .downloaders import download
 
 API = "https://api.modrinth.com/v2"
-HEADERS = {"User-Agent": "MZ-Minecraft-Launcher/1.0 (perso)"}
+HEADERS = {"User-Agent": "EZ-Minecraft-Launcher/1.0 (perso)"}
 
 # loader du launcher -> loaders Modrinth correspondants
 _LOADER_MAP = {
