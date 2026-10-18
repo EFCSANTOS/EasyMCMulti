@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from core import config_store, downloaders, java_manager, netinfo, paths, playit
-from core.server_process import ServerProcess, accept_eula
+from core.server_process import ServerProcess, accept_eula, update_properties
 from webapp.auth import validate_auth_settings, verify_basic_auth_header, verify_credentials
 from webapp.state import RuntimeState
 from webapp.websocket_manager import WebSocketManager
@@ -87,11 +87,77 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
             <label for="ram-input">RAM (MB)</label>
             <input id="ram-input" name="ram_mb" type="number" min="512" step="256" value="2048" />
           </div>
+          <div>
+            <label for="port-input">Port</label>
+            <input id="port-input" name="server_port" type="number" min="1024" max="65535" value="25565" />
+          </div>
           <button type="submit">Save config</button>
           <button id="create-button" type="button">Create server</button>
         </form>
       </div>
-
+      <div class="card">
+        <h3>Advanced settings</h3>
+        <div class="row">
+          <div>
+            <label for="motd-input">MOTD</label>
+            <input id="motd-input" value="EZ Minecraft Server" />
+          </div>
+          <div>
+            <label for="maxplayers-input">Max players</label>
+            <input id="maxplayers-input" type="number" min="1" max="1000" value="10" />
+          </div>
+          <div>
+            <label for="gamemode-input">Game mode</label>
+            <select id="gamemode-input">
+              <option value="survival">survival</option>
+              <option value="creative">creative</option>
+              <option value="adventure">adventure</option>
+              <option value="spectator">spectator</option>
+            </select>
+          </div>
+          <div>
+            <label for="difficulty-input">Difficulty</label>
+            <select id="difficulty-input">
+              <option value="peaceful">peaceful</option>
+              <option value="easy">easy</option>
+              <option value="normal">normal</option>
+              <option value="hard">hard</option>
+            </select>
+          </div>
+        </div>
+        <div class="row" style="margin-top:0.75rem;">
+          <div>
+            <label for="leveltype-input">World type</label>
+            <select id="leveltype-input">
+              <option value="normal">normal</option>
+              <option value="flat">flat</option>
+              <option value="largebiomes">largebiomes</option>
+              <option value="amplified">amplified</option>
+            </select>
+          </div>
+          <div>
+            <label for="viewdist-input">View distance</label>
+            <input id="viewdist-input" type="number" min="3" max="32" value="10" />
+          </div>
+          <div>
+            <label for="simdist-input">Simulation distance</label>
+            <input id="simdist-input" type="number" min="3" max="32" value="10" />
+          </div>
+          <div>
+            <label for="seed-input">Seed</label>
+            <input id="seed-input" value="" placeholder="empty = random" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:0.75rem;">
+          <label><input id="online-mode" type="checkbox" checked /> Online mode</label>
+          <label><input id="pvp-mode" type="checkbox" checked /> PvP</label>
+          <label><input id="spawn-monsters" type="checkbox" checked /> Spawn monsters</label>
+          <label><input id="allow-flight" type="checkbox" /> Allow flight</label>
+          <label><input id="nether-mode" type="checkbox" checked /> Nether</label>
+          <label><input id="whitelist-mode" type="checkbox" /> Whitelist</label>
+          <label><input id="command-blocks" type="checkbox" checked /> Command blocks</label>
+        </div>
+      </div>
       <div class="card">        <div class=\"row\">
           <button id=\"start-button\">Start server</button>
           <button id=\"stop-button\" class=\"danger\">Stop server</button>
@@ -112,8 +178,16 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
         </form>
       </div>
 
-      <div class=\"card\">
-        <h3>Console</h3>
+      <div class=\"card\">        <h3>Remote access (PlayIt)</h3>
+        <div class="row">
+          <button id="playit-config-button" class="secondary" type="button">Configure tunnel</button>
+          <button id="playit-start-button" class="secondary" type="button">Start tunnel</button>
+          <button id="playit-stop-button" class="danger" type="button">Stop tunnel</button>
+        </div>
+        <div class="status" id="playit-status-panel">PlayIt not configured.</div>
+      </div>
+
+      <div class="card">        <h3>Console</h3>
         <pre id=\"console-output\">Waiting for logs...</pre>
       </div>
     </div>
@@ -166,6 +240,30 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
         document.getElementById('console-output').textContent = output;
       }
 
+      function readConfigPayload() {
+        return {
+          loader: document.getElementById('loader-select').value,
+          version: document.getElementById('version-select').value,
+          ram_mb: Number(document.getElementById('ram-input').value || 2048),
+          server_port: Number(document.getElementById('port-input').value || 25565),
+          motd: document.getElementById('motd-input').value || 'EZ Minecraft Server',
+          max_players: Number(document.getElementById('maxplayers-input').value || 10),
+          gamemode: document.getElementById('gamemode-input').value || 'survival',
+          difficulty: document.getElementById('difficulty-input').value || 'normal',
+          level_type: document.getElementById('leveltype-input').value || 'normal',
+          view_distance: Number(document.getElementById('viewdist-input').value || 10),
+          simulation_distance: Number(document.getElementById('simdist-input').value || 10),
+          level_seed: document.getElementById('seed-input').value || '',
+          online_mode: document.getElementById('online-mode').checked,
+          pvp: document.getElementById('pvp-mode').checked,
+          spawn_monsters: document.getElementById('spawn-monsters').checked,
+          allow_flight: document.getElementById('allow-flight').checked,
+          allow_nether: document.getElementById('nether-mode').checked,
+          white_list: document.getElementById('whitelist-mode').checked,
+          enable_command_block: document.getElementById('command-blocks').checked,
+        };
+      }
+
       async function loadVersions(loader) {
         try {
           const payload = await apiRequest('/api/versions/' + loader);
@@ -189,8 +287,33 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
           const loader = document.getElementById('loader-select');
           const version = document.getElementById('version-select');
           const ram = document.getElementById('ram-input');
+          const port = document.getElementById('port-input');
+          const motd = document.getElementById('motd-input');
+          const maxPlayers = document.getElementById('maxplayers-input');
+          const gamemode = document.getElementById('gamemode-input');
+          const difficulty = document.getElementById('difficulty-input');
+          const levelType = document.getElementById('leveltype-input');
+          const viewDist = document.getElementById('viewdist-input');
+          const simDist = document.getElementById('simdist-input');
+          const seed = document.getElementById('seed-input');
           loader.value = payload.loader || 'vanilla';
           ram.value = payload.ram_mb || 2048;
+          port.value = payload.server_port || 25565;
+          motd.value = payload.motd || 'EZ Minecraft Server';
+          maxPlayers.value = payload.max_players || 10;
+          gamemode.value = payload.gamemode || 'survival';
+          difficulty.value = payload.difficulty || 'normal';
+          levelType.value = payload.level_type || 'normal';
+          viewDist.value = payload.view_distance || 10;
+          simDist.value = payload.simulation_distance || 10;
+          seed.value = payload.level_seed || '';
+          document.getElementById('online-mode').checked = payload.online_mode !== false;
+          document.getElementById('pvp-mode').checked = payload.pvp !== false;
+          document.getElementById('spawn-monsters').checked = payload.spawn_monsters !== false;
+          document.getElementById('allow-flight').checked = Boolean(payload.allow_flight);
+          document.getElementById('nether-mode').checked = payload.allow_nether !== false;
+          document.getElementById('whitelist-mode').checked = Boolean(payload.white_list);
+          document.getElementById('command-blocks').checked = payload.enable_command_block !== false;
           await loadVersions(loader.value);
           if (payload.version) {
             version.value = payload.version;
@@ -218,6 +341,21 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
         }
       }
 
+      async function refreshPlayItStatus() {
+        try {
+          const payload = await apiRequest('/api/playit/status');
+          const panel = document.getElementById('playit-status-panel');
+          if (!payload.configured) {
+            panel.textContent = 'PlayIt not configured yet.';
+            return;
+          }
+          const address = payload.address ? ' -> ' + payload.address : ' (waiting for tunnel address)';
+          panel.textContent = 'PlayIt ' + payload.state + address;
+        } catch (error) {
+          document.getElementById('playit-status-panel').textContent = 'PlayIt unavailable: ' + error.message;
+        }
+      }
+
       document.getElementById('auth-form').addEventListener('submit', (event) => {
         event.preventDefault();
         state.username = document.getElementById('username').value;
@@ -232,11 +370,7 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
 
       document.getElementById('setup-form').addEventListener('submit', async (event) => {
         event.preventDefault();
-        const payload = {
-          loader: document.getElementById('loader-select').value,
-          version: document.getElementById('version-select').value,
-          ram_mb: Number(document.getElementById('ram-input').value || 2048),
-        };
+        const payload = readConfigPayload();
         try {
           await apiRequest('/api/config', {
             method: 'PUT',
@@ -251,7 +385,11 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
 
       document.getElementById('create-button').addEventListener('click', async () => {
         try {
-          await apiRequest('/api/server/create', { method: 'POST' });
+          await apiRequest('/api/server/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(readConfigPayload()),
+          });
           await refreshStatus();
           await refreshConsole();
         } catch (error) {
@@ -261,7 +399,11 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
 
       document.getElementById('start-button').addEventListener('click', async () => {
         try {
-          await apiRequest('/api/server/start', { method: 'POST' });
+          await apiRequest('/api/server/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(readConfigPayload()),
+          });
           await refreshStatus();
           await refreshConsole();
         } catch (error) {
@@ -297,12 +439,41 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
         }
       });
 
+      document.getElementById('playit-config-button').addEventListener('click', async () => {
+        try {
+          await apiRequest('/api/playit/configure', { method: 'POST' });
+          await refreshPlayItStatus();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      document.getElementById('playit-start-button').addEventListener('click', async () => {
+        try {
+          await apiRequest('/api/playit/start', { method: 'POST' });
+          await refreshPlayItStatus();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      document.getElementById('playit-stop-button').addEventListener('click', async () => {
+        try {
+          await apiRequest('/api/playit/stop', { method: 'POST' });
+          await refreshPlayItStatus();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
       refreshConfig();
       refreshStatus();
       refreshConsole();
+      refreshPlayItStatus();
       setInterval(() => {
         refreshStatus();
         refreshConsole();
+        refreshPlayItStatus();
       }, 2000);
     </script>
   </body>
@@ -320,12 +491,48 @@ def require_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
     return verify_credentials(credentials)
 
 
+def _server_properties_from_config(config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "server-port": int(config.get("server_port", 25565)),
+        "online-mode": bool(config.get("online_mode", True)),
+        "max-players": int(config.get("max_players", 10)),
+        "motd": str(config.get("motd", "EZ Minecraft Server")),
+        "level-seed": str(config.get("level_seed", "")),
+        "gamemode": str(config.get("gamemode", "survival")),
+        "difficulty": str(config.get("difficulty", "normal")),
+        "level-type": str(config.get("level_type", "normal")),
+        "pvp": bool(config.get("pvp", True)),
+        "view-distance": int(config.get("view_distance", 10)),
+        "simulation-distance": int(config.get("simulation_distance", 10)),
+        "spawn-monsters": bool(config.get("spawn_monsters", True)),
+        "allow-nether": bool(config.get("allow_nether", True)),
+        "allow-flight": bool(config.get("allow_flight", False)),
+        "white-list": bool(config.get("white_list", False)),
+        "enable-command-block": bool(config.get("enable_command_block", True)),
+    }
+
+
 def _default_config() -> dict[str, Any]:
     return {
         "loader": "vanilla",
         "version": "1.21.7",
         "ram_mb": 2048,
         "server_port": 25565,
+        "motd": "EZ Minecraft Server",
+        "max_players": 10,
+        "gamemode": "survival",
+        "difficulty": "normal",
+        "level_type": "normal",
+        "view_distance": 10,
+        "simulation_distance": 10,
+        "level_seed": "",
+        "online_mode": True,
+        "pvp": True,
+        "spawn_monsters": True,
+        "allow_flight": False,
+        "allow_nether": True,
+        "white_list": False,
+        "enable_command_block": True,
     }
 
 
@@ -341,6 +548,12 @@ def _server_dir_for_config(config: dict[str, Any]) -> str:
     loader = str(config.get("loader", "vanilla"))
     version = str(config.get("version", "1.21.7"))
     return paths.server_dir(loader, version)
+
+
+def _playit_on_exit(console_manager: Any, runtime: RuntimeState, code: int) -> None:
+    runtime.playit_state = "stopped"
+    runtime.playit_agent = None
+    console_manager.publish(f"[playit] exited with code {code}")
 
 
 def _server_is_installed(target_dir: str, loader: str) -> bool:
@@ -442,7 +655,8 @@ def create_app() -> FastAPI:
 
     @app.put("/api/config")
     def save_config(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
-        config = dict(payload)
+        config = _effective_config()
+        config.update(payload)
         config_store.save(config)
         if "loader" in config:
             runtime.loader = str(config["loader"])
@@ -466,8 +680,11 @@ def create_app() -> FastAPI:
         return {"loader": loader, "versions": versions}
 
     @app.post("/api/server/create")
-    def create_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+    def create_server(payload: dict[str, Any] | None = None, _: str = Depends(require_auth)) -> dict[str, Any]:
         config = _effective_config()
+        if payload:
+            config.update(payload)
+            config_store.save(config)
         loader = str(config.get("loader", "vanilla"))
         version = str(config.get("version", "1.21.7"))
         runtime.loader = loader
@@ -476,6 +693,7 @@ def create_app() -> FastAPI:
         runtime.state = "ready"
         try:
             target_dir = ensure_server_installed(config)
+            update_properties(target_dir, **_server_properties_from_config(config))
         except Exception as exc:
             runtime.operation = "idle"
             runtime.state = "stopped"
@@ -486,11 +704,14 @@ def create_app() -> FastAPI:
         return {"state": runtime.state, "operation": runtime.operation, "loader": loader, "version": version, "server_dir": target_dir}
 
     @app.post("/api/server/start")
-    def start_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+    def start_server(payload: dict[str, Any] | None = None, _: str = Depends(require_auth)) -> dict[str, Any]:
         if runtime.process is not None and runtime.process.is_running():
             return {"state": runtime.state, "operation": runtime.operation, "message": "Server already running."}
 
         config = _effective_config()
+        if payload:
+            config.update(payload)
+            config_store.save(config)
         loader = str(config.get("loader", runtime.loader))
         version = str(config.get("version", runtime.version))
         runtime.loader = loader
@@ -505,6 +726,7 @@ def create_app() -> FastAPI:
             append_console_line(f"[server] exited with code {code}")
 
         target_dir = ensure_server_installed(config)
+        update_properties(target_dir, **_server_properties_from_config(config))
 
         java_exe = java_manager.ensure_java(java_manager.required_java(version))
         args = downloaders.launch_args(loader, java_exe, target_dir, int(config.get("ram_mb", 2048)))
@@ -578,24 +800,71 @@ def create_app() -> FastAPI:
     @app.get("/api/playit/status")
     def playit_status(_: str = Depends(require_auth)) -> dict[str, Any]:
         cfg = playit.load_config()
+        state = runtime.playit_state if runtime.playit_agent and runtime.playit_agent.is_running() else ("running" if cfg.get("secret") and cfg.get("address") else "configured" if cfg.get("secret") else "not-configured")
         return {
             "configured": bool(cfg.get("secret")),
-            "state": "configured" if cfg.get("secret") else "not-configured",
+            "state": state,
             "address": cfg.get("address") or "",
             "secret_present": bool(cfg.get("secret")),
+        }
+
+    @app.post("/api/playit/configure")
+    def configure_playit(_: str = Depends(require_auth)) -> dict[str, Any]:
+        cfg = playit.load_config()
+        if cfg.get("secret"):
+            runtime.playit_state = "configured"
+            runtime.playit_address = cfg.get("address") or runtime.playit_address
+            return {
+                "configured": True,
+                "state": "configured",
+                "address": cfg.get("address") or "",
+                "message": "PlayIt already configured.",
+            }
+
+        secret = playit.claim_interactive(append_console_line, lambda: False)
+        playit.ensure_agent(log=append_console_line)
+        runtime.playit_agent = playit.PlayitAgent(on_output=append_console_line, on_exit=lambda code: _playit_on_exit(app.state.console_manager, runtime, code))
+        runtime.playit_agent.start(secret)
+        local_port = int(_effective_config().get("server_port", 25565))
+        address = playit.ensure_tunnel(secret, local_port, append_console_line)
+        playit.save_config(secret, address)
+        runtime.playit_state = "running"
+        runtime.playit_address = address
+        return {
+            "configured": True,
+            "state": "running",
+            "address": address,
+            "message": "PlayIt tunnel configured and running.",
         }
 
     @app.post("/api/playit/start")
     def start_playit(_: str = Depends(require_auth)) -> dict[str, Any]:
         cfg = playit.load_config()
         if not cfg.get("secret"):
-            return {"configured": False, "state": "not-configured", "address": "", "message": "PlayIt is not configured yet."}
-        return {
-            "configured": True,
-            "state": "configured",
-            "address": cfg.get("address") or "",
-            "message": "PlayIt agent status is available.",
-        }
+            return {"configured": False, "state": "not-configured", "address": "", "message": "PlayIt is not configured yet. Click Configure tunnel first."}
+        if runtime.playit_agent and runtime.playit_agent.is_running():
+            runtime.playit_state = "running"
+            return {"configured": True, "state": "running", "address": cfg.get("address") or "", "message": "PlayIt tunnel is already running."}
+
+        playit.ensure_agent(log=append_console_line)
+        runtime.playit_agent = playit.PlayitAgent(on_output=append_console_line, on_exit=lambda code: _playit_on_exit(app.state.console_manager, runtime, code))
+        runtime.playit_agent.start(cfg["secret"])
+        local_port = int(_effective_config().get("server_port", 25565))
+        address = playit.ensure_tunnel(cfg["secret"], local_port, append_console_line)
+        playit.save_config(cfg["secret"], address)
+        runtime.playit_state = "running"
+        runtime.playit_address = address
+        return {"configured": True, "state": "running", "address": address, "message": "PlayIt tunnel started."}
+
+    @app.post("/api/playit/stop")
+    def stop_playit(_: str = Depends(require_auth)) -> dict[str, Any]:
+        if runtime.playit_agent and runtime.playit_agent.is_running():
+            runtime.playit_agent.stop()
+        runtime.playit_agent = None
+        cfg = playit.load_config()
+        runtime.playit_state = "stopped"
+        runtime.playit_address = cfg.get("address") or runtime.playit_address
+        return {"configured": bool(cfg.get("secret")), "state": "stopped", "address": cfg.get("address") or "", "message": "PlayIt tunnel stopped."}
 
     @app.get("/api/playit/config")
     def playit_config(_: str = Depends(require_auth)) -> dict[str, Any]:

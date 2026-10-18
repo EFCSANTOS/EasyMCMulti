@@ -20,6 +20,7 @@ class RuntimeState:
     public_address: str | None = None
     playit_state: str = "unknown"
     playit_address: str | None = None
+    playit_agent: Any = None
     process: Any = None
     console_history: deque[str] = field(default_factory=lambda: deque(maxlen=2000))
     lock: threading.RLock = field(default_factory=threading.RLock)

@@ -27,6 +27,12 @@ def test_dashboard_serves_html():
     assert "Dashboard" in response.text
 
 
+def test_dashboard_mentions_playit_support():
+    response = client.get("/", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    assert "PlayIt" in response.text
+
+
 def test_dashboard_uses_runtime_auth_defaults(monkeypatch):
     monkeypatch.setenv("EZ_WEBAPP_USERNAME", "admin")
     monkeypatch.setenv("EZ_WEBAPP_PASSWORD", "admin")
@@ -71,6 +77,34 @@ def test_playit_status_endpoint_reports_configuration():
     assert "configured" in payload
     assert "state" in payload
     assert "address" in payload
+
+
+def test_playit_start_route_starts_the_tunnel(monkeypatch):
+    monkeypatch.setattr(webapp_module.playit, "load_config", lambda: {"secret": "demo-secret", "address": "demo.example"})
+    monkeypatch.setattr(webapp_module.playit, "ensure_agent", lambda log=print: "agent.exe")
+    monkeypatch.setattr(webapp_module.playit, "ensure_tunnel", lambda secret, local_port, log, timeout_sec=120: "demo.example:25565")
+
+    class DummyAgent:
+        def __init__(self, on_output=None, on_exit=None):
+            self.on_output = on_output
+            self.on_exit = on_exit
+
+        def is_running(self):
+            return False
+
+        def start(self, secret):
+            self.secret = secret
+
+        def stop(self):
+            return None
+
+    monkeypatch.setattr(webapp_module.playit, "PlayitAgent", DummyAgent)
+
+    response = client.post("/api/playit/start", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["state"] == "running"
+    assert payload["address"] == "demo.example:25565"
 
 
 def test_config_can_persist_values():
@@ -134,23 +168,37 @@ def test_server_start_installs_before_launch(monkeypatch):
         def stop(self):
             return None
 
+    calls = {}
+
     def fake_prepare(loader, version, target_dir, java_exe, log=print, progress=None):
         if progress:
             progress(50, 100)
         return None
+
+    def fake_update_properties(server_dir, **kwargs):
+        calls["server_dir"] = server_dir
+        calls["kwargs"] = kwargs
 
     monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: False)
     monkeypatch.setattr(webapp_module.downloaders, "prepare", fake_prepare)
     monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required: "java")
     monkeypatch.setattr(webapp_module.downloaders, "launch_args", lambda *args, **kwargs: ["java", "-jar", "server.jar"])
     monkeypatch.setattr(webapp_module, "ServerProcess", DummyProcess)
+    monkeypatch.setattr(webapp_module, "update_properties", fake_update_properties)
 
-    response = client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    response = client.post(
+        "/api/server/start",
+        auth=("admin", "s3cret-pass"),
+        json={"server_port": 25566, "motd": "Advanced test", "max_players": 12},
+    )
     assert response.status_code == 200
     payload = response.json()
     assert payload["message"] == "Server started."
     assert app.state.runtime.install_status == "ready"
     assert app.state.runtime.install_progress >= 0
+    assert calls["kwargs"]["server-port"] == 25566
+    assert calls["kwargs"]["motd"] == "Advanced test"
+    assert calls["kwargs"]["max-players"] == 12
 
 
 def test_server_lifecycle_start_and_stop():
