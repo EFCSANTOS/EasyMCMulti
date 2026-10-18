@@ -86,6 +86,29 @@ def test_status_endpoint_returns_state_when_authenticated():
     assert "playit" in payload
 
 
+def test_modrinth_install_accepts_project_id(monkeypatch):
+    captured = {}
+
+    def fake_install(identifier, loader, version, target_folder, log=print):
+        captured["identifier"] = identifier
+        captured["loader"] = loader
+        captured["version"] = version
+        captured["target_folder"] = target_folder
+        return "fake-mod.jar"
+
+    monkeypatch.setattr(webapp_module.modrinth, "install", fake_install)
+
+    response = client.post(
+        "/api/modrinth/install",
+        auth=("admin", "s3cret-pass"),
+        json={"project_id": "abc123"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filename"] == "fake-mod.jar"
+    assert captured["identifier"] == "abc123"
+
+
 def test_playit_status_endpoint_reports_configuration():
     response = client.get("/api/playit/status", auth=("admin", "s3cret-pass"))
     assert response.status_code == 200

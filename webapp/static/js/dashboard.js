@@ -253,7 +253,7 @@ async function searchMods() {
     const list = document.getElementById('mod-search-results');
     if (!list) return;
     list.innerHTML = '';
-    const hits = result.hits || [];
+    const hits = result.items || result.hits || [];
     if (!hits.length) {
       const option = document.createElement('option');
       option.textContent = 'No results found';
@@ -262,8 +262,14 @@ async function searchMods() {
     }
     hits.forEach((hit) => {
       const option = document.createElement('option');
-      option.value = JSON.stringify({ project_id: hit.project_id, title: hit.title, version: hit.latest_version || hit.version || '' });
-      option.textContent = `${hit.title} (${hit.project_type || 'mod'})`;
+      const slug = hit.slug || hit.project_id || hit.id || '';
+      option.value = JSON.stringify({
+        slug,
+        project_id: hit.project_id || hit.id || slug,
+        title: hit.title || hit.name || slug,
+        version: hit.latest_version || hit.version || '',
+      });
+      option.textContent = `${hit.title || hit.name || slug} (${hit.project_type || 'mod'})`;
       list.appendChild(option);
     });
   } catch (error) {
@@ -397,7 +403,12 @@ async function installSelectedMod() {
 
   try {
     const payload = JSON.parse(list.value);
-    const response = await fetchJson('/api/modrinth/install', 'POST', payload);
+    const slug = payload.slug || payload.project_id || payload.id;
+    if (!slug) {
+      throw new Error('Selected mod has no valid slug or project id.');
+    }
+
+    const response = await fetchJson('/api/modrinth/install', 'POST', { slug });
     setStatus(response.message || 'Mod install started.');
     await loadInstalledMods();
   } catch (error) {

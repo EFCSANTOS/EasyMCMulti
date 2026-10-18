@@ -41,8 +41,24 @@ def search(query, loader, game_version, limit=20):
     ]
 
 
-def best_file_url(slug, loader, game_version):
+def resolve_project_slug(project_ref):
+    """Accepts either a project slug or project UUID/ID and resolves it to the canonical slug."""
+    ref = str(project_ref or "").strip()
+    if not ref:
+        raise ValueError("A Modrinth project identifier is required.")
+
+    r = requests.get(f"{API}/project/{ref}", headers=HEADERS, timeout=30)
+    if r.status_code == 200:
+        payload = r.json()
+        slug = payload.get("slug") if isinstance(payload, dict) else None
+        if slug:
+            return slug
+    return ref
+
+
+def best_file_url(project_ref, loader, game_version):
     """Trouve le .jar a telecharger pour un projet (version compatible la plus recente)."""
+    slug = resolve_project_slug(project_ref)
     loaders = _LOADER_MAP.get(loader, [])
     import json
     params = {}
@@ -61,9 +77,9 @@ def best_file_url(slug, loader, game_version):
     return primary["url"], primary["filename"]
 
 
-def install(slug, loader, game_version, dest_dir, log=print):
+def install(project_ref, loader, game_version, dest_dir, log=print):
     """Telecharge le mod/plugin dans dest_dir. Renvoie le nom de fichier."""
     import os
-    url, filename = best_file_url(slug, loader, game_version)
+    url, filename = best_file_url(project_ref, loader, game_version)
     download(url, os.path.join(dest_dir, filename), log=log)
     return filename

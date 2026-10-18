@@ -2375,16 +2375,16 @@ def create_app() -> FastAPI:
 
     @app.post("/api/modrinth/install")
     def modrinth_install(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
-        slug = str(payload.get("slug", "")).strip()
-        if not slug:
-            raise HTTPException(status_code=400, detail="A Modrinth project slug is required.")
+        project_ref = str(payload.get("slug") or payload.get("project_id") or payload.get("id") or "").strip()
+        if not project_ref:
+            raise HTTPException(status_code=400, detail="A Modrinth project slug or ID is required.")
         config = _effective_config()
         target_dir = _server_dir_for_config(config)
         loader = str(config.get("loader", "vanilla"))
         version = str(config.get("version", "1.21.7"))
         target_folder = os.path.join(target_dir, "mods") if loader in {"forge", "fabric", "neoforge"} else os.path.join(target_dir, "plugins")
         os.makedirs(target_folder, exist_ok=True)
-        installed = modrinth.install(slug, loader, version, target_folder, log=append_console_line)
+        installed = modrinth.install(project_ref, loader, version, target_folder, log=append_console_line)
         return {"ok": True, "filename": installed}
 
     @app.get("/api/playit/status")
