@@ -1,191 +1,205 @@
-# MZ Minecraft Server Launcher
+# EZ Minecraft Server Launcher
 
-> One-click, self-hosted Minecraft server launcher for Windows. It auto-installs the
-> correct Java runtime and the server itself, then lets you configure and operate the
-> server from a single window — no command line, no manual setup.
+> Web-first LAN server manager for Minecraft, built on the existing launcher core. It installs the correct Java runtime and server files, configures the server, and lets you administer it from a browser on the local network.
 
 ![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)
-![GUI](https://img.shields.io/badge/GUI-Tkinter-1f6feb)
+![Web](https://img.shields.io/badge/UI-Web%20Dashboard-4F46E5)
 ![License](https://img.shields.io/badge/License-All%20rights%20reserved-red)
-
-*(English first — [version française plus bas](#version-française).)*
 
 ---
 
 ## Overview
 
-Hosting a Minecraft server normally means installing the right Java version by hand,
-downloading the correct server `.jar`, editing config files, and opening ports. This
-launcher does all of it for you: pick a server type and a version, click once, and the
-launcher downloads a portable JRE and the server, writes the configuration, and starts it.
+This project started as a desktop launcher and has evolved into a browser-based management panel for a self-hosted Minecraft server.
 
-It ships as a **single portable `.exe`** — copy one file to the host machine and run it.
-Everything else is downloaded on first launch into a folder next to the executable.
+The current version is built around a FastAPI web app in `webapp/` and keeps the real runtime logic in `core/` so the server lifecycle, Java management, downloads, and process control come from the same verified code path.
 
-## Features
-
-- **Guided setup wizard** — a beginner-friendly question/answer flow (server type, version,
-  world, game mode, access) that creates the server for you, plus an **advanced mode** with
-  the full tabbed interface.
-- **One-click remote play** — fully automated **playit.gg** tunnel: a single "Allow" click in
-  the browser, then the app fetches the key and **creates the Minecraft tunnel by itself** and
-  shows the address to share — no port forwarding, no manual setup on the playit site.
-- **Automatic Java** — downloads the correct Eclipse Temurin JRE for each Minecraft
-  version (Java 8 / 17 / 21 / 25, incl. the new `26.x` versioning), fully portable.
-- **5 server types** — Vanilla, Paper, Fabric, Forge and NeoForge, with live version lists
-  fetched from each project's official API.
-- **Server configuration UI** — seed, game mode, difficulty, hardcore, world type
-  (normal / superflat / large biomes / amplified), max players, render & simulation
-  distance, PVP, monsters, nether, flight, command blocks, whitelist, online mode.
-- **Mods & plugins** — add/remove local `.jar` files and search/install directly from
-  **Modrinth**, filtered by loader and version.
-- **Live admin panel** — op, kick, ban, whitelist, per-player game mode, time, weather,
-  broadcasts and world saves while the server is running.
-- **World backups** — one-click timestamped `.zip` of the world.
-- **Networking** — shows LAN and public addresses with copy buttons and a port-forwarding
-  helper (in addition to the automatic tunnel above).
-- **Modern UI** — dark "SaaS" theme, guided reactive steps, HiDPI-crisp, scrollable panels.
-- **Quality of life** — saved profile, one-click reload of an existing server, live player
-  counter, auto-restart on crash, RAM detection with a safety guard, crash reporting.
-- **Single-file export** — `build.bat` produces one portable `.exe` via PyInstaller.
-
-## Tech stack
-
-| Area | Choice | Why |
-|------|--------|-----|
-| Language | **Python 3.13** | Readable, batteries-included, trivial `.exe` export |
-| GUI | **Tkinter** (stdlib) | No heavy dependency, ships with Python |
-| HTTP | **requests** | Only third-party dependency (downloads + APIs) |
-| Packaging | **PyInstaller** (`--onefile`) | One portable executable, zero install on the host |
-
-## Architecture
-
-The GUI orchestrates a small, single-responsibility `core/` package:
-
-```
-launcher.py            Tkinter GUI (tabs: Server / Configuration / Mods / Admin) + orchestration
-core/
-  paths.py             Runtime data locations (next to the .exe)
-  java_manager.py      Maps MC version -> Java version, downloads a portable Temurin JRE
-  downloaders.py       Version lists, server downloads, Forge/NeoForge installer handling
-  server_process.py    Subprocess management, console streaming, eula/properties files
-  modrinth.py          Mod/plugin search and install (Modrinth API)
-  playit.py            playit.gg agent (remote tunnel)
-  netinfo.py           LAN and public IP detection
-  sysinfo.py           Total RAM detection (allocation guard)
-  config_store.py      JSON profile load/save
-  crash_reporter.py    Structured crash reports
-```
-
-Each `loader + version` pair gets its own folder, so every world is persistent and
-independent.
-
-## Getting started (from source)
-
-Requirements: Windows, Python 3.13+.
-
-```bat
-run.bat            :: installs dependencies and launches the GUI
-```
-
-Or directly:
-
-```bat
-python -m pip install -r requirements.txt
-python launcher.py
-```
-
-## Build the executable
-
-```bat
-build.bat          :: -> dist\MZ_Server_Launcher.exe (single portable file)
-```
-
-Copy `dist\MZ_Server_Launcher.exe` to the host machine and run it. No Python or Java
-required on the target — both the JRE and the server are fetched on first launch.
-
-## How it works
-
-1. **Prepare** — resolve the required Java version, download a portable JRE, download the
-   server `.jar` (or run the Forge/NeoForge installer), then write `eula.txt` and
-   `server.properties`.
-2. **Start** — build the launch command and run the server as a subprocess, streaming its
-   console into the UI and parsing it for the live player count.
-3. **Operate** — send admin commands, manage mods, back up the world, copy the connection
-   address for your friends.
-
-## Hardware target
-
-Designed for a modest home server (Intel i5-10300 / 16 GB RAM / GTX 1650). ~6 GB allocated
-to the server comfortably hosts 8–10 players on Paper.
-
-## License
-
-**All rights reserved** — © 2026 Mathéo Zimmer. This repository is published for review
-and portfolio purposes only; use, redistribution, and commercial use are not permitted
-without prior written consent. See [LICENSE](LICENSE).
+The browser UI is designed for local network use. It is not intended to be exposed to the public internet without additional security hardening.
 
 ---
 
-## Version française
+## Current status
 
-Launcher Windows pour **auto-héberger un serveur Minecraft** et jouer entre amis, sans
-ligne de commande. On choisit un type de serveur et une version, on clique, et le launcher
-télécharge le bon Java (portable) et le serveur, écrit la configuration et démarre.
+The new version is functional and includes:
 
-L'application est un **`.exe` unique et portable** : il suffit de copier ce fichier sur la
-machine hôte et de le lancer. Java et le serveur sont téléchargés au premier démarrage.
+- a web dashboard at `/`
+- auth-protected API routes
+- config persistence for loader, version, and RAM
+- server creation, start, stop, and command routes
+- live console output via websocket
+- status reporting for LAN/public addresses and PlayIt metadata
+- real install flow before launch instead of demo fallback
 
-### Fonctionnalités
+The browser dashboard is the active and supported workflow.
 
-- **Assistant guidé** : un parcours question/réponse pour débutants (type de serveur,
-  version, monde, mode de jeu, accès) qui crée le serveur pour vous, plus un **mode avancé**
-  avec l'interface complète à onglets.
-- **Jeu à distance en un clic** : tunnel **playit.gg** entièrement automatisé — un seul clic
-  « Allow » dans le navigateur, puis l'application récupère la clé et **crée le tunnel toute
-  seule**, et affiche l'adresse à partager. Aucun port à ouvrir, aucune manipulation sur le site.
-- **Java automatique** (Eclipse Temurin, portable) selon la version de Minecraft
-  (Java 8 / 17 / 21 / 25, y compris le nouveau versioning `26.x`).
-- **5 types de serveur** : Vanilla, Paper, Fabric, Forge, NeoForge (listes de versions en
-  direct depuis les API officielles).
-- **Configuration complète** : seed, mode de jeu, difficulté, hardcore, type de monde,
-  joueurs max, distance de rendu et de simulation, PVP, monstres, nether, vol, command
-  blocks, whitelist, mode en ligne.
-- **Mods & plugins** : ajout/suppression de `.jar` et recherche/installation depuis
-  **Modrinth** (filtré par loader et version).
-- **Panneau admin en direct** : op, kick, ban, whitelist, mode de jeu par joueur, heure,
-  météo, annonces et sauvegardes pendant la partie.
-- **Sauvegardes du monde** en `.zip` horodaté.
-- **Réseau** : adresses LAN et publique (avec boutons copier) et aide au port-forwarding
-  (en plus du tunnel automatique ci-dessus).
-- **Interface moderne** : thème sombre « SaaS », étapes guidées réactives, rendu net (HiDPI),
-  panneaux défilables.
-- **Confort** : profil sauvegardé, rechargement d'un serveur existant en un clic, compteur
-  de joueurs, redémarrage auto en cas de crash, détection de la RAM, rapport de crash.
+---
 
-### Démarrer depuis les sources
+## What you need to run it
+
+Requirements:
+
+- Windows 10/11 recommended
+- Python 3.13+
+- Access to the local LAN or localhost
+- Environment variables for the web app auth
+
+Install dependencies:
 
 ```bat
+python -m pip install -r requirements.txt
+```
+
+---
+
+## Run the web app
+
+Set credentials before starting the app:
+
+PowerShell:
+
+```powershell
+$env:EZ_WEBAPP_USERNAME = "admin"
+$env:EZ_WEBAPP_PASSWORD = "your_secure_password"
+```
+
+Command Prompt:
+
+```bat
+set EZ_WEBAPP_USERNAME=admin
+set EZ_WEBAPP_PASSWORD=your_secure_password
+```
+
+Then start the web server:
+
+```bat
+.venv\Scripts\python.exe -m uvicorn webapp.app:app --host 0.0.0.0 --port 8000
+```
+
+Or, if using the current environment directly:
+
+```bat
+python -m uvicorn webapp.app:app --host 0.0.0.0 --port 8000
+```
+
+Open in a browser:
+
+```text
+http://localhost:8000
+```
+
+For LAN access, use the machine IP instead of `localhost`, for example:
+
+```text
+http://192.168.1.15:8000
+```
+
+Login with the credentials you set in `EZ_WEBAPP_USERNAME` and `EZ_WEBAPP_PASSWORD`.
+
+---
+
+## Web dashboard capabilities
+
+The app exposes a browser interface with:
+
+- loader selection: vanilla, paper, fabric, forge, neoforge
+- version list for the selected loader
+- RAM configuration
+- save config
+- create server
+- start and stop server
+- console command sending
+- live console output
+- LAN/public address display
+- PlayIt status reporting
+
+---
+
+## Real server lifecycle flow
+
+The browser app uses the same core runtime logic as the launcher:
+
+1. load config from the saved profile
+2. resolve the chosen loader and version
+3. ensure Java is available for the selected Minecraft version
+4. install the server when missing
+5. accept the EULA if needed
+6. launch the server process with the configured RAM
+7. stream server output to the browser console
+8. stop, restart, or send commands while running
+
+This is handled in `webapp/app.py` and the lower-level logic in `core/`.
+
+---
+
+## Project structure
+
+```text
+core/
+  config_store.py
+  crash_reporter.py
+  downloaders.py
+  java_manager.py
+  mailer.py
+  modrinth.py
+  netinfo.py
+  paths.py
+  playit.py
+  server_process.py
+  sysinfo.py
+
+webapp/
+  app.py
+  auth.py
+  state.py
+  websocket_manager.py
+
+requirements.txt
+README.md
 run.bat
+run_debug.bat
 ```
 
-### Générer l'exécutable
+---
+
+## Security note
+
+This app is intended for local or LAN use.
+
+- Basic auth is enabled for the web app
+- credentials must be set through environment variables
+- avoid exposing the port to the public internet without a proper firewall and reverse-proxy setup
+
+---
+
+## Development and testing
+
+Run the smoke suite:
 
 ```bat
-build.bat          :: -> dist\MZ_Server_Launcher.exe
+.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py
 ```
 
-Copier `dist\MZ_Server_Launcher.exe` sur la machine hôte et le lancer : ni Python ni Java
-ne sont requis sur la cible.
+This verifies the web dashboard, status endpoints, config persistence, console websocket, and lifecycle routes.
 
-### Matériel cible
+---
 
-Pensé pour un petit PC serveur (i5-10300 / 16 Go / GTX 1650). ~6 Go alloués suffisent pour
-8 à 10 joueurs en Paper.
+## Example launch in one shell
 
-### Licence
+```powershell
+$env:EZ_WEBAPP_USERNAME = "admin"
+$env:EZ_WEBAPP_PASSWORD = "very_secure_password"
+.venv\Scripts\python.exe -m uvicorn webapp.app:app --host 0.0.0.0 --port 8000
+```
 
-**Tous droits réservés** — © 2026 Mathéo Zimmer. Dépôt publié à des fins de consultation et
-de portfolio uniquement ; la réutilisation, la redistribution et l'usage commercial ne sont
-pas autorisés sans accord écrit préalable. Voir [LICENSE](LICENSE).
+Then open:
+
+```text
+http://localhost:8000
+```
+
+---
+
+## License
+
+All rights reserved.

@@ -2,7 +2,7 @@
 
 En cas d'exception non geree :
 1. construit un rapport detaille et structure (facile a relire pour debugger),
-2. l'enregistre dans MZ_Server_Data/crash_reports/,
+2. l'enregistre dans EZ_Server_Data/crash_reports/,
 3. ouvre le client mail par defaut pre-rempli vers DEV_EMAIL avec le rapport.
 
 Pas d'envoi SMTP (pas de mot de passe a stocker) : on passe par mailto:.
@@ -26,7 +26,7 @@ def build_report(context, exc_info, version):
     lines = []
     add = lines.append
 
-    add("==== MZ MINECRAFT LAUNCHER - RAPPORT DE CRASH ====")
+    add("==== EZ MINECRAFT LAUNCHER - RAPPORT DE CRASH ====")
     add(f"Date          : {datetime.datetime.now().isoformat(timespec='seconds')}")
     add(f"Version app   : {version}")
     add("")
@@ -65,7 +65,7 @@ def save_report(text):
 
 def open_mail(text, file_path):
     """Ouvre le client mail pre-rempli (corps tronque si tres long)."""
-    subject = "MZ Launcher - Rapport de crash"
+    subject = "EZ Launcher - Rapport de crash"
     body = text
     if len(body) > 1800:  # certains clients tronquent les mailto: trop longs
         body = body[:1800] + (
@@ -88,7 +88,7 @@ def deliver(text, file_path):
     try:
         from . import mailer
         if mailer.is_configured():
-            mailer.send(DEV_EMAIL, "MZ Launcher - Rapport de crash", text, file_path)
+            mailer.send(DEV_EMAIL, "EZ Launcher - Rapport de crash", text, file_path)
             return "auto"
     except Exception:
         pass  # echec SMTP -> on retombe sur le mode manuel

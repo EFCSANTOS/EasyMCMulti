@@ -12,7 +12,7 @@ via l'API officielle (api.playit.gg) :
   5. on recupere l'adresse publique allouee (/tunnels/list)
   6. on lance le daemon : playit.exe --secret <KEY>
 
-Secret + adresse sont stockes LOCALEMENT (MZ_Server_Data/playit_config.json), jamais commit.
+Secret + adresse sont stockes LOCALEMENT (EZ_Server_Data/playit_config.json), jamais commit.
 
 Refs API (client officiel) : https://github.com/playit-cloud/playit-api-java
 Auth : header  Authorization: Agent-Key <secret>
@@ -97,7 +97,7 @@ def claim_url(code):
 
 def _claim_setup(code):
     res = _api("/claim/setup", {"code": code, "agent_type": "self-managed",
-                                "version": "playit-mz-launcher 1.0"})
+                                "version": "playit-ez-launcher 1.0"})
     return res.get("data")  # WaitingForUserVisit | WaitingForUser | UserAccepted | UserRejected
 
 
@@ -205,7 +205,7 @@ def ensure_tunnel(secret, local_port, log, timeout_sec=120):
         while True:
             try:
                 _api("/tunnels/create", {
-                    "name": "MZ Minecraft",
+                    "name": "EZ Minecraft",
                     "tunnel_type": "minecraft-java",
                     "port_type": "tcp",
                     "port_count": 1,
