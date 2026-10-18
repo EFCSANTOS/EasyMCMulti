@@ -2309,7 +2309,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/server/backups/restore")
     def restore_backup(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
-        backup_path = str(payload.get("backup_path", "")).strip()
+        backup_path = str(payload.get("backup_path", "") or payload.get("name", "")).strip()
         if not backup_path or not os.path.exists(backup_path):
             raise HTTPException(status_code=400, detail="A valid backup path is required.")
         config = _effective_config()
@@ -2323,6 +2323,14 @@ def create_app() -> FastAPI:
         with zipfile.ZipFile(backup_path, "r") as zf:
             zf.extractall(target_dir)
         return {"ok": True, "message": f"Backup restored from {backup_path}"}
+
+    @app.post("/api/backups/restore")
+    def legacy_restore_backup(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        return restore_backup(payload, _)
+
+    @app.get("/api/backups")
+    def legacy_list_backups(_: str = Depends(require_auth)) -> dict[str, Any]:
+        return list_backups(_)
 
     @app.get("/api/server/mods")
     def list_mods(_: str = Depends(require_auth)) -> dict[str, Any]:
@@ -2361,6 +2369,45 @@ def create_app() -> FastAPI:
                     handle.write(chunk)
             saved.append(dest)
         return {"ok": True, "saved": saved}
+
+    @app.get("/api/mods")
+    def legacy_list_mods(_: str = Depends(require_auth)) -> dict[str, Any]:
+        return list_mods(_)
+
+    @app.post("/api/admin/{action}")
+    def admin_action(action: str, payload: dict[str, Any] | None = None, _: str = Depends(require_auth)) -> dict[str, Any]:
+        if runtime.process is None or not runtime.process.is_running():
+            raise HTTPException(status_code=409, detail="Server is not running.")
+
+        action = action.lower()
+        player = str((payload or {}).get("player", "")).strip() if payload else ""
+        command_map = {
+            "op": f"op {player}" if player else "op",
+            "deop": f"deop {player}" if player else "deop",
+            "kick": f"kick {player}" if player else "kick",
+            "ban": f"ban {player}" if player else "ban",
+            "day": "time set day",
+            "night": "time set night",
+            "clear": "weather clear",
+            "rain": "weather rain",
+            "save": "save-all",
+        }
+        if action not in command_map:
+            raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
+
+        command = command_map[action]
+        if command.endswith("op") and not player:
+            raise HTTPException(status_code=400, detail="A player name is required for this action.")
+        if command.endswith("deop") and not player:
+            raise HTTPException(status_code=400, detail="A player name is required for this action.")
+        if command.endswith("kick") and not player:
+            raise HTTPException(status_code=400, detail="A player name is required for this action.")
+        if command.endswith("ban") and not player:
+            raise HTTPException(status_code=400, detail="A player name is required for this action.")
+
+        runtime.process.send(command)
+        append_console_line(f"> {command}")
+        return {"ok": True, "action": action, "command": command, "message": f"{action} command sent."}
 
     @app.get("/api/modrinth/search")
     def modrinth_search(query: str, _: str = Depends(require_auth)) -> dict[str, Any]:

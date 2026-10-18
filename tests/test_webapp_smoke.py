@@ -109,6 +109,22 @@ def test_modrinth_install_accepts_project_id(monkeypatch):
     assert captured["identifier"] == "abc123"
 
 
+def test_legacy_backup_and_mod_routes_still_work():
+    response = client.get("/api/backups", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    assert "backups" in response.json()
+
+    response = client.get("/api/mods", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    assert "mods" in response.json()
+
+
+def test_admin_action_routes_exist_for_dashboard_buttons():
+    for action in ("op", "deop", "kick", "ban", "day", "night", "clear", "rain", "save"):
+        response = client.post(f"/api/admin/{action}", auth=("admin", "s3cret-pass"), json={"player": "Steve"})
+        assert response.status_code in {200, 409, 400}
+
+
 def test_playit_status_endpoint_reports_configuration():
     response = client.get("/api/playit/status", auth=("admin", "s3cret-pass"))
     assert response.status_code == 200
