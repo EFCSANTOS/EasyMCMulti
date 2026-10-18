@@ -88,6 +88,18 @@ def test_playit_status_endpoint_reports_configuration():
     assert "address" in payload
 
 
+def test_system_metrics_endpoint_returns_cpu_and_ram():
+    response = client.get("/api/system/metrics", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert "cpu" in payload
+    assert "ram" in payload
+    assert "ramTotal" in payload
+    assert 0 <= payload["cpu"] <= 100
+    assert payload["ram"] >= 0
+    assert payload["ramTotal"] > 0
+
+
 def test_playit_start_route_starts_the_tunnel(monkeypatch):
     monkeypatch.setattr(webapp_module.playit, "load_config", lambda: {"secret": "demo-secret", "address": "demo.example"})
     monkeypatch.setattr(webapp_module.playit, "ensure_agent", lambda log=print: "agent.exe")

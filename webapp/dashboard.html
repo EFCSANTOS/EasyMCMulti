@@ -7,200 +7,295 @@
     <link rel="stylesheet" href="/dashboard.css" />
   </head>
   <body>
-    <div class="wrap">
-      <h1>EZ Minecraft Server</h1>
-      <h2>Dashboard</h2>
-
-      <form id="legacy-auth-hidden" style="display:none;">
-        <input name="username" type="text" value="admin" />
-        <input name="password" type="password" value="admin" />
-      </form>
-
-      <div class="card">
-        <div class="row" style="justify-content: space-between; align-items: center;">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-logo">⛏</div>
           <div>
-            <div class="status" id="session-status">Signed in</div>
+            <div class="brand-title">EZ Minecraft</div>
+            <div class="brand-sub">Server Dashboard</div>
           </div>
-          <button id="logout-button" class="secondary" type="button">Sign out</button>
         </div>
-      </div>
 
-      <div class="card">
-        <form id="setup-form" class="row">
-          <div>
-            <label for="loader-select">Loader</label>
-            <select id="loader-select" name="loader">
-              <option value="vanilla">vanilla</option>
-              <option value="paper">paper</option>
-              <option value="fabric">fabric</option>
-              <option value="forge">forge</option>
-              <option value="neoforge">neoforge</option>
-            </select>
-          </div>
-          <div>
-            <label for="version-select">Version</label>
-            <select id="version-select" name="version"></select>
-          </div>
-          <div>
-            <label for="ram-input">RAM (MB)</label>
-            <input id="ram-input" name="ram_mb" type="number" min="512" step="256" value="2048" />
-          </div>
-          <div>
-            <label for="port-input">Port</label>
-            <input id="port-input" name="server_port" type="number" min="1024" max="65535" value="25565" />
-          </div>
-          <button type="submit">Save config</button>
-          <button id="create-button" type="button">Create server</button>
+        <nav class="nav" aria-label="Dashboard sections">
+          <a href="#overview" class="nav-link active">Overview</a>
+          <a href="#setup" class="nav-link">Setup</a>
+          <a href="#advanced" class="nav-link">Advanced</a>
+          <a href="#mods" class="nav-link">Mods</a>
+          <a href="#remote" class="nav-link">Remote</a>
+          <a href="#backups" class="nav-link">Backups</a>
+          <a href="#console" class="nav-link">Console</a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="status-pill" id="session-status">Signed in</div>
+          <button id="logout-button" class="btn btn-ghost" type="button">Sign out</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <form id="legacy-auth-hidden" style="display:none;">
+          <input name="username" type="text" value="admin" />
+          <input name="password" type="password" value="admin" />
         </form>
-      </div>
 
-      <div class="card">
-        <h3>Advanced settings</h3>
-        <div class="row">
-          <div>
-            <label for="motd-input">MOTD</label>
-            <input id="motd-input" value="EZ Minecraft Server" />
+        <section id="overview" class="card hero">
+          <div class="hero-text">
+            <h1>Welcome back 👋</h1>
+            <p>Manage your Minecraft server without leaving the dashboard.</p>
           </div>
-          <div>
-            <label for="maxplayers-input">Max players</label>
-            <input id="maxplayers-input" type="number" min="1" max="1000" value="10" />
+          <div class="hero-status">
+            <div class="status-dot" id="server-dot"></div>
+            <div>
+              <div class="status-label">Server status</div>
+              <div id="status-panel" class="status-value">Loading...</div>
+            </div>
           </div>
-          <div>
-            <label for="gamemode-input">Game mode</label>
-            <select id="gamemode-input">
-              <option value="survival">survival</option>
-              <option value="creative">creative</option>
-              <option value="adventure">adventure</option>
-              <option value="spectator">spectator</option>
-            </select>
-          </div>
-          <div>
-            <label for="difficulty-input">Difficulty</label>
-            <select id="difficulty-input">
-              <option value="peaceful">peaceful</option>
-              <option value="easy">easy</option>
-              <option value="normal">normal</option>
-              <option value="hard">hard</option>
-            </select>
-          </div>
-        </div>
-        <div class="row" style="margin-top:0.75rem;">
-          <div>
-            <label for="leveltype-input">World type</label>
-            <select id="leveltype-input">
-              <option value="normal">normal</option>
-              <option value="flat">flat</option>
-              <option value="largebiomes">largebiomes</option>
-              <option value="amplified">amplified</option>
-            </select>
-          </div>
-          <div>
-            <label for="viewdist-input">View distance</label>
-            <input id="viewdist-input" type="number" min="3" max="32" value="10" />
-          </div>
-          <div>
-            <label for="simdist-input">Simulation distance</label>
-            <input id="simdist-input" type="number" min="3" max="32" value="10" />
-          </div>
-          <div>
-            <label for="seed-input">Seed</label>
-            <input id="seed-input" value="" placeholder="empty = random" />
-          </div>
-        </div>
-        <div class="row" style="margin-top:0.75rem;">
-          <label><input id="online-mode" type="checkbox" checked /> Online mode</label>
-          <label><input id="pvp-mode" type="checkbox" checked /> PvP</label>
-          <label><input id="spawn-monsters" type="checkbox" checked /> Spawn monsters</label>
-          <label><input id="allow-flight" type="checkbox" /> Allow flight</label>
-          <label><input id="nether-mode" type="checkbox" checked /> Nether</label>
-          <label><input id="whitelist-mode" type="checkbox" /> Whitelist</label>
-          <label><input id="command-blocks" type="checkbox" checked /> Command blocks</label>
-        </div>
-      </div>
+        </section>
 
-      <div class="card">
-        <div class="row">
-          <button id="start-button">Start server</button>
-          <button id="stop-button" class="danger">Stop server</button>
-          <button id="restart-button" class="secondary">Restart server</button>
-          <button id="backup-button" class="secondary">Backup world</button>
-        </div>
-      </div>
+        <section id="metrics" class="card metrics-panel">
+          <div class="card-header">
+            <h2>System resources</h2>
+            <span id="metrics-badge" class="badge badge-live">● live</span>
+          </div>
 
-      <div class="card">
-        <div class="status" id="status-panel">Loading status...</div>
-      </div>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-head">
+                <div>
+                  <div class="metric-label">CPU</div>
+                  <div id="cpu-value" class="metric-value">—%</div>
+                </div>
+                <div id="cpu-sub" class="metric-sub">Waiting for data…</div>
+              </div>
+              <canvas id="cpu-chart" height="120"></canvas>
+              <div class="metric-foot">
+                <span>min <strong id="cpu-min">—</strong></span>
+                <span>max <strong id="cpu-max">—</strong></span>
+                <span>avg <strong id="cpu-avg">—</strong></span>
+              </div>
+            </div>
 
-      <div class="card">
-        <form id="command-form" class="row">
-          <div style="flex:1">
-            <label for="command-input">Console command</label>
+            <div class="metric-card">
+              <div class="metric-head">
+                <div>
+                  <div class="metric-label">RAM</div>
+                  <div id="ram-value" class="metric-value">—</div>
+                </div>
+                <div id="ram-sub" class="metric-sub">Waiting for data…</div>
+              </div>
+              <canvas id="ram-chart" height="120"></canvas>
+              <div class="metric-foot">
+                <span>min <strong id="ram-min">—</strong></span>
+                <span>max <strong id="ram-max">—</strong></span>
+                <span>avg <strong id="ram-avg">—</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="metrics-meta">
+            <span id="metrics-endpoint">endpoint: <code>—</code></span>
+            <span id="metrics-last">last update: —</span>
+            <button id="metrics-toggle" class="btn btn-ghost" type="button">Pause</button>
+          </div>
+        </section>
+
+        <section id="setup" class="card">
+          <div class="card-header">
+            <h2>Server setup</h2>
+          </div>
+          <form id="setup-form" class="form-grid">
+            <div>
+              <label for="loader-select">Loader</label>
+              <select id="loader-select" name="loader">
+                <option value="vanilla">vanilla</option>
+                <option value="paper">paper</option>
+                <option value="fabric">fabric</option>
+                <option value="forge">forge</option>
+                <option value="neoforge">neoforge</option>
+              </select>
+            </div>
+            <div>
+              <label for="version-select">Version</label>
+              <select id="version-select" name="version"></select>
+            </div>
+            <div>
+              <label for="ram-input">RAM (MB)</label>
+              <input id="ram-input" name="ram_mb" type="number" min="512" step="256" value="2048" />
+            </div>
+            <div>
+              <label for="port-input">Port</label>
+              <input id="port-input" name="server_port" type="number" min="1024" max="65535" value="25565" />
+            </div>
+            <button type="submit" class="btn btn-primary">Save config</button>
+            <button id="create-button" type="button" class="btn btn-secondary">Create server</button>
+          </form>
+        </section>
+
+        <section id="advanced" class="card">
+          <div class="card-header">
+            <h2>Advanced settings</h2>
+          </div>
+          <div class="form-grid advanced-grid">
+            <div>
+              <label for="motd-input">MOTD</label>
+              <input id="motd-input" value="EZ Minecraft Server" />
+            </div>
+            <div>
+              <label for="maxplayers-input">Max players</label>
+              <input id="maxplayers-input" type="number" min="1" max="1000" value="10" />
+            </div>
+            <div>
+              <label for="gamemode-input">Game mode</label>
+              <select id="gamemode-input">
+                <option value="survival">survival</option>
+                <option value="creative">creative</option>
+                <option value="adventure">adventure</option>
+                <option value="spectator">spectator</option>
+              </select>
+            </div>
+            <div>
+              <label for="difficulty-input">Difficulty</label>
+              <select id="difficulty-input">
+                <option value="peaceful">peaceful</option>
+                <option value="easy">easy</option>
+                <option value="normal">normal</option>
+                <option value="hard">hard</option>
+              </select>
+            </div>
+            <div>
+              <label for="leveltype-input">World type</label>
+              <select id="leveltype-input">
+                <option value="normal">normal</option>
+                <option value="flat">flat</option>
+                <option value="largebiomes">largebiomes</option>
+                <option value="amplified">amplified</option>
+              </select>
+            </div>
+            <div>
+              <label for="viewdist-input">View distance</label>
+              <input id="viewdist-input" type="number" min="3" max="32" value="10" />
+            </div>
+            <div>
+              <label for="simdist-input">Simulation distance</label>
+              <input id="simdist-input" type="number" min="3" max="32" value="10" />
+            </div>
+            <div>
+              <label for="seed-input">Seed</label>
+              <input id="seed-input" value="" placeholder="empty = random" />
+            </div>
+          </div>
+
+          <div class="checkbox-grid">
+            <label><input id="online-mode" type="checkbox" checked /> Online mode</label>
+            <label><input id="pvp-mode" type="checkbox" checked /> PvP</label>
+            <label><input id="spawn-monsters" type="checkbox" checked /> Spawn monsters</label>
+            <label><input id="allow-flight" type="checkbox" /> Allow flight</label>
+            <label><input id="nether-mode" type="checkbox" checked /> Nether</label>
+            <label><input id="whitelist-mode" type="checkbox" /> Whitelist</label>
+            <label><input id="command-blocks" type="checkbox" checked /> Command blocks</label>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <h2>Server controls</h2>
+          </div>
+          <div class="btn-grid">
+            <button id="start-button" class="btn btn-primary" type="button">Start server</button>
+            <button id="stop-button" class="btn btn-danger" type="button">Stop server</button>
+            <button id="restart-button" class="btn btn-secondary" type="button">Restart server</button>
+            <button id="backup-button" class="btn btn-secondary" type="button">Backup world</button>
+          </div>
+        </section>
+
+        <section id="command-form-block" class="card">
+          <div class="card-header">
+            <h2>Console command</h2>
+          </div>
+          <form id="command-form" class="inline-form">
             <input id="command-input" name="command" placeholder="say hello" />
+            <button type="submit" class="btn btn-primary">Send</button>
+          </form>
+        </section>
+
+        <section id="remote" class="card">
+          <div class="card-header">
+            <h2>Remote access</h2>
           </div>
-          <button type="submit">Send</button>
-        </form>
-      </div>
+          <div class="btn-grid">
+            <button id="playit-config-button" class="btn btn-secondary" type="button">Configure tunnel</button>
+            <button id="playit-start-button" class="btn btn-secondary" type="button">Start tunnel</button>
+            <button id="playit-stop-button" class="btn btn-danger" type="button">Stop tunnel</button>
+          </div>
+          <div class="status-block" id="playit-status-panel">PlayIt not configured.</div>
+        </section>
 
-      <div class="card">
-        <h3>Remote access (PlayIt)</h3>
-        <div class="row">
-          <button id="playit-config-button" class="secondary" type="button">Configure tunnel</button>
-          <button id="playit-start-button" class="secondary" type="button">Start tunnel</button>
-          <button id="playit-stop-button" class="danger" type="button">Stop tunnel</button>
-        </div>
-        <div class="status" id="playit-status-panel">PlayIt not configured.</div>
-      </div>
+        <section id="mods" class="card">
+          <div class="card-header">
+            <h2>Mods / Plugins</h2>
+          </div>
+          <div class="inline-form compact">
+            <input id="mod-search-query" placeholder="Search Modrinth" />
+            <button id="mod-search-button" class="btn btn-secondary" type="button">Search</button>
+            <button id="mod-refresh-button" class="btn btn-ghost" type="button">Refresh</button>
+          </div>
+          <div class="inline-form compact">
+            <input id="mod-upload-input" type="file" multiple accept=".jar,application/java-archive" />
+            <button id="mod-upload-button" class="btn btn-secondary" type="button">Upload jars</button>
+          </div>
+          <div class="split">
+            <div>
+              <label for="mod-search-results">Search results</label>
+              <select id="mod-search-results" size="6" class="listbox"></select>
+            </div>
+            <div>
+              <label for="mod-installed-list">Installed</label>
+              <select id="mod-installed-list" size="6" class="listbox"></select>
+            </div>
+          </div>
+          <div class="card-row">
+            <button id="mod-install-button" class="btn btn-primary" type="button">Install selected</button>
+          </div>
+        </section>
 
-      <div class="card">
-        <h3>Mods / Plugins</h3>
-        <div class="row">
-          <input id="mod-search-query" placeholder="Search Modrinth" style="flex:1; min-width: 220px;" />
-          <button id="mod-search-button" class="secondary" type="button">Search</button>
-          <button id="mod-refresh-button" class="secondary" type="button">Refresh list</button>
-        </div>
-        <div class="row" style="margin-top:0.75rem;">
-          <input id="mod-upload-input" type="file" multiple accept=".jar,application/java-archive" />
-          <button id="mod-upload-button" class="secondary" type="button">Upload jars</button>
-        </div>
-        <div class="row" style="margin-top:0.75rem;">
-          <select id="mod-search-results" size="6" style="flex:1; min-width: 300px; background:#0b1120; color:#e2e8f0; border:1px solid #475569; border-radius:8px; padding:0.5rem;"></select>
-          <button id="mod-install-button" type="button">Install selected</button>
-        </div>
-        <div class="row" style="margin-top:0.75rem;">
-          <select id="mod-installed-list" size="6" style="flex:1; min-width: 300px; background:#0b1120; color:#e2e8f0; border:1px solid #475569; border-radius:8px; padding:0.5rem;"></select>
-        </div>
-      </div>
+        <section id="admin" class="card">
+          <div class="card-header">
+            <h2>Admin commands</h2>
+          </div>
+          <div class="inline-form compact">
+            <input id="admin-player" placeholder="Player name" />
+            <button id="admin-op" class="btn btn-secondary" type="button">OP</button>
+            <button id="admin-deop" class="btn btn-secondary" type="button">De-OP</button>
+            <button id="admin-kick" class="btn btn-secondary" type="button">Kick</button>
+            <button id="admin-ban" class="btn btn-secondary" type="button">Ban</button>
+          </div>
+          <div class="btn-grid small-grid">
+            <button id="admin-day" class="btn btn-ghost" type="button">Day</button>
+            <button id="admin-night" class="btn btn-ghost" type="button">Night</button>
+            <button id="admin-clear" class="btn btn-ghost" type="button">Clear weather</button>
+            <button id="admin-rain" class="btn btn-ghost" type="button">Rain</button>
+            <button id="admin-save" class="btn btn-ghost" type="button">Save all</button>
+          </div>
+        </section>
 
-      <div class="card">
-        <h3>Admin commands</h3>
-        <div class="row">
-          <input id="admin-player" placeholder="Player name" style="min-width: 180px;" />
-          <button id="admin-op" class="secondary" type="button">OP</button>
-          <button id="admin-deop" class="secondary" type="button">De-OP</button>
-          <button id="admin-kick" class="secondary" type="button">Kick</button>
-          <button id="admin-ban" class="secondary" type="button">Ban</button>
-        </div>
-        <div class="row" style="margin-top:0.75rem;">
-          <button id="admin-day" class="secondary" type="button">Day</button>
-          <button id="admin-night" class="secondary" type="button">Night</button>
-          <button id="admin-clear" class="secondary" type="button">Clear weather</button>
-          <button id="admin-rain" class="secondary" type="button">Rain</button>
-          <button id="admin-save" class="secondary" type="button">Save all</button>
-        </div>
-      </div>
+        <section id="backups" class="card">
+          <div class="card-header">
+            <h2>Backups</h2>
+          </div>
+          <div class="inline-form compact">
+            <select id="backup-list" class="listbox" size="5"></select>
+            <button id="backup-restore-button" class="btn btn-secondary" type="button">Restore selected</button>
+          </div>
+        </section>
 
-      <div class="card">
-        <h3>Backups</h3>
-        <div class="row">
-          <select id="backup-list" size="5" style="flex:1; min-width: 280px; background:#0b1120; color:#e2e8f0; border:1px solid #475569; border-radius:8px; padding:0.5rem;"></select>
-          <button id="backup-restore-button" class="secondary" type="button">Restore selected</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Console</h3>
-        <pre id="console-output">Waiting for logs...</pre>
-      </div>
+        <section id="console" class="card">
+          <div class="card-header">
+            <h2>Console</h2>
+          </div>
+          <pre id="console-output">Waiting for logs...</pre>
+        </section>
+      </main>
     </div>
 
     <script>

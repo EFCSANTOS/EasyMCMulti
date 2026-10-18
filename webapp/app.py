@@ -4,7 +4,13 @@ import asyncio
 import glob
 import os
 import sys
+import time
 from typing import Any
+
+try:
+    import psutil
+except ModuleNotFoundError:  # pragma: no cover - installed in project venv for runtime metrics
+    psutil = None
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -1446,6 +1452,51 @@ def _effective_config() -> dict[str, Any]:
     return merged
 
 
+def _system_metrics_snapshot() -> dict[str, Any]:
+    if psutil is not None:
+        mem = psutil.virtual_memory()
+        return {
+            "cpu": float(psutil.cpu_percent(interval=None)),
+            "ram": int(mem.used),
+            "ramTotal": int(mem.total),
+            "uptime": int(time.time() - _APP_START_TIME),
+        }
+
+    total = 1
+    used = 0
+    try:
+        import ctypes
+
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        stat = MEMORYSTATUSEX()
+        stat.dwLength = ctypes.sizeof(stat)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+            total = int(stat.ullTotalPhys)
+            used = int(total - stat.ullAvailPhys)
+    except Exception:
+        total = 1
+        used = 0
+
+    return {
+        "cpu": 0.0,
+        "ram": int(used),
+        "ramTotal": int(total),
+        "uptime": 0,
+    }
+
+
 def _server_dir_for_config(config: dict[str, Any]) -> str:
     loader = str(config.get("loader", "vanilla"))
     version = str(config.get("version", "1.21.7"))
@@ -1469,6 +1520,9 @@ def _server_is_installed(target_dir: str, loader: str) -> bool:
             or glob.glob(os.path.join(target_dir, "libraries", "**", "win_args.txt"), recursive=True)
         )
     return False
+
+
+_APP_START_TIME = time.time()
 
 
 def create_app() -> FastAPI:
@@ -1548,6 +1602,14 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, Any]:
         return {"status": "ok", "service": "ez-server-webapp"}
+
+    @app.get("/api/system/metrics")
+    @app.get("/api/system")
+    @app.get("/api/stats")
+    @app.get("/api/metrics")
+    @app.get("/metrics")
+    def system_metrics(_: str = Depends(require_auth)) -> dict[str, Any]:
+        return _system_metrics_snapshot()
 
     @app.get("/api/status")
     def status(_: str = Depends(require_auth)) -> dict[str, Any]:

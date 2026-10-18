@@ -5,6 +5,17 @@ const appState = {
   latestVersionList: [],
 };
 
+const metricsState = {
+  endpoint: null,
+  paused: false,
+  pollMs: 2000,
+  cpu: [],
+  ram: [],
+  maxPoints: 60,
+  lastSample: null,
+  timer: null,
+};
+
 function readSessionCredentials() {
   try {
     const username = sessionStorage.getItem('ez_auth_username') || '';
@@ -38,20 +49,11 @@ function setPlayitStatus(message, isError = false) {
   }
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
 async function fetchJson(url, method = 'GET', body = null) {
   const options = {
     method,
     headers: {
-      'Authorization': buildBasicAuth(),
+      Authorization: buildBasicAuth(),
       'Content-Type': 'application/json',
     },
   };
@@ -120,6 +122,7 @@ async function loadConfig() {
     const config = await fetchJson('/api/config');
     appState.config = config;
     populateConfigForm(config);
+
     const motd = document.getElementById('motd-input');
     const maxplayers = document.getElementById('maxplayers-input');
     const gamemode = document.getElementById('gamemode-input');
@@ -472,39 +475,301 @@ async function applyAdminAction(action) {
   }
 }
 
+function drawMetricChart(canvas, values, maxValue, color) {
+  if (!canvas) return;
+
+  const context = canvas.getContext('2d');
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(120, rect.width || canvas.width || 300);
+  const height = Math.max(80, rect.height || canvas.height || 120);
+  const dpr = window.devicePixelRatio || 1;
+
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const padding = 10;
+  const usableWidth = width - padding * 2;
+  const usableHeight = height - padding * 2;
+
+  context.strokeStyle = 'rgba(148, 163, 184, 0.18)';
+  context.lineWidth = 1;
+  for (let i = 0; i <= 3; i += 1) {
+    const y = padding + (usableHeight / 3) * i;
+    context.beginPath();
+    context.moveTo(padding, y);
+    context.lineTo(width - padding, y);
+    context.stroke();
+  }
+
+  if (!values.length) {
+    context.fillStyle = '#94a3b8';
+    context.font = '12px sans-serif';
+    context.textAlign = 'center';
+    context.fillText('Awaiting data…', width / 2, height / 2);
+    return;
+  }
+
+  const step = usableWidth / Math.max(1, values.length - 1);
+  const safeMax = maxValue > 0 ? maxValue : 100;
+
+  context.beginPath();
+  values.forEach((value, index) => {
+    const x = padding + index * step;
+    const y = padding + usableHeight - (Math.min(Math.max(value, 0), safeMax) / safeMax) * usableHeight;
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+
+  const gradient = context.createLinearGradient(0, padding, 0, height - padding);
+  gradient.addColorStop(0, color + 'ee');
+  gradient.addColorStop(1, color + '00');
+  context.strokeStyle = color;
+  context.lineWidth = 2;
+  context.stroke();
+
+  const fillPath = context.getLineDash ? context : null;
+  if (fillPath) {
+    context.beginPath();
+    values.forEach((value, index) => {
+      const x = padding + index * step;
+      const y = padding + usableHeight - (Math.min(Math.max(value, 0), safeMax) / safeMax) * usableHeight;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    context.lineTo(padding + (values.length - 1) * step, height - padding);
+    context.lineTo(padding, height - padding);
+    context.closePath();
+    context.fillStyle = gradient;
+    context.fill();
+    context.beginPath();
+    values.forEach((value, index) => {
+      const x = padding + index * step;
+      const y = padding + usableHeight - (Math.min(Math.max(value, 0), safeMax) / safeMax) * usableHeight;
+      if (index === 0) context.moveTo(x, y);
+      else context.lineTo(x, y);
+    });
+    context.strokeStyle = color;
+    context.stroke();
+  }
+}
+
+function formatBytes(value) {
+  if (!Number.isFinite(value) || value == null) return '—';
+  let bytes = Number(value);
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let unit = 0;
+  while (bytes >= 1024 && unit < units.length - 1) {
+    bytes /= 1024;
+    unit += 1;
+  }
+  return `${bytes.toFixed(bytes >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function parseMetricsPayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+  const cpu = Number(data.cpu ?? data.cpuUsage ?? data.cpuPercent ?? data.cpu_percent ?? 0);
+  const ram = Number(data.ram ?? data.ramUsed ?? data.usedMemory ?? data.memoryUsed ?? data.used_ram ?? 0);
+  const total = Number(data.ramTotal ?? data.ram_total ?? data.memoryTotal ?? data.totalMemory ?? data.total_ram ?? 0);
+  return {
+    cpu: Number.isFinite(cpu) ? Math.max(0, Math.min(100, cpu)) : null,
+    ram: Number.isFinite(ram) ? ram : null,
+    ramTotal: Number.isFinite(total) && total > 0 ? total : null,
+  };
+}
+
+function updateMetricsUi(sample) {
+  const cpuValue = document.getElementById('cpu-value');
+  const cpuSub = document.getElementById('cpu-sub');
+  const ramValue = document.getElementById('ram-value');
+  const ramSub = document.getElementById('ram-sub');
+  const cpuMin = document.getElementById('cpu-min');
+  const cpuMax = document.getElementById('cpu-max');
+  const cpuAvg = document.getElementById('cpu-avg');
+  const ramMin = document.getElementById('ram-min');
+  const ramMax = document.getElementById('ram-max');
+  const ramAvg = document.getElementById('ram-avg');
+
+  if (sample && Number.isFinite(sample.cpu)) {
+    cpuValue.textContent = `${sample.cpu.toFixed(1)}%`;
+    cpuSub.textContent = 'usage now';
+    metricsState.cpu.push(sample.cpu);
+    if (metricsState.cpu.length > metricsState.maxPoints) metricsState.cpu.shift();
+    const cpuValues = metricsState.cpu;
+    const cpuMinValue = cpuValues.reduce((min, value) => Math.min(min, value), Infinity);
+    const cpuMaxValue = cpuValues.reduce((max, value) => Math.max(max, value), -Infinity);
+    const cpuAvgValue = cpuValues.reduce((sum, value) => sum + value, 0) / cpuValues.length;
+    cpuMin.textContent = `${cpuMinValue === Infinity ? '—' : cpuMinValue.toFixed(1)}%`;
+    cpuMax.textContent = `${cpuMaxValue === -Infinity ? '—' : cpuMaxValue.toFixed(1)}%`;
+    cpuAvg.textContent = `${cpuAvgValue.toFixed(1)}%`;
+  } else {
+    cpuValue.textContent = '—%';
+    cpuSub.textContent = 'waiting';
+  }
+
+  if (sample && Number.isFinite(sample.ram) && sample.ramTotal) {
+    ramValue.textContent = `${formatBytes(sample.ram)} / ${formatBytes(sample.ramTotal)}`;
+    ramSub.textContent = `${((sample.ram / sample.ramTotal) * 100).toFixed(1)}% used`;
+    metricsState.ram.push(sample.ram);
+    if (metricsState.ram.length > metricsState.maxPoints) metricsState.ram.shift();
+    const ramValues = metricsState.ram;
+    const ramMinValue = ramValues.reduce((min, value) => Math.min(min, value), Infinity);
+    const ramMaxValue = ramValues.reduce((max, value) => Math.max(max, value), -Infinity);
+    const ramAvgValue = ramValues.reduce((sum, value) => sum + value, 0) / ramValues.length;
+    ramMin.textContent = `${ramMinValue === Infinity ? '—' : ((ramMinValue / sample.ramTotal) * 100).toFixed(1)}%`;
+    ramMax.textContent = `${ramMaxValue === -Infinity ? '—' : ((ramMaxValue / sample.ramTotal) * 100).toFixed(1)}%`;
+    ramAvg.textContent = `${((ramAvgValue / sample.ramTotal) * 100).toFixed(1)}%`;
+  } else {
+    ramValue.textContent = '—';
+    ramSub.textContent = 'waiting';
+  }
+
+  const cpuChart = document.getElementById('cpu-chart');
+  const ramChart = document.getElementById('ram-chart');
+  drawMetricChart(cpuChart, metricsState.cpu, 100, '#38bdf8');
+  drawMetricChart(ramChart, metricsState.ram, sample && sample.ramTotal ? sample.ramTotal : 1, '#818cf8');
+
+  const badge = document.getElementById('metrics-badge');
+  if (badge) {
+    badge.textContent = metricsState.paused ? '● paused' : '● live';
+    badge.className = metricsState.paused ? 'badge' : 'badge badge-live';
+  }
+
+  const endpoint = document.getElementById('metrics-endpoint');
+  if (endpoint) endpoint.innerHTML = metricsState.endpoint ? `endpoint: <code>${metricsState.endpoint}</code>` : 'endpoint: <code>unavailable</code>';
+
+  const last = document.getElementById('metrics-last');
+  if (last) last.textContent = `last update: ${new Date().toLocaleTimeString()}`;
+}
+
+async function refreshMetrics() {
+  if (metricsState.paused) return;
+
+  try {
+    if (!metricsState.endpoint) {
+      const candidates = ['/api/system/metrics', '/api/system', '/api/stats', '/api/metrics', '/metrics'];
+      for (const candidate of candidates) {
+        try {
+          const response = await fetch(candidate, { headers: { Authorization: buildBasicAuth(), Accept: 'application/json' } });
+          if (!response.ok) continue;
+          const text = await response.text();
+          if (!text) continue;
+          const payload = JSON.parse(text);
+          const sample = parseMetricsPayload(payload);
+          if (sample && (sample.cpu !== null || sample.ram !== null)) {
+            metricsState.endpoint = candidate;
+            metricsState.lastSample = sample;
+            updateMetricsUi(sample);
+            return;
+          }
+        } catch (err) {
+          // try next candidate
+        }
+      }
+      return;
+    }
+
+    const response = await fetch(metricsState.endpoint, { headers: { Authorization: buildBasicAuth(), Accept: 'application/json' } });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const sample = parseMetricsPayload(payload);
+    if (sample && (sample.cpu !== null || sample.ram !== null)) {
+      metricsState.lastSample = sample;
+      updateMetricsUi(sample);
+      return;
+    }
+    throw new Error('No metric sample');
+  } catch (error) {
+    const badge = document.getElementById('metrics-badge');
+    if (badge) {
+      badge.textContent = '● error';
+      badge.className = 'badge';
+    }
+  }
+}
+
+function bindMetrics() {
+  const toggle = document.getElementById('metrics-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      metricsState.paused = !metricsState.paused;
+      toggle.textContent = metricsState.paused ? 'Resume' : 'Pause';
+      const badge = document.getElementById('metrics-badge');
+      if (badge) {
+        badge.textContent = metricsState.paused ? '● paused' : '● live';
+        badge.className = metricsState.paused ? 'badge' : 'badge badge-live';
+      }
+      if (!metricsState.paused) refreshMetrics();
+    });
+  }
+
+  if (!metricsState.timer) {
+    metricsState.timer = setInterval(() => refreshMetrics(), metricsState.pollMs);
+  }
+  refreshMetrics();
+}
+
 function bindEvents() {
-  document.getElementById('setup-form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    saveConfigFromForm();
-  });
+  const setupForm = document.getElementById('setup-form');
+  if (setupForm) {
+    setupForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      saveConfigFromForm();
+    });
+  }
 
-  document.getElementById('create-button').addEventListener('click', () => createServer());
-  document.getElementById('start-button').addEventListener('click', () => startServer());
-  document.getElementById('stop-button').addEventListener('click', () => stopServer());
-  document.getElementById('restart-button').addEventListener('click', () => restartServer());
-  document.getElementById('backup-button').addEventListener('click', () => backupServer());
-  document.getElementById('backup-restore-button').addEventListener('click', () => restoreBackup());
-  document.getElementById('command-form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    sendCommand();
-  });
-  document.getElementById('playit-config-button').addEventListener('click', () => configurePlayit());
-  document.getElementById('playit-start-button').addEventListener('click', () => startPlayit());
-  document.getElementById('playit-stop-button').addEventListener('click', () => stopPlayit());
-  document.getElementById('mod-search-button').addEventListener('click', () => searchMods());
-  document.getElementById('mod-refresh-button').addEventListener('click', () => loadInstalledMods());
-  document.getElementById('mod-install-button').addEventListener('click', () => installSelectedMod());
-  document.getElementById('mod-upload-button').addEventListener('click', () => uploadMods());
+  const createButton = document.getElementById('create-button');
+  if (createButton) createButton.addEventListener('click', () => createServer());
+  const startButton = document.getElementById('start-button');
+  if (startButton) startButton.addEventListener('click', () => startServer());
+  const stopButton = document.getElementById('stop-button');
+  if (stopButton) stopButton.addEventListener('click', () => stopServer());
+  const restartButton = document.getElementById('restart-button');
+  if (restartButton) restartButton.addEventListener('click', () => restartServer());
+  const backupButton = document.getElementById('backup-button');
+  if (backupButton) backupButton.addEventListener('click', () => backupServer());
+  const restoreButton = document.getElementById('backup-restore-button');
+  if (restoreButton) restoreButton.addEventListener('click', () => restoreBackup());
+  const commandForm = document.getElementById('command-form');
+  if (commandForm) {
+    commandForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      sendCommand();
+    });
+  }
+  const playitConfigButton = document.getElementById('playit-config-button');
+  if (playitConfigButton) playitConfigButton.addEventListener('click', () => configurePlayit());
+  const playitStartButton = document.getElementById('playit-start-button');
+  if (playitStartButton) playitStartButton.addEventListener('click', () => startPlayit());
+  const playitStopButton = document.getElementById('playit-stop-button');
+  if (playitStopButton) playitStopButton.addEventListener('click', () => stopPlayit());
+  const modSearchButton = document.getElementById('mod-search-button');
+  if (modSearchButton) modSearchButton.addEventListener('click', () => searchMods());
+  const modRefreshButton = document.getElementById('mod-refresh-button');
+  if (modRefreshButton) modRefreshButton.addEventListener('click', () => loadInstalledMods());
+  const modInstallButton = document.getElementById('mod-install-button');
+  if (modInstallButton) modInstallButton.addEventListener('click', () => installSelectedMod());
+  const modUploadButton = document.getElementById('mod-upload-button');
+  if (modUploadButton) modUploadButton.addEventListener('click', () => uploadMods());
 
-  document.getElementById('admin-op').addEventListener('click', () => applyAdminAction('op'));
-  document.getElementById('admin-deop').addEventListener('click', () => applyAdminAction('deop'));
-  document.getElementById('admin-kick').addEventListener('click', () => applyAdminAction('kick'));
-  document.getElementById('admin-ban').addEventListener('click', () => applyAdminAction('ban'));
-  document.getElementById('admin-day').addEventListener('click', () => applyAdminAction('day'));
-  document.getElementById('admin-night').addEventListener('click', () => applyAdminAction('night'));
-  document.getElementById('admin-clear').addEventListener('click', () => applyAdminAction('clear'));
-  document.getElementById('admin-rain').addEventListener('click', () => applyAdminAction('rain'));
-  document.getElementById('admin-save').addEventListener('click', () => applyAdminAction('save'));
+  const adminActions = [
+    ['admin-op', 'op'],
+    ['admin-deop', 'deop'],
+    ['admin-kick', 'kick'],
+    ['admin-ban', 'ban'],
+    ['admin-day', 'day'],
+    ['admin-night', 'night'],
+    ['admin-clear', 'clear'],
+    ['admin-rain', 'rain'],
+    ['admin-save', 'save'],
+  ];
+
+  adminActions.forEach(([id, action]) => {
+    const button = document.getElementById(id);
+    if (button) button.addEventListener('click', () => applyAdminAction(action));
+  });
 
   const logoutButton = document.getElementById('logout-button');
   if (logoutButton) {
@@ -526,7 +791,9 @@ async function boot() {
     window.location.href = '/login';
     return;
   }
+
   bindEvents();
+  bindMetrics();
   await loadConfig();
   await loadStatus();
   await loadBackups();
@@ -535,3 +802,9 @@ async function boot() {
 }
 
 document.addEventListener('DOMContentLoaded', boot);
+window.addEventListener('resize', () => {
+  const cpuChart = document.getElementById('cpu-chart');
+  const ramChart = document.getElementById('ram-chart');
+  if (cpuChart) drawMetricChart(cpuChart, metricsState.cpu, 100, '#38bdf8');
+  if (ramChart) drawMetricChart(ramChart, metricsState.ram, metricsState.lastSample && metricsState.lastSample.ramTotal ? metricsState.lastSample.ramTotal : 1, '#818cf8');
+});
