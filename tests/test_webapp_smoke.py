@@ -33,6 +33,13 @@ def test_dashboard_mentions_playit_support():
     assert "PlayIt" in response.text
 
 
+def test_dashboard_mentions_legacy_management_controls():
+    response = client.get("/", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    assert "Restart server" in response.text
+    assert "Backup world" in response.text
+
+
 def test_dashboard_uses_runtime_auth_defaults(monkeypatch):
     monkeypatch.setenv("EZ_WEBAPP_USERNAME", "admin")
     monkeypatch.setenv("EZ_WEBAPP_PASSWORD", "admin")

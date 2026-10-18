@@ -160,8 +160,8 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
       </div>
       <div class="card">        <div class=\"row\">
           <button id=\"start-button\">Start server</button>
-          <button id=\"stop-button\" class=\"danger\">Stop server</button>
-        </div>
+          <button id=\"stop-button\" class=\"danger\">Stop server</button>          <button id=\"restart-button\" class=\"secondary\">Restart server</button>
+          <button id=\"backup-button\" class=\"secondary\">Backup world</button>        </div>
       </div>
 
       <div class=\"card\">
@@ -414,6 +414,28 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
       document.getElementById('stop-button').addEventListener('click', async () => {
         try {
           await apiRequest('/api/server/stop', { method: 'POST' });
+          await refreshStatus();
+          await refreshConsole();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      document.getElementById('restart-button').addEventListener('click', async () => {
+        try {
+          await apiRequest('/api/server/restart', { method: 'POST' });
+          await refreshStatus();
+          await refreshConsole();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      document.getElementById('backup-button').addEventListener('click', async () => {
+        try {
+          const payload = await apiRequest('/api/server/backup', { method: 'POST' });
+          const archive = payload && payload.archive ? payload.archive : 'backup created';
+          alert('Backup created: ' + archive);
           await refreshStatus();
           await refreshConsole();
         } catch (error) {
