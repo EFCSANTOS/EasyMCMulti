@@ -174,6 +174,20 @@ def test_playit_start_route_starts_the_tunnel(monkeypatch):
     assert payload["address"] == "demo.example:25565"
 
 
+def test_playit_agent_name_is_platform_aware(monkeypatch):
+    monkeypatch.setattr(webapp_module.playit.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(webapp_module.playit.platform, "machine", lambda: "aarch64")
+    assert webapp_module.playit._agent_binary_name() == "playit-linux-aarch64"
+
+    monkeypatch.setattr(webapp_module.playit.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(webapp_module.playit.platform, "machine", lambda: "x86_64")
+    assert webapp_module.playit._agent_binary_name() == "playit-linux-amd64"
+
+    monkeypatch.setattr(webapp_module.playit.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(webapp_module.playit.platform, "machine", lambda: "armv7l")
+    assert webapp_module.playit._agent_binary_name() == "playit-linux-armv7"
+
+
 def test_config_can_persist_values():
     response = client.put(
         "/api/config",
