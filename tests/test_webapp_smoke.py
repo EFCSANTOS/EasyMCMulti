@@ -34,6 +34,8 @@ def test_dashboard_uses_runtime_auth_defaults(monkeypatch):
     assert response.status_code == 200
     assert 'value="admin"' in response.text
     assert 'name="password" type="password" value="admin"' in response.text
+    assert "join('\\\\n')" in response.text
+    assert "join('\\\\n')" in response.text
 
 
 def test_console_history_endpoint_returns_messages():

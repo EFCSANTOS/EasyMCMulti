@@ -158,11 +158,11 @@ DASHBOARD_HTML_TEMPLATE = """<!doctype html>
         if (status.install_message) {
           lines.push('Message: ' + status.install_message);
         }
-        document.getElementById('status-panel').textContent = lines.join('\n');
+        document.getElementById('status-panel').textContent = lines.join('\\n');
       }
 
       function renderConsole(lines) {
-        const output = Array.isArray(lines) && lines.length ? lines.join('\n') : 'No console output yet.';
+        const output = Array.isArray(lines) && lines.length ? lines.join('\\n') : 'No console output yet.';
         document.getElementById('console-output').textContent = output;
       }
 
