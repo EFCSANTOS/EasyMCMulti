@@ -42,6 +42,13 @@ def test_dashboard_mentions_legacy_management_controls():
     assert "Admin commands" in response.text
 
 
+def test_dashboard_sections_have_their_own_pages():
+    for section in ("overview", "setup", "advanced", "mods", "remote", "backups", "console"):
+        response = client.get(f"/dashboard/{section}", auth=("admin", "s3cret-pass"))
+        assert response.status_code == 200
+        assert "EZ Minecraft" in response.text
+
+
 def test_dashboard_uses_runtime_auth_defaults(monkeypatch):
     monkeypatch.setenv("EZ_WEBAPP_USERNAME", "admin")
     monkeypatch.setenv("EZ_WEBAPP_PASSWORD", "admin")
