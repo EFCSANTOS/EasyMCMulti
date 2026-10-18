@@ -68,8 +68,31 @@ DASHBOARD_HTML = """<!doctype html>
         </form>
       </div>
 
-      <div class=\"card\">
-        <div class=\"row\">
+      <div class=\"card\">        <form id="setup-form" class="row">
+          <div>
+            <label for="loader-select">Loader</label>
+            <select id="loader-select" name="loader">
+              <option value="vanilla">vanilla</option>
+              <option value="paper">paper</option>
+              <option value="fabric">fabric</option>
+              <option value="forge">forge</option>
+              <option value="neoforge">neoforge</option>
+            </select>
+          </div>
+          <div>
+            <label for="version-select">Version</label>
+            <select id="version-select" name="version"></select>
+          </div>
+          <div>
+            <label for="ram-input">RAM (MB)</label>
+            <input id="ram-input" name="ram_mb" type="number" min="512" step="256" value="2048" />
+          </div>
+          <button type="submit">Save config</button>
+          <button id="create-button" type="button">Create server</button>
+        </form>
+      </div>
+
+      <div class="card">        <div class=\"row\">
           <button id=\"start-button\">Start server</button>
           <button id=\"stop-button\" class=\"danger\">Stop server</button>
         </div>
@@ -125,18 +148,56 @@ DASHBOARD_HTML = """<!doctype html>
         const lines = [
           'State: ' + (status.state || 'unknown'),
           'Operation: ' + (status.operation || 'unknown'),
+          'Install: ' + (status.install_status || 'ready') + ' (' + ((status.install_progress ?? 0) | 0) + '%)',
           'Loader: ' + (status.loader || 'unknown'),
           'Version: ' + (status.version || 'unknown'),
           'Players: ' + (status.players ?? 0),
           'LAN: ' + (status.lan_address || 'unknown'),
           'Public: ' + (status.public_address || 'unknown'),
         ];
+        if (status.install_message) {
+          lines.push('Message: ' + status.install_message);
+        }
         document.getElementById('status-panel').textContent = lines.join('\n');
       }
 
       function renderConsole(lines) {
         const output = Array.isArray(lines) && lines.length ? lines.join('\n') : 'No console output yet.';
         document.getElementById('console-output').textContent = output;
+      }
+
+      async function loadVersions(loader) {
+        try {
+          const payload = await apiRequest('/api/versions/' + loader);
+          const versionSelect = document.getElementById('version-select');
+          versionSelect.innerHTML = '';
+          for (const version of payload.versions || []) {
+            const option = document.createElement('option');
+            option.value = version;
+            option.textContent = version;
+            versionSelect.appendChild(option);
+          }
+        } catch (error) {
+          const versionSelect = document.getElementById('version-select');
+          versionSelect.innerHTML = '<option value="">Unavailable</option>';
+        }
+      }
+
+      async function refreshConfig() {
+        try {
+          const payload = await apiRequest('/api/config');
+          const loader = document.getElementById('loader-select');
+          const version = document.getElementById('version-select');
+          const ram = document.getElementById('ram-input');
+          loader.value = payload.loader || 'vanilla';
+          ram.value = payload.ram_mb || 2048;
+          await loadVersions(loader.value);
+          if (payload.version) {
+            version.value = payload.version;
+          }
+        } catch (error) {
+          // keep defaults
+        }
       }
 
       async function refreshStatus() {
@@ -163,6 +224,39 @@ DASHBOARD_HTML = """<!doctype html>
         state.password = document.getElementById('password').value;
         refreshStatus();
         refreshConsole();
+      });
+
+      document.getElementById('loader-select').addEventListener('change', async (event) => {
+        await loadVersions(event.target.value);
+      });
+
+      document.getElementById('setup-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const payload = {
+          loader: document.getElementById('loader-select').value,
+          version: document.getElementById('version-select').value,
+          ram_mb: Number(document.getElementById('ram-input').value || 2048),
+        };
+        try {
+          await apiRequest('/api/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          await refreshStatus();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      document.getElementById('create-button').addEventListener('click', async () => {
+        try {
+          await apiRequest('/api/server/create', { method: 'POST' });
+          await refreshStatus();
+          await refreshConsole();
+        } catch (error) {
+          alert(error.message);
+        }
       });
 
       document.getElementById('start-button').addEventListener('click', async () => {
@@ -203,6 +297,7 @@ DASHBOARD_HTML = """<!doctype html>
         }
       });
 
+      refreshConfig();
       refreshStatus();
       refreshConsole();
       setInterval(() => {
@@ -264,6 +359,48 @@ def create_app() -> FastAPI:
 
     def append_console_line(line: str) -> None:
         app.state.console_manager.publish(line)
+
+    def update_install_state(status: str, progress: float, message: str) -> None:
+        runtime.install_status = status
+        runtime.install_progress = max(0.0, min(float(progress), 100.0))
+        runtime.install_message = message
+
+    def ensure_server_installed(config: dict[str, Any]) -> str:
+        loader = str(config.get("loader", "vanilla"))
+        version = str(config.get("version", "1.21.7"))
+        target_dir = _server_dir_for_config(config)
+        if _server_is_installed(target_dir, loader):
+            update_install_state("ready", 100.0, f"{loader} {version} ready.")
+            return target_dir
+
+        runtime.state = "installing"
+        runtime.operation = "installing"
+        update_install_state("installing", 0.0, f"Installing {loader} {version}...")
+
+        def install_log(message: str) -> None:
+            if message:
+                append_console_line(f"[install] {message}")
+
+        def install_progress(done: int, total: int) -> None:
+            if total > 0:
+                update_install_state("installing", (done / total) * 100.0, f"Downloading {loader} {version} ({done}/{total} bytes)")
+            else:
+                update_install_state("installing", 100.0, f"Installing {loader} {version}...")
+
+        try:
+            java_exe = java_manager.ensure_java(java_manager.required_java(version))
+            downloaders.prepare(loader, version, target_dir, java_exe, log=install_log, progress=install_progress)
+            accept_eula(target_dir)
+        except Exception as exc:
+            runtime.state = "stopped"
+            runtime.operation = "idle"
+            update_install_state("failed", 0.0, str(exc))
+            raise
+
+        runtime.state = "stopped"
+        runtime.operation = "idle"
+        update_install_state("ready", 100.0, f"{loader} {version} installed.")
+        return target_dir
 
     @app.get("/")
     def root() -> HTMLResponse:
@@ -331,11 +468,8 @@ def create_app() -> FastAPI:
         runtime.version = version
         runtime.operation = "creating"
         runtime.state = "ready"
-        target_dir = _server_dir_for_config(config)
         try:
-            java_exe = java_manager.ensure_java(java_manager.required_java(version))
-            downloaders.prepare(loader, version, target_dir, java_exe, log=print)
-            accept_eula(target_dir)
+            target_dir = ensure_server_installed(config)
         except Exception as exc:
             runtime.operation = "idle"
             runtime.state = "stopped"
@@ -364,27 +498,7 @@ def create_app() -> FastAPI:
             runtime.process = None
             append_console_line(f"[server] exited with code {code}")
 
-        target_dir = _server_dir_for_config(config)
-        installed = _server_is_installed(target_dir, loader)
-
-        if not installed:
-            demo_script = (
-                "import sys, time; "
-                "print('Demo server booting...', flush=True); "
-                "for i in range(3): "
-                "print(f'demo-line-{i}', flush=True); time.sleep(0.2)"
-            )
-            runtime.process = ServerProcess(
-                [sys.executable, "-c", demo_script],
-                cwd=os.getcwd(),
-                on_output=append_console_line,
-                on_exit=on_exit,
-            )
-            runtime.process.start()
-            runtime.state = "running"
-            runtime.operation = "idle"
-            append_console_line("[server] started (demo mode)")
-            return {"state": runtime.state, "operation": runtime.operation, "message": "Server started in demo mode."}
+        target_dir = ensure_server_installed(config)
 
         java_exe = java_manager.ensure_java(java_manager.required_java(version))
         args = downloaders.launch_args(loader, java_exe, target_dir, int(config.get("ram_mb", 2048)))
