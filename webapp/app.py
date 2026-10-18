@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import glob
 import os
 import sys
 from typing import Any
@@ -241,6 +242,19 @@ def _server_dir_for_config(config: dict[str, Any]) -> str:
     return paths.server_dir(loader, version)
 
 
+def _server_is_installed(target_dir: str, loader: str) -> bool:
+    if loader in {"vanilla", "paper", "fabric"}:
+        return os.path.exists(os.path.join(target_dir, "server.jar"))
+
+    if loader in {"forge", "neoforge"}:
+        return bool(
+            glob.glob(os.path.join(target_dir, f"{loader}-*.jar"))
+            or glob.glob(os.path.join(target_dir, f"{loader}*.jar"))
+            or glob.glob(os.path.join(target_dir, "libraries", "**", "win_args.txt"), recursive=True)
+        )
+    return False
+
+
 def create_app() -> FastAPI:
     validate_auth_settings()
     app = FastAPI(title="MZ Minecraft Server Launcher", version="0.1.0")
@@ -351,11 +365,7 @@ def create_app() -> FastAPI:
             append_console_line(f"[server] exited with code {code}")
 
         target_dir = _server_dir_for_config(config)
-        server_jar = os.path.join(target_dir, "server.jar")
-        installed = os.path.exists(server_jar) or any(
-            os.path.exists(os.path.join(target_dir, name))
-            for name in ("forge-*.jar", "neoforge-*.jar")
-        )
+        installed = _server_is_installed(target_dir, loader)
 
         if not installed:
             demo_script = (
