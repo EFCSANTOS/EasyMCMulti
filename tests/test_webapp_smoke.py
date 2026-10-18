@@ -39,3 +39,39 @@ def test_versions_endpoint_accepts_known_loader():
     assert "loader" in data
     assert "versions" in data
     assert data["loader"] == "vanilla"
+
+
+def test_websocket_console_requires_authentication():
+    try:
+        with client.websocket_connect("/ws/console"):
+            pass
+    except Exception:
+        return
+    raise AssertionError("Unauthenticated WebSocket access should be rejected.")
+
+
+def test_websocket_console_streams_messages():
+    with client.websocket_connect(
+        "/ws/console",
+        headers={"Authorization": "Basic YWRtaW46czNjcmV0LXBhc3M="},
+    ) as websocket:
+        app.state.console_manager.publish("hello from websocket")
+        message = websocket.receive_text()
+        assert message == "hello from websocket"
+
+
+def test_server_lifecycle_start_and_stop():
+    start_response = client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    assert start_response.status_code == 200
+    payload = start_response.json()
+    assert payload["state"] in {"starting", "running"}
+
+    command_response = client.post(
+        "/api/server/command",
+        auth=("admin", "s3cret-pass"),
+        json={"command": "say hello"},
+    )
+    assert command_response.status_code == 200
+
+    stop_response = client.post("/api/server/stop", auth=("admin", "s3cret-pass"))
+    assert stop_response.status_code == 200

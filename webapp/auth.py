@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 
 from fastapi import HTTPException, status
@@ -34,3 +35,30 @@ def verify_credentials(credentials: HTTPBasicCredentials) -> str:
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
+
+
+def verify_basic_auth_header(auth_header: str | None) -> str:
+    if not auth_header:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+
+    scheme, _, encoded = auth_header.partition(" ")
+    if scheme.lower() != "basic" or not encoded:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+
+    try:
+        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.") from None
+
+    username, separator, password = decoded.partition(":")
+    if separator != ":":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
+
+    expected_username, expected_password = get_expected_credentials()
+    if username != expected_username or password != expected_password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed.",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return username
