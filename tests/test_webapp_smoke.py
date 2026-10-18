@@ -45,6 +45,18 @@ def test_status_endpoint_returns_state_when_authenticated():
     assert "state" in payload
     assert "loader" in payload
     assert "version" in payload
+    assert "lan_address" in payload
+    assert "public_address" in payload
+    assert "playit" in payload
+
+
+def test_playit_status_endpoint_reports_configuration():
+    response = client.get("/api/playit/status", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert "configured" in payload
+    assert "state" in payload
+    assert "address" in payload
 
 
 def test_versions_endpoint_accepts_known_loader():

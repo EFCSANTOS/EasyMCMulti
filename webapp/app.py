@@ -9,8 +9,8 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from core import config_store, downloaders
-from core.server_process import ServerProcess
+from core import config_store, downloaders, java_manager, netinfo, paths, playit
+from core.server_process import ServerProcess, accept_eula
 from webapp.auth import validate_auth_settings, verify_basic_auth_header, verify_credentials
 from webapp.state import RuntimeState
 from webapp.websocket_manager import WebSocketManager
@@ -218,6 +218,29 @@ def require_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
     return verify_credentials(credentials)
 
 
+def _default_config() -> dict[str, Any]:
+    return {
+        "loader": "vanilla",
+        "version": "1.21.7",
+        "ram_mb": 2048,
+        "server_port": 25565,
+    }
+
+
+def _effective_config() -> dict[str, Any]:
+    config = config_store.load()
+    merged = _default_config()
+    if isinstance(config, dict):
+        merged.update(config)
+    return merged
+
+
+def _server_dir_for_config(config: dict[str, Any]) -> str:
+    loader = str(config.get("loader", "vanilla"))
+    version = str(config.get("version", "1.21.7"))
+    return paths.server_dir(loader, version)
+
+
 def create_app() -> FastAPI:
     validate_auth_settings()
     app = FastAPI(title="MZ Minecraft Server Launcher", version="0.1.0")
@@ -242,9 +265,14 @@ def create_app() -> FastAPI:
 
     @app.get("/api/status")
     def status(_: str = Depends(require_auth)) -> dict[str, Any]:
-        config = config_store.load()
-        runtime.loader = config.get("loader", runtime.loader)
-        runtime.version = config.get("version", runtime.version)
+        config = _effective_config()
+        runtime.loader = str(config.get("loader", runtime.loader))
+        runtime.version = str(config.get("version", runtime.version))
+        runtime.lan_address = netinfo.lan_ip()
+        runtime.public_address = netinfo.public_ip()
+        playit_cfg = playit.load_config()
+        runtime.playit_state = "configured" if playit_cfg.get("secret") else "not-configured"
+        runtime.playit_address = playit_cfg.get("address") or runtime.public_address
         return runtime.snapshot()
 
     @app.get("/api/console")
@@ -253,16 +281,17 @@ def create_app() -> FastAPI:
 
     @app.get("/api/config")
     def get_config(_: str = Depends(require_auth)) -> dict[str, Any]:
-        return config_store.load()
+        return _effective_config()
 
     @app.put("/api/config")
     def save_config(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
-        config_store.save(payload)
-        if "loader" in payload:
-            runtime.loader = payload["loader"]
-        if "version" in payload:
-            runtime.version = payload["version"]
-        return payload
+        config = dict(payload)
+        config_store.save(config)
+        if "loader" in config:
+            runtime.loader = str(config["loader"])
+        if "version" in config:
+            runtime.version = str(config["version"])
+        return config
 
     @app.get("/api/versions/{loader}")
     def versions(loader: str, _: str = Depends(require_auth)) -> dict[str, Any]:
@@ -279,11 +308,39 @@ def create_app() -> FastAPI:
 
         return {"loader": loader, "versions": versions}
 
+    @app.post("/api/server/create")
+    def create_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+        config = _effective_config()
+        loader = str(config.get("loader", "vanilla"))
+        version = str(config.get("version", "1.21.7"))
+        runtime.loader = loader
+        runtime.version = version
+        runtime.operation = "creating"
+        runtime.state = "ready"
+        target_dir = _server_dir_for_config(config)
+        try:
+            java_exe = java_manager.ensure_java(java_manager.required_java(version))
+            downloaders.prepare(loader, version, target_dir, java_exe, log=print)
+            accept_eula(target_dir)
+        except Exception as exc:
+            runtime.operation = "idle"
+            runtime.state = "stopped"
+            raise HTTPException(status_code=500, detail=f"Server creation failed: {exc}") from exc
+
+        runtime.operation = "idle"
+        runtime.state = "stopped"
+        return {"state": runtime.state, "operation": runtime.operation, "loader": loader, "version": version, "server_dir": target_dir}
+
     @app.post("/api/server/start")
     def start_server(_: str = Depends(require_auth)) -> dict[str, Any]:
         if runtime.process is not None and runtime.process.is_running():
             return {"state": runtime.state, "operation": runtime.operation, "message": "Server already running."}
 
+        config = _effective_config()
+        loader = str(config.get("loader", runtime.loader))
+        version = str(config.get("version", runtime.version))
+        runtime.loader = loader
+        runtime.version = version
         runtime.state = "starting"
         runtime.operation = "starting"
 
@@ -293,22 +350,44 @@ def create_app() -> FastAPI:
             runtime.process = None
             append_console_line(f"[server] exited with code {code}")
 
-        demo_script = (
-            "import sys, time; "
-            "print('Demo server booting...', flush=True); "
-            "for i in range(3): "
-            "print(f'demo-line-{i}', flush=True); time.sleep(0.2)"
+        target_dir = _server_dir_for_config(config)
+        server_jar = os.path.join(target_dir, "server.jar")
+        installed = os.path.exists(server_jar) or any(
+            os.path.exists(os.path.join(target_dir, name))
+            for name in ("forge-*.jar", "neoforge-*.jar")
         )
+
+        if not installed:
+            demo_script = (
+                "import sys, time; "
+                "print('Demo server booting...', flush=True); "
+                "for i in range(3): "
+                "print(f'demo-line-{i}', flush=True); time.sleep(0.2)"
+            )
+            runtime.process = ServerProcess(
+                [sys.executable, "-c", demo_script],
+                cwd=os.getcwd(),
+                on_output=append_console_line,
+                on_exit=on_exit,
+            )
+            runtime.process.start()
+            runtime.state = "running"
+            runtime.operation = "idle"
+            append_console_line("[server] started (demo mode)")
+            return {"state": runtime.state, "operation": runtime.operation, "message": "Server started in demo mode."}
+
+        java_exe = java_manager.ensure_java(java_manager.required_java(version))
+        args = downloaders.launch_args(loader, java_exe, target_dir, int(config.get("ram_mb", 2048)))
         runtime.process = ServerProcess(
-            [sys.executable, "-c", demo_script],
-            cwd=os.getcwd(),
+            args,
+            cwd=target_dir,
             on_output=append_console_line,
             on_exit=on_exit,
         )
         runtime.process.start()
         runtime.state = "running"
         runtime.operation = "idle"
-        append_console_line("[server] started")
+        append_console_line(f"[server] started with {loader} {version}")
         return {"state": runtime.state, "operation": runtime.operation, "message": "Server started."}
 
     @app.post("/api/server/stop")
@@ -323,6 +402,11 @@ def create_app() -> FastAPI:
         runtime.process.stop()
         return {"state": runtime.state, "operation": runtime.operation, "message": "Stop requested."}
 
+    @app.post("/api/server/restart")
+    def restart_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+        stop_server(_)
+        return start_server(_)
+
     @app.post("/api/server/command")
     def send_command(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
         command = str(payload.get("command", "")).strip()
@@ -333,6 +417,59 @@ def create_app() -> FastAPI:
         runtime.process.send(command)
         append_console_line(f"> {command}")
         return {"ok": True, "command": command}
+
+    @app.post("/api/server/backup")
+    def backup_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+        config = _effective_config()
+        target_dir = _server_dir_for_config(config)
+        world_dir = os.path.join(target_dir, "world")
+        if not os.path.isdir(world_dir):
+            return {"ok": False, "message": "No world directory found for backup."}
+        archive = os.path.join(target_dir, f"world-backup-{__import__('time').strftime('%Y%m%d-%H%M%S')}.zip")
+        import zipfile
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for root, _, files in os.walk(world_dir):
+                for name in files:
+                    abs_path = os.path.join(root, name)
+                    rel_path = os.path.relpath(abs_path, target_dir)
+                    zf.write(abs_path, rel_path)
+        return {"ok": True, "archive": archive}
+
+    @app.get("/api/server/backups")
+    def list_backups(_: str = Depends(require_auth)) -> dict[str, Any]:
+        config = _effective_config()
+        target_dir = _server_dir_for_config(config)
+        backups = []
+        for entry in os.listdir(target_dir):
+            if entry.startswith("world-backup-") and entry.endswith(".zip"):
+                backups.append(os.path.join(target_dir, entry))
+        return {"backups": backups}
+
+    @app.get("/api/playit/status")
+    def playit_status(_: str = Depends(require_auth)) -> dict[str, Any]:
+        cfg = playit.load_config()
+        return {
+            "configured": bool(cfg.get("secret")),
+            "state": "configured" if cfg.get("secret") else "not-configured",
+            "address": cfg.get("address") or "",
+            "secret_present": bool(cfg.get("secret")),
+        }
+
+    @app.post("/api/playit/start")
+    def start_playit(_: str = Depends(require_auth)) -> dict[str, Any]:
+        cfg = playit.load_config()
+        if not cfg.get("secret"):
+            return {"configured": False, "state": "not-configured", "address": "", "message": "PlayIt is not configured yet."}
+        return {
+            "configured": True,
+            "state": "configured",
+            "address": cfg.get("address") or "",
+            "message": "PlayIt agent status is available.",
+        }
+
+    @app.get("/api/playit/config")
+    def playit_config(_: str = Depends(require_auth)) -> dict[str, Any]:
+        return playit.load_config()
 
     @app.websocket("/ws/console")
     async def console_websocket(websocket: WebSocket) -> None:
