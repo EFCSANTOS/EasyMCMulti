@@ -27,7 +27,7 @@ FALLBACK_VERSIONS = {
 
 security = HTTPBasic()
 
-DASHBOARD_HTML = """<!doctype html>
+DASHBOARD_HTML_TEMPLATE = """<!doctype html>
 <html lang=\"en\">
   <head>
     <meta charset=\"utf-8\" />
@@ -58,11 +58,11 @@ DASHBOARD_HTML = """<!doctype html>
         <form id=\"auth-form\" class=\"row\">
           <div>
             <label for=\"username\">Username</label>
-            <input id=\"username\" name=\"username\" value=\"admin\" />
+            <input id=\"username\" name=\"username\" value=\"__DEFAULT_USERNAME__\" />
           </div>
           <div>
             <label for=\"password\">Password</label>
-            <input id=\"password\" name=\"password\" type=\"password\" value=\"s3cret-pass\" />
+            <input id=\"password\" name=\"password\" type=\"password\" value=\"__DEFAULT_PASSWORD__\" />
           </div>
           <button type=\"submit\">Use credentials</button>
         </form>
@@ -120,8 +120,8 @@ DASHBOARD_HTML = """<!doctype html>
 
     <script>
       const state = {
-        username: 'admin',
-        password: 's3cret-pass'
+        username: '__DEFAULT_USERNAME__',
+        password: '__DEFAULT_PASSWORD__'
       };
 
       function getAuthHeader() {
@@ -310,6 +310,12 @@ DASHBOARD_HTML = """<!doctype html>
 """
 
 
+def _dashboard_html() -> str:
+    username = os.getenv("EZ_WEBAPP_USERNAME", "admin")
+    password = os.getenv("EZ_WEBAPP_PASSWORD", "admin")
+    return DASHBOARD_HTML_TEMPLATE.replace("__DEFAULT_USERNAME__", username).replace("__DEFAULT_PASSWORD__", password)
+
+
 def require_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
     return verify_credentials(credentials)
 
@@ -404,11 +410,11 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     def root() -> HTMLResponse:
-        return HTMLResponse(DASHBOARD_HTML)
+        return HTMLResponse(_dashboard_html())
 
     @app.get("/dashboard")
     def dashboard() -> HTMLResponse:
-        return HTMLResponse(DASHBOARD_HTML)
+        return HTMLResponse(_dashboard_html())
 
     @app.get("/health")
     def health() -> dict[str, Any]:

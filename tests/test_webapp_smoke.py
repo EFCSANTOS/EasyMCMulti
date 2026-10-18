@@ -27,6 +27,15 @@ def test_dashboard_serves_html():
     assert "Dashboard" in response.text
 
 
+def test_dashboard_uses_runtime_auth_defaults(monkeypatch):
+    monkeypatch.setenv("EZ_WEBAPP_USERNAME", "admin")
+    monkeypatch.setenv("EZ_WEBAPP_PASSWORD", "admin")
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'value="admin"' in response.text
+    assert 'name="password" type="password" value="admin"' in response.text
+
+
 def test_console_history_endpoint_returns_messages():
     app.state.console_manager.publish("hello from history endpoint")
     response = client.get("/api/console", auth=("admin", "s3cret-pass"))
