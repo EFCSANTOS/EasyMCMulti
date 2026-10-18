@@ -6,6 +6,7 @@ import sys
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from core import config_store, downloaders
@@ -25,6 +26,193 @@ FALLBACK_VERSIONS = {
 
 security = HTTPBasic()
 
+DASHBOARD_HTML = """<!doctype html>
+<html lang=\"en\">
+  <head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>MZ Minecraft Server Dashboard</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 2rem; }
+      .wrap { max-width: 980px; margin: 0 auto; }
+      h1 { margin-bottom: 0.25rem; }
+      .card { background: #111827; border: 1px solid #334155; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+      .row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+      .row input, .row button, .row textarea { font: inherit; }
+      .row input, .row textarea { background: #0b1120; color: #e2e8f0; border: 1px solid #475569; border-radius: 8px; padding: 0.65rem 0.75rem; }
+      button { background: #2563eb; color: white; border: none; border-radius: 8px; padding: 0.7rem 1rem; cursor: pointer; }
+      button.secondary { background: #374151; }
+      button.danger { background: #dc2626; }
+      pre { white-space: pre-wrap; word-break: break-word; background: #020817; border-radius: 8px; padding: 1rem; min-height: 120px; }
+      label { display: block; margin-bottom: 0.45rem; color: #cbd5e1; }
+      .status { font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <div class=\"wrap\">
+      <h1>MZ Minecraft Server</h1>
+      <h2>Dashboard</h2>
+
+      <div class=\"card\">
+        <form id=\"auth-form\" class=\"row\">
+          <div>
+            <label for=\"username\">Username</label>
+            <input id=\"username\" name=\"username\" value=\"admin\" />
+          </div>
+          <div>
+            <label for=\"password\">Password</label>
+            <input id=\"password\" name=\"password\" type=\"password\" value=\"s3cret-pass\" />
+          </div>
+          <button type=\"submit\">Use credentials</button>
+        </form>
+      </div>
+
+      <div class=\"card\">
+        <div class=\"row\">
+          <button id=\"start-button\">Start server</button>
+          <button id=\"stop-button\" class=\"danger\">Stop server</button>
+        </div>
+      </div>
+
+      <div class=\"card\">
+        <div class=\"status\" id=\"status-panel\">Loading status...</div>
+      </div>
+
+      <div class=\"card\">
+        <form id=\"command-form\" class=\"row\">
+          <div style=\"flex:1\">
+            <label for=\"command-input\">Console command</label>
+            <input id=\"command-input\" name=\"command\" placeholder=\"say hello\" />
+          </div>
+          <button type=\"submit\">Send</button>
+        </form>
+      </div>
+
+      <div class=\"card\">
+        <h3>Console</h3>
+        <pre id=\"console-output\">Waiting for logs...</pre>
+      </div>
+    </div>
+
+    <script>
+      const state = {
+        username: 'admin',
+        password: 's3cret-pass'
+      };
+
+      function getAuthHeader() {
+        const user = state.username || '';
+        const pass = state.password || '';
+        return 'Basic ' + btoa(user + ':' + pass);
+      }
+
+      async function apiRequest(path, options = {}) {
+        const headers = Object.assign({}, options.headers || {});
+        headers.Authorization = getAuthHeader();
+        const response = await fetch(path, Object.assign({ headers }, options));
+        const text = await response.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch (error) { data = text; }
+        if (!response.ok) {
+          throw new Error(data && data.detail ? data.detail : 'Request failed');
+        }
+        return data;
+      }
+
+      function renderStatus(payload) {
+        const status = payload || {};
+        const lines = [
+          'State: ' + (status.state || 'unknown'),
+          'Operation: ' + (status.operation || 'unknown'),
+          'Loader: ' + (status.loader || 'unknown'),
+          'Version: ' + (status.version || 'unknown'),
+          'Players: ' + (status.players ?? 0),
+          'LAN: ' + (status.lan_address || 'unknown'),
+          'Public: ' + (status.public_address || 'unknown'),
+        ];
+        document.getElementById('status-panel').textContent = lines.join('\n');
+      }
+
+      function renderConsole(lines) {
+        const output = Array.isArray(lines) && lines.length ? lines.join('\n') : 'No console output yet.';
+        document.getElementById('console-output').textContent = output;
+      }
+
+      async function refreshStatus() {
+        try {
+          const payload = await apiRequest('/api/status');
+          renderStatus(payload);
+        } catch (error) {
+          document.getElementById('status-panel').textContent = 'Status unavailable: ' + error.message;
+        }
+      }
+
+      async function refreshConsole() {
+        try {
+          const payload = await apiRequest('/api/console');
+          renderConsole(payload && Array.isArray(payload.lines) ? payload.lines : []);
+        } catch (error) {
+          document.getElementById('console-output').textContent = 'Console unavailable: ' + error.message;
+        }
+      }
+
+      document.getElementById('auth-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        state.username = document.getElementById('username').value;
+        state.password = document.getElementById('password').value;
+        refreshStatus();
+        refreshConsole();
+      });
+
+      document.getElementById('start-button').addEventListener('click', async () => {
+        try {
+          await apiRequest('/api/server/start', { method: 'POST' });
+          await refreshStatus();
+          await refreshConsole();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      document.getElementById('stop-button').addEventListener('click', async () => {
+        try {
+          await apiRequest('/api/server/stop', { method: 'POST' });
+          await refreshStatus();
+          await refreshConsole();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      document.getElementById('command-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const input = document.getElementById('command-input');
+        const command = input.value.trim();
+        if (!command) return;
+        try {
+          await apiRequest('/api/server/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command })
+          });
+          input.value = '';
+          await refreshConsole();
+        } catch (error) {
+          alert(error.message);
+        }
+      });
+
+      refreshStatus();
+      refreshConsole();
+      setInterval(() => {
+        refreshStatus();
+        refreshConsole();
+      }, 2000);
+    </script>
+  </body>
+</html>
+"""
+
 
 def require_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
     return verify_credentials(credentials)
@@ -41,8 +229,12 @@ def create_app() -> FastAPI:
         app.state.console_manager.publish(line)
 
     @app.get("/")
-    def root() -> dict[str, str]:
-        return {"message": "MZ Minecraft Server web UI is starting."}
+    def root() -> HTMLResponse:
+        return HTMLResponse(DASHBOARD_HTML)
+
+    @app.get("/dashboard")
+    def dashboard() -> HTMLResponse:
+        return HTMLResponse(DASHBOARD_HTML)
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -54,6 +246,10 @@ def create_app() -> FastAPI:
         runtime.loader = config.get("loader", runtime.loader)
         runtime.version = config.get("version", runtime.version)
         return runtime.snapshot()
+
+    @app.get("/api/console")
+    def console_history(_: str = Depends(require_auth)) -> dict[str, Any]:
+        return {"lines": list(app.state.console_manager.history)}
 
     @app.get("/api/config")
     def get_config(_: str = Depends(require_auth)) -> dict[str, Any]:

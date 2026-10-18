@@ -17,6 +17,22 @@ def test_health_endpoint():
     assert response.json()["status"] == "ok"
 
 
+def test_dashboard_serves_html():
+    response = client.get("/", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    assert "MZ Minecraft Server" in response.text
+    assert "Dashboard" in response.text
+
+
+def test_console_history_endpoint_returns_messages():
+    app.state.console_manager.publish("hello from history endpoint")
+    response = client.get("/api/console", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert "lines" in payload
+    assert "hello from history endpoint" in payload["lines"]
+
+
 def test_status_requires_authentication():
     response = client.get("/api/status")
     assert response.status_code == 401
@@ -51,6 +67,7 @@ def test_websocket_console_requires_authentication():
 
 
 def test_websocket_console_streams_messages():
+    app.state.console_manager.history.clear()
     with client.websocket_connect(
         "/ws/console",
         headers={"Authorization": "Basic YWRtaW46czNjcmV0LXBhc3M="},
