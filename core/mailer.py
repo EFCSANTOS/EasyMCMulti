@@ -1,6 +1,6 @@
 """Envoi d'e-mail automatique via SMTP (pour les rapports de crash).
 
-Les identifiants sont stockes LOCALEMENT (MZ_Server_Data/mail_config.json), jamais dans
+Les identifiants sont stockes LOCALEMENT (EZ_Server_Data/mail_config.json), jamais dans
 le code ni le repo. Sans identifiants, l'envoi auto est simplement desactive (fallback
 sur l'ouverture du client mail dans crash_reporter).
 

@@ -1,6 +1,6 @@
 """Emplacement des dossiers de donnees.
 
-Tout est range dans un dossier "MZ_Server_Data" place a cote du .exe
+Tout est range dans un dossier "EZ_Server_Data" place a cote du .exe
 (ou a la racine du projet quand on lance depuis les sources).
 Comme ca, copier le .exe sur un autre PC suffit : il recree tout au 1er lancement.
 """
@@ -15,7 +15,7 @@ def base_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-DATA_DIR = os.path.join(base_dir(), "MZ_Server_Data")
+DATA_DIR = os.path.join(base_dir(), "EZ_Server_Data")
 JAVA_DIR = os.path.join(DATA_DIR, "java")
 SERVERS_DIR = os.path.join(DATA_DIR, "servers")
 

@@ -1,6 +1,6 @@
 """Telechargement automatique de la bonne version de Java (Eclipse Temurin / Adoptium).
 
-L'utilisateur n'a RIEN a installer : on telecharge un JRE portable dans MZ_Server_Data/java
+L'utilisateur n'a RIEN a installer : on telecharge un JRE portable dans EZ_Server_Data/java
 et on l'utilise directement. Chaque version de Minecraft a besoin d'un Java precis.
 """
 import os

@@ -1,1 +1,1 @@
-# Package coeur du launcher MZ Minecraft Server
+# Package coeur du launcher EZ Minecraft Server

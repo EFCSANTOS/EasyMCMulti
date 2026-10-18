@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EZ Minecraft Server Login</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #020817;
+        --panel: #0f172a;
+        --border: #334155;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --primary: #38bdf8;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, #020817 0%, #0f172a 100%);
+        color: var(--text);
+      }
+      .panel {
+        width: min(420px, calc(100vw - 2rem));
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 2rem;
+        box-shadow: 0 20px 40px rgba(15, 23, 42, 0.45);
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: 2rem;
+      }
+      p {
+        margin: 0 0 1.25rem;
+        color: var(--muted);
+      }
+      label {
+        display: block;
+        color: var(--muted);
+        margin-bottom: 0.35rem;
+      }
+      input {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #0b1120;
+        color: var(--text);
+        padding: 0.8rem 0.9rem;
+        font: inherit;
+        margin-bottom: 1rem;
+      }
+      input:focus {
+        outline: 2px solid rgba(56, 189, 248, 0.4);
+        border-color: var(--primary);
+      }
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 10px;
+        background: linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%);
+        color: white;
+        padding: 0.9rem 1rem;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+      }
+      .error {
+        min-height: 1.2rem;
+        margin-top: 0.75rem;
+        color: #fca5a5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <h1>EZ Minecraft Server</h1>
+      <p>Sign in to access the management dashboard.</p>
+      <form id="login-form">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" required />
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required />
+
+        <button type="submit">Sign in</button>
+      </form>
+      <div id="error-message" class="error" aria-live="polite"></div>
+    </div>
+
+    <script>
+      function buildBasicAuth(username, password) {
+        return 'Basic ' + btoa(username + ':' + password);
+      }
+
+      function showError(message) {
+        const panel = document.getElementById('error-message');
+        panel.textContent = message || '';
+      }
+
+      window.addEventListener('load', () => {
+        const username = sessionStorage.getItem('ez_auth_username');
+        const password = sessionStorage.getItem('ez_auth_password');
+        if (username && password) {
+          window.location.href = '/dashboard';
+        }
+      });
+
+      document.getElementById('login-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value;
+        if (!username || !password) {
+          showError('Both username and password are required.');
+          return;
+        }
+
+        try {
+          const response = await fetch('/api/status', {
+            headers: {
+              Authorization: buildBasicAuth(username, password),
+            },
+          });
+
+          if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || 'Authentication failed.');
+          }
+
+          sessionStorage.setItem('ez_auth_username', username);
+          sessionStorage.setItem('ez_auth_password', password);
+          window.location.href = '/dashboard';
+        } catch (error) {
+          showError(error.message || 'Authentication failed.');
+        }
+      });
+    </script>
+  </body>
+</html>
