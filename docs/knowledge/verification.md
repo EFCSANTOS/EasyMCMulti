@@ -3,41 +3,63 @@
 ## Fetch status
 | File | Status |
 |---|---|
+| webapp/app.py | **Fully read** (both blob and raw) |
+| webapp/auth.py, state.py, websocket_manager.py | Fully read |
 | core/server_process.py | Fully read |
-| webapp/state.py | Fully read |
-| webapp/auth.py | Fully read |
-| webapp/websocket_manager.py | Fully read |
 | tests/test_webapp_smoke.py | Fully read |
-| webapp/app.py | **Truncated** — cut inside `render_dashboard_page` HTML (~`setup`/`advanced`); route decorators and most handlers not captured |
+| core/config_store.py, downloaders.py, java_manager.py, modrinth.py, netinfo.py, paths.py, playit.py | **Not read** — signatures inferred from `app.py` calls |
 
-## Claims requiring re-check against `webapp/app.py`
-- Exact route paths/methods for `/api/status`, `/api/config` (GET/PUT), `/api/server/{start,stop,restart,command}`,
-  `/api/console`, `/api/backups` (GET/POST/restore), `/api/mods` (GET/POST/upload/install),
-  `/api/admin/*`, `/api/playit/{status,config,start,stop}`, `/api/system/metrics`,
-  `/api/versions/{loader}`, `/ws/console`, `/dashboard/{section}`, `/health`.
-- Whether `/` redirects to `/dashboard/overview` (`RedirectResponse` imported but target unseen).
-- How `runtime.state` is set to `"running"`/`"stopped"`; `on_exit` wiring to `RuntimeState`.
-- `netinfo` usage for `lan_address` / `public_address`.
-- `playit._agent_binary_name` mapping table (only linux cases tested).
-- `paths.server_dir` layout.
-- `config_store.save` signature.
-- `downloaders.prepare` / `launch_args` signatures (inferred from test monkeypatch only).
-- `modrinth.install` signature (inferred from monkeypatch).
-- `crash_reporter`, `mailer`, `sysinfo` — unreferenced in inspected code; purpose unknown.
+## Verified route table
+UI: `/`, `/login`, `/dashboard`, `/dashboard/{section}`, `/dashboard.css`, `/dashboard.js`.
+Health: `/health`.
+Metrics aliases: `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/metrics`.
+Status/console: `/api/status`, `/api/console`.
+Config: `GET/PUT /api/config`.
+Versions: `/api/versions/{loader}`.
+Server: `POST /api/server/{create,start,stop,restart,command,backup}`.
+Backups: `GET /api/server/backups`, `POST /api/server/backups/restore`, `GET /api/backups`,
+`POST /api/backups/restore`.
+Mods: `GET /api/server/mods`, `POST /api/server/mods/upload`, `GET /api/mods`.
+Admin: `POST /api/admin/{action}`.
+Modrinth: `GET /api/modrinth/search`, `POST /api/modrinth/install`.
+PlayIt: `GET /api/playit/status`, `POST /api/playit/{configure,start,stop}`, `GET /api/playit/config`.
+WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 
 ## Documentation vs implementation conflicts
-1. README says "Basic auth is enabled … credentials must be set through environment variables" —
-   consistent with `auth.py`. But `test_dashboard_uses_runtime_auth_defaults` asserts the dashboard
-   HTML contains `value="admin"` and a password input with `value="admin"`, i.e. credentials are
-   rendered into the page. This conflicts with the security note. **Needs confirmation in `app.py`.**
-2. README lists `webapp/state.py` but describes "config persistence for loader, version, RAM" —
-   `RuntimeState` is in-memory only; persistence is `core/config_store`. Wording imprecise.
-3. README "server creation, start, stop, and command routes" — creation route name not seen
-   (`/api/server/create`?); only start/stop/command verified by tests.
+1. **Credentials in dashboard HTML.** `render_dashboard_page` emits
+   `<form id="legacy-auth-hidden" style="display:none;"><input name="username" value="admin" />
+   <input name="password" value="admin" /></form>`. `test_dashboard_uses_runtime_auth_defaults`
+   asserts this. README says credentials come from env vars and app is LAN-only. This is a real
+   inconsistency: real creds are not rendered (only literal `admin`), but shipping default
+   credentials in markup is a security smell and contradicts the README's security note.
+2. **Restart race.** `restart_server` calls `stop_server` (sets `"stopping"`, sends `"stop"`) then
+   immediately `start_server`, which checks `runtime.process.is_running()`. Since `stop()` only
+   writes to stdin, the process is likely still running → `start_server` returns
+   `"Server already running."` So restart is effectively a stop. **Behavioral bug** (verified from code).
+3. **README "create server"** — actual route is `POST /api/server/create` (README doesn't name it).
+4. **README "config persistence for loader, version, RAM"** — full 20-key schema exists; README
+   understates.
+5. **`/api/status` mutates runtime** (sets loader/version/lan/public/playit) on a GET; side-effectful
+   read. Not a doc conflict but worth noting.
+6. **Admin `op`/`deop`/`kick`/`ban` without player** produce commands `"op"`, `"deop"`, `"kick"`,
+   `"ban"` and then 400 via `endswith` checks — the `endswith("op")` check also matches `"deop"`,
+   so deop-without-player is caught; but `"op"` also matches `"deop"` suffix logic — works by accident.
 
-## Unresolved
-- Full `webapp/app.py` (largest, most central file).
-- All `core/` modules except `server_process.py`.
-- `requirements.txt` exact versions.
-- CI configuration, license terms beyond "All rights reserved".
-- Whether dashboard HTML embeds credentials intentionally (dev convenience) or is a bug.
+## Unverified / needs inspection
+- `core/config_store.py`: `load()`/`save()` signature, file location, error behavior.
+- `core/downloaders.py`: `prepare`, `launch_args`, `list_versions` signatures/behavior.
+- `core/java_manager.py`: `ensure_java`, `required_java`.
+- `core/modrinth.py`: `search`, `install` return types.
+- `core/netinfo.py`: `lan_ip`, `public_ip` (network calls? caching?).
+- `core/paths.py`: `server_dir` layout (base dir, sanitization).
+- `core/playit.py`: `claim_interactive`, `ensure_agent`, `ensure_tunnel`, `PlayitAgent`,
+  `_agent_binary_name`, `load_config`/`save_config` format.
+- `crash_reporter.py`, `mailer.py`, `sysinfo.py`: purpose (unreferenced by `app.py`).
+- `webapp/templates/login.html`, `webapp/static/css/dashboard.css`, `webapp/static/js/dashboard.js`
+  (referenced, not read).
+- `requirements.txt` versions; CI; license terms beyond "All rights reserved".
+
+## Unresolved questions
+- Is the hidden `admin`/`admin` form intentional (dev convenience) or leftover?
+- Intended restart semantics (should it wait for exit)?
+- Are `crash_reporter`/`mailer`/`sysinfo` dead code or used by launcher entry points not inspected?
