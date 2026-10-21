@@ -31,17 +31,37 @@ public_address, playit_*, playit_agent, process, `console_history` (deque 2000),
 `WebSocketManager`: `history` deque(2000), per-client `asyncio.Queue(250)`, `connect` replays last
 500 lines, `publish` thread-safe via `loop.call_soon_threadsafe`, `disconnect` cancels sender.
 
-### `core/`
-- `server_process.py` — `accept_eula`, `read_properties`, `update_properties`, `ServerProcess`.
-- `config_store.py` — `load()`, `save(config)` (called by `PUT /api/config`, `/api/server/create`, `/api/server/start`).
-- `downloaders.py` — `prepare`, `launch_args`, `list_versions`.
-- `java_manager.py` — `ensure_java`, `required_java`.
-- `modrinth.py` — `search`, `install`.
-- `playit.py` — `load_config`, `save_config`, `ensure_agent`, `ensure_tunnel`, `claim_interactive`,
-  `PlayitAgent`, `_agent_binary_name`.
-- `netinfo.py` — `lan_ip`, `public_ip`.
-- `paths.py` — `server_dir(loader, version)`.
-- Not inspected: `crash_reporter.py`, `mailer.py`, `sysinfo.py` (no imports from `app.py`).
+### `core/` (synchronous, no FastAPI imports; inherited from the former desktop launcher)
+- `paths.py` — `DATA_DIR`/`JAVA_DIR`/`SERVERS_DIR`, `ensure_dirs`, `server_dir(loader, version)`
+  (creates dir). Layout: data-model.md.
+- `config_store.py` — `load()` → dict (`{}` on missing/invalid JSON); `save(data)` swallows `OSError`.
+- `server_process.py` — `accept_eula`, `update_properties`, `ServerProcess(args, cwd, on_output, on_exit)`
+  with `start`/`send`/`stop` (sends `"stop"`)/`kill`/`is_running`.
+- `java_manager.py` — `required_java(mc_version)`, `ensure_java(feature, log, progress)` → `java.exe` path.
+- `downloaders.py` — `list_versions(loader, include_snapshots)`, `prepare(loader, version, sdir, java_exe,
+  log, progress)`, `launch_args(loader, java_exe, sdir, ram_mb)`, `download(url, dest, …)` (writes
+  `.part` then `os.replace`). `JAR_LOADERS`=vanilla/paper/fabric, `INSTALLER_LOADERS`=forge/neoforge.
+- `modrinth.py` — `search(query, loader, game_version, limit)` → `[{title,slug,description,downloads}]`;
+  `install(project_ref, loader, game_version, dest_dir, log)` → filename (newest compatible version's
+  primary file; `resolve_project_slug` accepts slug or ID).
+- `playit.py` — claim/tunnel API client + `PlayitAgent` daemon wrapper (workflows.md §14).
+- `netinfo.py` — `lan_ip()` (UDP "connect" to 8.8.8.8, fallback `127.0.0.1`), `public_ip()`
+  (`api.ipify.org`, 10 s timeout, returns `"indisponible"` on error). No caching.
+- **Unused by the web app** (desktop-launcher leftovers; `crash_reporter.install` targets a Tk
+  `root.report_callback_exception`): `crash_reporter.py` (mailto/SMTP crash reports to hard-coded
+  `DEV_EMAIL`), `mailer.py` (SMTP via `EZ_Server_Data/mail_config.json`), `sysinfo.py` (RAM
+  recommendations), `netinfo.port_in_use/pids_on_port/free_port`, `paths.list_servers/content_folder`,
+  `server_process.read_properties`, `ServerProcess.kill`.
+- `requirements.txt`: `jinja2` and `itsdangerous` are not imported anywhere; `python-multipart` is
+  needed implicitly by FastAPI `File` uploads.
+
+### Frontend (`webapp/static/js/dashboard.js`, `webapp/templates/login.html`)
+- Plain JS, no framework/build. `login.html` checks creds against `GET /api/status`, stores them in
+  `sessionStorage`; `dashboard.js::boot` redirects to `/login` if absent, then loads config, status,
+  backups, mods and console once. Only metrics poll (`setInterval`, 2 s, probes alias list).
+- All calls use `fetchJson` with `Authorization: Basic` from `buildBasicAuth`.
+- `webapp/templates/dashboard.html` is unused (pages come from `render_dashboard_page`).
+- Known JS/API mismatches: verification.md.
 
 ## Control flow (verified)
 1. Uvicorn imports `webapp.app:app` → `create_app()` → `validate_auth_settings()` → attach
@@ -60,3 +80,12 @@ public_address, playit_*, playit_agent, process, `console_history` (deque 2000),
 - PlayIt agent subprocess.
 - Modrinth HTTP API.
 - Mojang/Paper/Fabric/Forge/NeoForge download endpoints.
+- Endpoint constants: `downloaders.VANILLA_MANIFEST`, `PAPER_API` (v2), `FABRIC_META`, `FORGE_PROMOS`/
+  `FORGE_MAVEN`, `NEOFORGE_VERSIONS`/`NEOFORGE_MAVEN`; `java_manager.ADOPTIUM`; `modrinth.API`;
+  `playit.API_BASE`, `playit.RELEASES_API` (GitHub latest release); `api.ipify.org`.
+
+## Platform constraints
+- Java auto-download is **Windows x64 only**: `java_manager.ADOPTIUM` hard-codes `windows/x64`, and
+  `find_java_exe` looks for `java.exe`. PlayIt agent naming supports Linux, but on non-Windows hosts
+  a Windows JRE is downloaded and the install/launch subprocess cannot execute it.
+- Modern Forge/NeoForge launch relies on `libraries/**/win_args.txt` (`downloaders._find_args_file`).

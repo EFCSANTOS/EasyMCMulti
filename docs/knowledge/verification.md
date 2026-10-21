@@ -1,13 +1,9 @@
 # Verification & Gaps
 
 ## Fetch status
-| File | Status |
-|---|---|
-| webapp/app.py | **Fully read** (both blob and raw) |
-| webapp/auth.py, state.py, websocket_manager.py | Fully read |
-| core/server_process.py | Fully read |
-| tests/test_webapp_smoke.py | Fully read |
-| core/config_store.py, downloaders.py, java_manager.py, modrinth.py, netinfo.py, paths.py, playit.py | **Not read** — signatures inferred from `app.py` calls |
+Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/dashboard.js`, `templates/*.html`),
+`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 22 passed.
+Not audited line-by-line: `webapp/static/css/dashboard.css` (presentation only).
 
 ## Verified route table
 UI: `/`, `/login`, `/dashboard`, `/dashboard/{section}`, `/dashboard.css`, `/dashboard.js`.
@@ -44,22 +40,43 @@ WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 6. **Admin `op`/`deop`/`kick`/`ban` without player** produce commands `"op"`, `"deop"`, `"kick"`,
    `"ban"` and then 400 via `endswith` checks — the `endswith("op")` check also matches `"deop"`,
    so deop-without-player is caught; but `"op"` also matches `"deop"` suffix logic — works by accident.
+7. **README** lists `run_debug.bat` (absent from repo) and omits `webapp/static/`, `webapp/templates/`, `tests/`.
+
+## Frontend ↔ API mismatches (verified defects)
+`webapp/static/js/dashboard.js` vs `webapp/app.py`:
+1. **Mod upload always fails.** `uploadMods` POSTs to `/api/mods/upload`; route is
+   `/api/server/mods/upload` (`app.py::upload_mods`). No such alias exists.
+2. **Three settings never reach `server.properties`.** `saveConfigFromForm` sends `whitelist`,
+   `command_blocks`, `seed`; backend reads `white_list`, `enable_command_block`, `level_seed`
+   (`_server_properties_from_config`). Wrong keys are persisted as extra config keys and ignored.
+   `loadConfig` also reads `config.seed`.
+3. **Save config only works on `/` (overview).** `saveConfigFromForm` dereferences the advanced
+   inputs (`online-mode`, `motd-input`, …) unguarded; `/dashboard/setup` has `setup-form` but not
+   those inputs → `TypeError` before the request is sent. `/dashboard/advanced` has the inputs but no
+   save control.
+4. **Browser never uses `/ws/console`.** No `WebSocket` in `dashboard.js`; console is fetched once at
+   `boot()` via `refreshConsole()` (`GET /api/console`) and not polled. Browsers cannot set an
+   `Authorization` header on a WebSocket, so the WS route as implemented is only usable by non-browser
+   clients (and the test).
+5. **Hidden `#legacy-auth-hidden` form is dead markup** — nothing in `dashboard.js` reads it. Real
+   browser auth: `login.html` validates via `GET /api/status`, then stores username/password in
+   `sessionStorage` (`ez_auth_username`/`ez_auth_password`); `dashboard.js::buildBasicAuth` sends them
+   on every call. `webapp/templates/dashboard.html` duplicates the inline page and is not served.
+6. **`/api/playit/status` reports `"running"`** when the saved config has secret + address, even if no
+   agent process is running (`app.py::playit_status`).
+
+## Security findings (not covered by README security note)
+- `GET /api/playit/config` returns `playit_config.json` verbatim, **including the PlayIt secret key**.
+- UI routes (`/`, `/login`, `/dashboard/*`, `/dashboard.{css,js}`, `/health`) are unauthenticated;
+  only `/api/*` and `/ws/console` check credentials.
+- `POST /api/server/backups/restore` accepts any existing filesystem path (`backup_path` or `name`) and
+  calls `ZipFile.extractall(target_dir)` without member validation (zip-slip possible).
+- Credentials compared with `!=` (`auth.py::verify_credentials`), not `secrets.compare_digest`.
+- `run.bat` hard-codes `EZ_WEBAPP_USERNAME/PASSWORD=admin`.
 
 ## Unverified / needs inspection
-- `core/config_store.py`: `load()`/`save()` signature, file location, error behavior.
-- `core/downloaders.py`: `prepare`, `launch_args`, `list_versions` signatures/behavior.
-- `core/java_manager.py`: `ensure_java`, `required_java`.
-- `core/modrinth.py`: `search`, `install` return types.
-- `core/netinfo.py`: `lan_ip`, `public_ip` (network calls? caching?).
-- `core/paths.py`: `server_dir` layout (base dir, sanitization).
-- `core/playit.py`: `claim_interactive`, `ensure_agent`, `ensure_tunnel`, `PlayitAgent`,
-  `_agent_binary_name`, `load_config`/`save_config` format.
-- `crash_reporter.py`, `mailer.py`, `sysinfo.py`: purpose (unreferenced by `app.py`).
-- `webapp/templates/login.html`, `webapp/static/css/dashboard.css`, `webapp/static/js/dashboard.js`
-  (referenced, not read).
-- `requirements.txt` versions; CI; license terms beyond "All rights reserved".
+- License terms beyond "All rights reserved".
 
 ## Unresolved questions
-- Is the hidden `admin`/`admin` form intentional (dev convenience) or leftover?
 - Intended restart semantics (should it wait for exit)?
-- Are `crash_reporter`/`mailer`/`sysinfo` dead code or used by launcher entry points not inspected?
+- Should `test_dashboard_uses_runtime_auth_defaults` keep pinning the dead hidden form?
