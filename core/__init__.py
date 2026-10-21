@@ -1,1 +1,1 @@
-# Package coeur du launcher EZ Minecraft Server
+# Core package of the EZ Minecraft Server launcher

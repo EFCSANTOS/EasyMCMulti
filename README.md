@@ -23,11 +23,11 @@ The browser UI is designed for local network use. It is not intended to be expos
 
 The new version is functional and includes:
 
-- a web dashboard at `/`
+- a web dashboard at `/` with separate pages per section
 - auth-protected API routes
-- config persistence for loader, version, and RAM
-- server creation, start, stop, and command routes
-- live console output via websocket
+- config persistence for loader, version, RAM, port and all `server.properties` settings
+- server creation, start, stop, restart, and command routes
+- live console output (polled by the dashboard; websocket available for scripted clients)
 - status reporting for LAN/public addresses and PlayIt metadata
 - real install flow before launch instead of demo fallback
 
@@ -104,14 +104,16 @@ The app exposes a browser interface with:
 
 - loader selection: vanilla, paper, fabric, forge, neoforge
 - version list for the selected loader
-- RAM configuration
-- save config
-- create server
-- start and stop server
-- console command sending
+- RAM and port configuration
+- advanced server settings (MOTD, game mode, difficulty, world type, seed, PvP, whitelist, …)
+- save config and create server
+- start, stop, and restart server
+- console command sending and admin shortcuts (op, kick, ban, time, weather, save)
 - live console output
-- LAN/public address display
-- PlayIt status reporting
+- world backups and restore
+- mods/plugins: Modrinth search and install, `.jar` upload (not available for vanilla)
+- PlayIt tunnel setup, start, and stop
+- LAN/public address display, online player list, and live CPU/RAM charts
 
 ---
 
@@ -137,27 +139,30 @@ This is handled in `webapp/app.py` and the lower-level logic in `core/`.
 ```text
 core/
   config_store.py
-  crash_reporter.py
   downloaders.py
   java_manager.py
-  mailer.py
   modrinth.py
   netinfo.py
   paths.py
   playit.py
   server_process.py
-  sysinfo.py
 
 webapp/
   app.py
   auth.py
   state.py
   websocket_manager.py
+  static/        dashboard.css, dashboard.js
+  templates/     login.html
+
+tests/
+  test_webapp_smoke.py
+
+docs/knowledge/  maintainer knowledge base
 
 requirements.txt
 README.md
 run.bat
-run_debug.bat
 ```
 
 ---
@@ -167,7 +172,10 @@ run_debug.bat
 This app is intended for local or LAN use.
 
 - Basic auth is enabled for the web app
-- credentials must be set through environment variables
+- credentials must be set through environment variables (`run.bat` prompts for them when unset)
+- the PlayIt secret key never leaves the host (`/api/playit/config` returns only the address)
+- backup restore only accepts the current server's own backups and only extracts `world/`
+- the dashboard pages themselves are public shells; all data and actions require auth
 - avoid exposing the port to the public internet without a proper firewall and reverse-proxy setup
 
 ---
@@ -180,7 +188,7 @@ Run the smoke suite:
 .venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py
 ```
 
-This verifies the web dashboard, status endpoints, config persistence, console websocket, and lifecycle routes.
+This verifies the web dashboard, status endpoints, config persistence, console websocket, lifecycle routes, and that every API call made by `dashboard.js` maps to a real route. Tests run against a temporary data folder and do not touch `EZ_Server_Data/`.
 
 ---
 

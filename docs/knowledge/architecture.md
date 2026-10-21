@@ -15,16 +15,20 @@
 - Metrics: `_system_metrics_snapshot`.
 - Paths/install: `_server_dir_for_config`, `_server_is_installed`, `ensure_server_installed`.
 - Console: `append_console_line`, `WebSocketManager`.
-- Dashboard: `render_dashboard_page(section)` (7 sections: overview, setup, advanced, mods, remote, backups, console).
-- PlayIt exit hook: `_playit_on_exit`.
+- Dashboard: module-level `_render_dashboard_page(section)`; pages (overview, setup, advanced, mods,
+  remote, backups, console) are tuples of `_SECTION_*` HTML constants in `_DASHBOARD_PAGES`.
+- PlayIt: `_playit_on_exit`, `_playit_state(runtime, cfg)` (running only if the agent process is alive).
+- Restart: `_wait_for_exit(process, timeout)`, `RESTART_STOP_TIMEOUT_SEC`.
+- Mods folder: `_content_dir_for_config` → `paths.content_folder` (400 for vanilla).
 
 ### `webapp/auth.py`
 `validate_auth_settings`, `get_expected_credentials`, `verify_credentials` (HTTPBasic),
 `verify_basic_auth_header` (manual Base64 for WS; requires `Basic user:pass`).
 
 ### `webapp/state.py`
-`RuntimeState` dataclass: loader, version, state, operation, install_*, players, lan_address,
-public_address, playit_*, playit_agent, process, `console_history` (deque 2000), `lock` (RLock);
+`RuntimeState` dataclass: loader, version, state, operation, install_*, `online_players` (set;
+`track_player_event(line)` / `clear_players()`), lan_address,
+public_address, playit_*, playit_agent, process, `lock` (RLock);
 `snapshot()` returns JSON-safe dict.
 
 ### `webapp/websocket_manager.py`
@@ -33,10 +37,12 @@ public_address, playit_*, playit_agent, process, `console_history` (deque 2000),
 
 ### `core/` (synchronous, no FastAPI imports; inherited from the former desktop launcher)
 - `paths.py` — `DATA_DIR`/`JAVA_DIR`/`SERVERS_DIR`, `ensure_dirs`, `server_dir(loader, version)`
-  (creates dir). Layout: data-model.md.
+  (creates dir), `content_folder(loader, sdir)` (paper → `plugins/`, fabric/forge/neoforge → `mods/`,
+  vanilla → None). Layout: data-model.md.
 - `config_store.py` — `load()` → dict (`{}` on missing/invalid JSON); `save(data)` swallows `OSError`.
-- `server_process.py` — `accept_eula`, `update_properties`, `ServerProcess(args, cwd, on_output, on_exit)`
-  with `start`/`send`/`stop` (sends `"stop"`)/`kill`/`is_running`.
+- `server_process.py` — `accept_eula`, `read_properties`, `update_properties` (read-merge-rewrite via
+  `read_properties`), `ServerProcess(args, cwd, on_output, on_exit)` with `start`/`send`/`stop` (sends
+  `"stop"`)/`kill` (used by restart on timeout)/`is_running`.
 - `java_manager.py` — `required_java(mc_version)`, `ensure_java(feature, log, progress)` → `java.exe` path.
 - `downloaders.py` — `list_versions(loader, include_snapshots)`, `prepare(loader, version, sdir, java_exe,
   log, progress)`, `launch_args(loader, java_exe, sdir, ram_mb)`, `download(url, dest, …)` (writes
@@ -46,22 +52,25 @@ public_address, playit_*, playit_agent, process, `console_history` (deque 2000),
   primary file; `resolve_project_slug` accepts slug or ID).
 - `playit.py` — claim/tunnel API client + `PlayitAgent` daemon wrapper (workflows.md §14).
 - `netinfo.py` — `lan_ip()` (UDP "connect" to 8.8.8.8, fallback `127.0.0.1`), `public_ip()`
-  (`api.ipify.org`, 10 s timeout, returns `"indisponible"` on error). No caching.
-- **Unused by the web app** (desktop-launcher leftovers; `crash_reporter.install` targets a Tk
-  `root.report_callback_exception`): `crash_reporter.py` (mailto/SMTP crash reports to hard-coded
-  `DEV_EMAIL`), `mailer.py` (SMTP via `EZ_Server_Data/mail_config.json`), `sysinfo.py` (RAM
-  recommendations), `netinfo.port_in_use/pids_on_port/free_port`, `paths.list_servers/content_folder`,
-  `server_process.read_properties`, `ServerProcess.kill`.
+  (`api.ipify.org`, 10 s timeout, returns `"unavailable"` on error; successful lookups cached for
+  `PUBLIC_IP_TTL_SEC` = 300 s because the dashboard polls `/api/status`).
+- Desktop-launcher leftovers (`crash_reporter.py`, `mailer.py`, `sysinfo.py`,
+  `webapp/templates/dashboard.html`) and dead helpers (`netinfo.port_in_use/pids_on_port/free_port`,
+  `paths.list_servers`, `playit.is_configured`, `playit.TUNNELS_URL`) were deleted 2026-10-22.
+  Everything in `core/` is now used by the web app.
 - `requirements.txt`: `jinja2` and `itsdangerous` are not imported anywhere; `python-multipart` is
   needed implicitly by FastAPI `File` uploads.
 
 ### Frontend (`webapp/static/js/dashboard.js`, `webapp/templates/login.html`)
 - Plain JS, no framework/build. `login.html` checks creds against `GET /api/status`, stores them in
-  `sessionStorage`; `dashboard.js::boot` redirects to `/login` if absent, then loads config, status,
-  backups, mods and console once. Only metrics poll (`setInterval`, 2 s, probes alias list).
-- All calls use `fetchJson` with `Authorization: Basic` from `buildBasicAuth`.
-- `webapp/templates/dashboard.html` is unused (pages come from `render_dashboard_page`).
-- Known JS/API mismatches: verification.md.
+  `sessionStorage`; `dashboard.js::boot` redirects to `/login` if absent, then binds events, loads
+  config (+ `/api/versions/{loader}`), status, backups, mods and console. Each loader skips its fetch
+  when its elements are not on the current page.
+- Polling: metrics 2 s (overview only, probes alias list), console 2 s (`CONSOLE_POLL_MS`, pages with
+  `#console-output`), status 10 s (`STATUS_POLL_MS`).
+- All calls use `fetchJson` with `Authorization: Basic` from `buildBasicAuth` (upload uses raw `fetch`
+  with `FormData`).
+- GUI feature status: verification.md.
 
 ## Control flow (verified)
 1. Uvicorn imports `webapp.app:app` → `create_app()` → `validate_auth_settings()` → attach

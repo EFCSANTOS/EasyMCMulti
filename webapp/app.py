@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import glob
 import os
-import sys
 import time
+import zipfile
 from typing import Any
 
 try:
@@ -12,7 +12,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - installed in project venv for runtime metrics
     psutil = None
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
@@ -23,6 +23,7 @@ from webapp.state import RuntimeState
 from webapp.websocket_manager import WebSocketManager
 
 KNOWN_LOADERS = ("vanilla", "paper", "fabric", "forge", "neoforge")
+RESTART_STOP_TIMEOUT_SEC = 60
 FALLBACK_VERSIONS = {
     "vanilla": ["1.21.7", "1.21.6", "1.21.5", "1.21.4", "1.21.3", "1.21.2", "1.21.1", "1.20.4"],
     "paper": ["1.21.7", "1.21.6", "1.21.4", "1.21.1", "1.20.4"],
@@ -147,6 +148,46 @@ def _playit_on_exit(console_manager: Any, runtime: RuntimeState, code: int) -> N
     console_manager.publish(f"[playit] exited with code {code}")
 
 
+def _playit_state(runtime: RuntimeState, cfg: dict[str, Any]) -> str:
+    if runtime.playit_agent is not None and runtime.playit_agent.is_running():
+        return "running"
+    return "configured" if cfg.get("secret") else "not-configured"
+
+
+def _is_backup_name(name: str) -> bool:
+    return name.startswith("world-backup-") and name.endswith(".zip")
+
+
+def _is_safe_world_member(member: str) -> bool:
+    """True if a zip entry stays inside world/ (no absolute paths, drive letters or '..')."""
+    normalized = member.replace("\\", "/")
+    parts = normalized.split("/")
+    return (
+        parts[0] == "world"
+        and not normalized.startswith("/")
+        and ":" not in parts[0]
+        and ".." not in parts
+    )
+
+
+def _wait_for_exit(process: Any, timeout_sec: float) -> bool:
+    deadline = time.monotonic() + timeout_sec
+    while process.is_running():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
+    return True
+
+
+def _content_dir_for_config(config: dict[str, Any]) -> str:
+    loader = str(config.get("loader", "vanilla"))
+    folder = paths.content_folder(loader, _server_dir_for_config(config))
+    if folder is None:
+        raise HTTPException(status_code=400, detail=f"The {loader} loader does not support mods or plugins.")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
 def _server_is_installed(target_dir: str, loader: str) -> bool:
     if loader in {"vanilla", "paper", "fabric"}:
         return os.path.exists(os.path.join(target_dir, "server.jar"))
@@ -160,98 +201,82 @@ def _server_is_installed(target_dir: str, loader: str) -> bool:
     return False
 
 
-_APP_START_TIME = time.time()
+_DASHBOARD_NAVIGATION = (
+    ("overview", "Overview"),
+    ("setup", "Setup"),
+    ("advanced", "Advanced"),
+    ("mods", "Mods"),
+    ("remote", "Remote"),
+    ("backups", "Backups"),
+    ("console", "Console"),
+)
 
-
-def create_app() -> FastAPI:
-    validate_auth_settings()
-    app = FastAPI(title="EZ Minecraft Server Launcher", version="0.1.0")
-    runtime = RuntimeState()
-    app.state.runtime = runtime
-    app.state.console_manager = WebSocketManager()
-
-    def append_console_line(line: str) -> None:
-        app.state.console_manager.publish(line)
-
-    def update_install_state(status: str, progress: float, message: str) -> None:
-        runtime.install_status = status
-        runtime.install_progress = max(0.0, min(float(progress), 100.0))
-        runtime.install_message = message
-
-    def render_dashboard_page(section: str) -> HTMLResponse:
-        navigation = (
-            ("overview", "Overview"),
-            ("setup", "Setup"),
-            ("advanced", "Advanced"),
-            ("mods", "Mods"),
-            ("remote", "Remote"),
-            ("backups", "Backups"),
-            ("console", "Console"),
-        )
-        normalized = section.strip("/").lower()
-        pages: dict[str, str] = {
-            "overview": """
-        <section id=\"overview\" class=\"card hero\">
-          <div class=\"hero-text\">
+_SECTION_HERO = """
+        <section id="overview" class="card hero">
+          <div class="hero-text">
             <h1>Welcome back 👋</h1>
             <p>Manage your Minecraft server without leaving the dashboard.</p>
           </div>
-          <div class=\"hero-status\">
-            <div class=\"status-dot\" id=\"server-dot\"></div>
+          <div class="hero-status">
+            <div class="status-dot" id="server-dot"></div>
             <div>
-              <div class=\"status-label\">Server status</div>
-              <div id=\"status-panel\" class=\"status-value\">Loading...</div>
+              <div class="status-label">Server status</div>
+              <div id="status-panel" class="status-value">Loading...</div>
             </div>
           </div>
         </section>
+"""
 
-        <section id=\"metrics\" class=\"card metrics-panel\">
-          <div class=\"card-header\">
+_SECTION_METRICS = """
+        <section id="metrics" class="card metrics-panel">
+          <div class="card-header">
             <h2>System resources</h2>
-            <span id=\"metrics-badge\" class=\"badge badge-live\">● live</span>
+            <span id="metrics-badge" class="badge badge-live">● live</span>
           </div>
 
-          <div class=\"metrics-grid\">
-            <div class=\"metric-card\">
-              <div class=\"metric-head\">
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-head">
                 <div>
-                  <div class=\"metric-label\">CPU</div>
-                  <div id=\"cpu-value\" class=\"metric-value\">—%</div>
+                  <div class="metric-label">CPU</div>
+                  <div id="cpu-value" class="metric-value">—%</div>
                 </div>
-                <div id=\"cpu-sub\" class=\"metric-sub\">Waiting for data…</div>
+                <div id="cpu-sub" class="metric-sub">Waiting for data…</div>
               </div>
-              <canvas id=\"cpu-chart\" height=\"120\"></canvas>
-              <div class=\"metric-foot\">
-                <span>min <strong id=\"cpu-min\">—</strong></span>
-                <span>max <strong id=\"cpu-max\">—</strong></span>
-                <span>avg <strong id=\"cpu-avg\">—</strong></span>
+              <canvas id="cpu-chart" height="120"></canvas>
+              <div class="metric-foot">
+                <span>min <strong id="cpu-min">—</strong></span>
+                <span>max <strong id="cpu-max">—</strong></span>
+                <span>avg <strong id="cpu-avg">—</strong></span>
               </div>
             </div>
 
-            <div class=\"metric-card\">
-              <div class=\"metric-head\">
+            <div class="metric-card">
+              <div class="metric-head">
                 <div>
-                  <div class=\"metric-label\">RAM</div>
-                  <div id=\"ram-value\" class=\"metric-value\">—</div>
+                  <div class="metric-label">RAM</div>
+                  <div id="ram-value" class="metric-value">—</div>
                 </div>
-                <div id=\"ram-sub\" class=\"metric-sub\">Waiting for data…</div>
+                <div id="ram-sub" class="metric-sub">Waiting for data…</div>
               </div>
-              <canvas id=\"ram-chart\" height=\"120\"></canvas>
-              <div class=\"metric-foot\">
-                <span>min <strong id=\"ram-min\">—</strong></span>
-                <span>max <strong id=\"ram-max\">—</strong></span>
-                <span>avg <strong id=\"ram-avg\">—</strong></span>
+              <canvas id="ram-chart" height="120"></canvas>
+              <div class="metric-foot">
+                <span>min <strong id="ram-min">—</strong></span>
+                <span>max <strong id="ram-max">—</strong></span>
+                <span>avg <strong id="ram-avg">—</strong></span>
               </div>
             </div>
           </div>
 
-          <div class=\"metrics-meta\">
-            <span id=\"metrics-endpoint\">endpoint: <code>—</code></span>
-            <span id=\"metrics-last\">last update: —</span>
-            <button id=\"metrics-toggle\" class=\"btn btn-ghost\" type=\"button\">Pause</button>
+          <div class="metrics-meta">
+            <span id="metrics-endpoint">endpoint: <code>—</code></span>
+            <span id="metrics-last">last update: —</span>
+            <button id="metrics-toggle" class="btn btn-ghost" type="button">Pause</button>
           </div>
         </section>
+"""
 
+_SECTION_SETUP = """
         <section id="setup" class="card">
           <div class="card-header">
             <h2>Server setup</h2>
@@ -283,7 +308,9 @@ def create_app() -> FastAPI:
             <button id="create-button" type="button" class="btn btn-secondary">Create server</button>
           </form>
         </section>
+"""
 
+_SECTION_ADVANCED = """
         <section id="advanced" class="card">
           <div class="card-header">
             <h2>Advanced settings</h2>
@@ -347,8 +374,13 @@ def create_app() -> FastAPI:
             <label><input id="whitelist-mode" type="checkbox" /> Whitelist</label>
             <label><input id="command-blocks" type="checkbox" checked /> Command blocks</label>
           </div>
+          <div class="card-row">
+            <button id="advanced-save-button" class="btn btn-primary" type="button">Save settings</button>
+          </div>
         </section>
+"""
 
+_SECTION_CONTROLS = """
         <section class="card">
           <div class="card-header">
             <h2>Server controls</h2>
@@ -360,7 +392,9 @@ def create_app() -> FastAPI:
             <button id="backup-button" class="btn btn-secondary" type="button">Backup world</button>
           </div>
         </section>
+"""
 
+_SECTION_COMMAND = """
         <section id="command-form-block" class="card">
           <div class="card-header">
             <h2>Console command</h2>
@@ -370,7 +404,9 @@ def create_app() -> FastAPI:
             <button type="submit" class="btn btn-primary">Send</button>
           </form>
         </section>
+"""
 
+_SECTION_REMOTE = """
         <section id="remote" class="card">
           <div class="card-header">
             <h2>Remote access</h2>
@@ -382,7 +418,9 @@ def create_app() -> FastAPI:
           </div>
           <div class="status-block" id="playit-status-panel">PlayIt not configured.</div>
         </section>
+"""
 
+_SECTION_MODS = """
         <section id="mods" class="card">
           <div class="card-header">
             <h2>Mods / Plugins</h2>
@@ -410,7 +448,9 @@ def create_app() -> FastAPI:
             <button id="mod-install-button" class="btn btn-primary" type="button">Install selected</button>
           </div>
         </section>
+"""
 
+_SECTION_ADMIN = """
         <section id="admin" class="card">
           <div class="card-header">
             <h2>Admin commands</h2>
@@ -430,7 +470,9 @@ def create_app() -> FastAPI:
             <button id="admin-save" class="btn btn-ghost" type="button">Save all</button>
           </div>
         </section>
+"""
 
+_SECTION_BACKUPS = """
         <section id="backups" class="card">
           <div class="card-header">
             <h2>Backups</h2>
@@ -440,270 +482,102 @@ def create_app() -> FastAPI:
             <button id="backup-restore-button" class="btn btn-secondary" type="button">Restore selected</button>
           </div>
         </section>
+"""
 
+_SECTION_CONSOLE = """
         <section id="console" class="card">
           <div class="card-header">
             <h2>Console</h2>
           </div>
           <pre id="console-output">Waiting for logs...</pre>
         </section>
-        """,
-            "setup": """
-        <section id=\"setup\" class=\"card\">
-          <div class=\"card-header\">
-            <h2>Server setup</h2>
-          </div>
-          <form id=\"setup-form\" class=\"form-grid\">
-            <div>
-              <label for=\"loader-select\">Loader</label>
-              <select id=\"loader-select\" name=\"loader\">
-                <option value=\"vanilla\">vanilla</option>
-                <option value=\"paper\">paper</option>
-                <option value=\"fabric\">fabric</option>
-                <option value=\"forge\">forge</option>
-                <option value=\"neoforge\">neoforge</option>
-              </select>
-            </div>
-            <div>
-              <label for=\"version-select\">Version</label>
-              <select id=\"version-select\" name=\"version\"></select>
-            </div>
-            <div>
-              <label for=\"ram-input\">RAM (MB)</label>
-              <input id=\"ram-input\" name=\"ram_mb\" type=\"number\" min=\"512\" step=\"256\" value=\"2048\" />
-            </div>
-            <div>
-              <label for=\"port-input\">Port</label>
-              <input id=\"port-input\" name=\"server_port\" type=\"number\" min=\"1024\" max=\"65535\" value=\"25565\" />
-            </div>
-            <button type=\"submit\" class=\"btn btn-primary\">Save config</button>
-            <button id=\"create-button\" type=\"button\" class=\"btn btn-secondary\">Create server</button>
-          </form>
-        </section>
-        """,
-            "advanced": """
-        <section id=\"advanced\" class=\"card\">
-          <div class=\"card-header\">
-            <h2>Advanced settings</h2>
-          </div>
-          <div class=\"form-grid advanced-grid\">
-            <div>
-              <label for=\"motd-input\">MOTD</label>
-              <input id=\"motd-input\" value=\"EZ Minecraft Server\" />
-            </div>
-            <div>
-              <label for=\"maxplayers-input\">Max players</label>
-              <input id=\"maxplayers-input\" type=\"number\" min=\"1\" max=\"1000\" value=\"10\" />
-            </div>
-            <div>
-              <label for=\"gamemode-input\">Game mode</label>
-              <select id=\"gamemode-input\">
-                <option value=\"survival\">survival</option>
-                <option value=\"creative\">creative</option>
-                <option value=\"adventure\">adventure</option>
-                <option value=\"spectator\">spectator</option>
-              </select>
-            </div>
-            <div>
-              <label for=\"difficulty-input\">Difficulty</label>
-              <select id=\"difficulty-input\">
-                <option value=\"peaceful\">peaceful</option>
-                <option value=\"easy\">easy</option>
-                <option value=\"normal\">normal</option>
-                <option value=\"hard\">hard</option>
-              </select>
-            </div>
-            <div>
-              <label for=\"leveltype-input\">World type</label>
-              <select id=\"leveltype-input\">
-                <option value=\"normal\">normal</option>
-                <option value=\"flat\">flat</option>
-                <option value=\"largebiomes\">largebiomes</option>
-                <option value=\"amplified\">amplified</option>
-              </select>
-            </div>
-            <div>
-              <label for=\"viewdist-input\">View distance</label>
-              <input id=\"viewdist-input\" type=\"number\" min=\"3\" max=\"32\" value=\"10\" />
-            </div>
-            <div>
-              <label for=\"simdist-input\">Simulation distance</label>
-              <input id=\"simdist-input\" type=\"number\" min=\"3\" max=\"32\" value=\"10\" />
-            </div>
-            <div>
-              <label for=\"seed-input\">Seed</label>
-              <input id=\"seed-input\" value=\"\" placeholder=\"empty = random\" />
-            </div>
-          </div>
+"""
 
-          <div class=\"checkbox-grid\">
-            <label><input id=\"online-mode\" type=\"checkbox\" checked /> Online mode</label>
-            <label><input id=\"pvp-mode\" type=\"checkbox\" checked /> PvP</label>
-            <label><input id=\"spawn-monsters\" type=\"checkbox\" checked /> Spawn monsters</label>
-            <label><input id=\"allow-flight\" type=\"checkbox\" /> Allow flight</label>
-            <label><input id=\"nether-mode\" type=\"checkbox\" checked /> Nether</label>
-            <label><input id=\"whitelist-mode\" type=\"checkbox\" /> Whitelist</label>
-            <label><input id=\"command-blocks\" type=\"checkbox\" checked /> Command blocks</label>
-          </div>
-        </section>
+# Each dashboard page is a list of sections; the overview shows everything.
+_DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
+    "overview": (
+        _SECTION_HERO, _SECTION_METRICS, _SECTION_SETUP, _SECTION_ADVANCED, _SECTION_CONTROLS,
+        _SECTION_COMMAND, _SECTION_REMOTE, _SECTION_MODS, _SECTION_ADMIN, _SECTION_BACKUPS,
+        _SECTION_CONSOLE,
+    ),
+    "setup": (_SECTION_SETUP,),
+    "advanced": (_SECTION_ADVANCED, _SECTION_CONTROLS, _SECTION_COMMAND),
+    "mods": (_SECTION_MODS, _SECTION_ADMIN),
+    "remote": (_SECTION_REMOTE,),
+    "backups": (_SECTION_BACKUPS,),
+    "console": (_SECTION_CONSOLE, _SECTION_COMMAND),
+}
 
-        <section class=\"card\">
-          <div class=\"card-header\">
-            <h2>Server controls</h2>
-          </div>
-          <div class=\"btn-grid\">
-            <button id=\"start-button\" class=\"btn btn-primary\" type=\"button\">Start server</button>
-            <button id=\"stop-button\" class=\"btn btn-danger\" type=\"button\">Stop server</button>
-            <button id=\"restart-button\" class=\"btn btn-secondary\" type=\"button\">Restart server</button>
-            <button id=\"backup-button\" class=\"btn btn-secondary\" type=\"button\">Backup world</button>
-          </div>
-        </section>
 
-        <section id=\"command-form-block\" class=\"card\">
-          <div class=\"card-header\">
-            <h2>Console command</h2>
-          </div>
-          <form id=\"command-form\" class=\"inline-form\">
-            <input id=\"command-input\" name=\"command\" placeholder=\"say hello\" />
-            <button type=\"submit\" class=\"btn btn-primary\">Send</button>
-          </form>
-        </section>
-        """,
-            "mods": """
-        <section id=\"mods\" class=\"card\">
-          <div class=\"card-header\">
-            <h2>Mods / Plugins</h2>
-          </div>
-          <div class=\"inline-form compact\">
-            <input id=\"mod-search-query\" placeholder=\"Search Modrinth\" />
-            <button id=\"mod-search-button\" class=\"btn btn-secondary\" type=\"button\">Search</button>
-            <button id=\"mod-refresh-button\" class=\"btn btn-ghost\" type=\"button\">Refresh</button>
-          </div>
-          <div class=\"inline-form compact\">
-            <input id=\"mod-upload-input\" type=\"file\" multiple accept=\".jar,application/java-archive\" />
-            <button id=\"mod-upload-button\" class=\"btn btn-secondary\" type=\"button\">Upload jars</button>
-          </div>
-          <div class=\"split\">
-            <div>
-              <label for=\"mod-search-results\">Search results</label>
-              <select id=\"mod-search-results\" size=\"6\" class=\"listbox\"></select>
-            </div>
-            <div>
-              <label for=\"mod-installed-list\">Installed</label>
-              <select id=\"mod-installed-list\" size=\"6\" class=\"listbox\"></select>
-            </div>
-          </div>
-          <div class=\"card-row\">
-            <button id=\"mod-install-button\" class=\"btn btn-primary\" type=\"button\">Install selected</button>
-          </div>
-        </section>
+def _render_dashboard_page(section: str) -> HTMLResponse:
+    normalized = section.strip("/").lower()
+    if normalized not in _DASHBOARD_PAGES:
+        raise HTTPException(status_code=404, detail=f"Dashboard section '{section}' not found.")
 
-        <section id=\"admin\" class=\"card\">
-          <div class=\"card-header\">
-            <h2>Admin commands</h2>
-          </div>
-          <div class=\"inline-form compact\">
-            <input id=\"admin-player\" placeholder=\"Player name\" />
-            <button id=\"admin-op\" class=\"btn btn-secondary\" type=\"button\">OP</button>
-            <button id=\"admin-deop\" class=\"btn btn-secondary\" type=\"button\">De-OP</button>
-            <button id=\"admin-kick\" class=\"btn btn-secondary\" type=\"button\">Kick</button>
-            <button id=\"admin-ban\" class=\"btn btn-secondary\" type=\"button\">Ban</button>
-          </div>
-          <div class=\"btn-grid small-grid\">
-            <button id=\"admin-day\" class=\"btn btn-ghost\" type=\"button\">Day</button>
-            <button id=\"admin-night\" class=\"btn btn-ghost\" type=\"button\">Night</button>
-            <button id=\"admin-clear\" class=\"btn btn-ghost\" type=\"button\">Clear weather</button>
-            <button id=\"admin-rain\" class=\"btn btn-ghost\" type=\"button\">Rain</button>
-            <button id=\"admin-save\" class=\"btn btn-ghost\" type=\"button\">Save all</button>
-          </div>
-        </section>
-        """,
-            "remote": """
-        <section id=\"remote\" class=\"card\">
-          <div class=\"card-header\">
-            <h2>Remote access</h2>
-          </div>
-          <div class=\"btn-grid\">
-            <button id=\"playit-config-button\" class=\"btn btn-secondary\" type=\"button\">Configure tunnel</button>
-            <button id=\"playit-start-button\" class=\"btn btn-secondary\" type=\"button\">Start tunnel</button>
-            <button id=\"playit-stop-button\" class=\"btn btn-danger\" type=\"button\">Stop tunnel</button>
-          </div>
-          <div class=\"status-block\" id=\"playit-status-panel\">PlayIt not configured.</div>
-        </section>
-        """,
-            "backups": """
-        <section id=\"backups\" class=\"card\">
-          <div class=\"card-header\">
-            <h2>Backups</h2>
-          </div>
-          <div class=\"inline-form compact\">
-            <select id=\"backup-list\" class=\"listbox\" size=\"5\"></select>
-            <button id=\"backup-restore-button\" class=\"btn btn-secondary\" type=\"button\">Restore selected</button>
-          </div>
-        </section>
-        """,
-            "console": """
-        <section id=\"console\" class=\"card\">
-          <div class=\"card-header\">
-            <h2>Console</h2>
-          </div>
-          <pre id=\"console-output\">Waiting for logs...</pre>
-        </section>
-        """,
-        }
-        if normalized not in pages:
-            raise HTTPException(status_code=404, detail=f"Dashboard section '{section}' not found.")
+    nav_html = "".join(
+        f'<a href="/dashboard/{key}" class="nav-link{" active" if key == normalized else ""}">{label}</a>'
+        for key, label in _DASHBOARD_NAVIGATION
+    )
+    body_html = "".join(_DASHBOARD_PAGES[normalized])
 
-        nav_html = "".join(
-            f'<a href="/dashboard/{key}" class="nav-link{" active" if key == normalized else ""}">{label}</a>'
-            for key, label in navigation
-        )
-
-        return HTMLResponse(
-            f"""
+    return HTMLResponse(
+        f"""
 <!doctype html>
-<html lang=\"en\">
+<html lang="en">
   <head>
-    <meta charset=\"utf-8\" />
-    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EZ Minecraft Server Dashboard</title>
-    <link rel=\"stylesheet\" href=\"/dashboard.css\" />
+    <link rel="stylesheet" href="/dashboard.css" />
   </head>
   <body>
-    <div class=\"app-shell\">
-      <aside class=\"sidebar\">
-        <div class=\"brand\">
-          <div class=\"brand-logo\">⛏</div>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-logo">⛏</div>
           <div>
-            <div class=\"brand-title\">EZ Minecraft</div>
-            <div class=\"brand-sub\">Server Dashboard</div>
+            <div class="brand-title">EZ Minecraft</div>
+            <div class="brand-sub">Server Dashboard</div>
           </div>
         </div>
 
-        <nav class=\"nav\" aria-label=\"Dashboard sections\">{nav_html}</nav>
+        <nav class="nav" aria-label="Dashboard sections">{nav_html}</nav>
 
-        <div class=\"sidebar-footer\">
-          <div class=\"status-pill\" id=\"session-status\">Signed in</div>
-          <button id=\"logout-button\" class=\"btn btn-ghost\" type=\"button\">Sign out</button>
+        <div class="sidebar-footer">
+          <div class="status-pill" id="session-status">Signed in</div>
+          <button id="logout-button" class="btn btn-ghost" type="button">Sign out</button>
         </div>
       </aside>
 
-      <main class=\"main\">
-        <form id=\"legacy-auth-hidden\" style=\"display:none;\">
-          <input name=\"username\" type=\"text\" value=\"admin\" />
-          <input name=\"password\" type=\"password\" value=\"admin\" />
-        </form>
-        {pages[normalized]}
+      <main class="main">
+        <div id="action-status" class="card action-status" role="status" aria-live="polite" hidden></div>
+        {body_html}
       </main>
     </div>
-    <script>
-      const __LEGACY_CONSOLE_OUTPUT = \"join('\\\\n')\";
-    </script>
-    <script src=\"/dashboard.js\"></script>
+    <script src="/dashboard.js"></script>
   </body>
 </html>
-            """
-        )
+        """
+    )
+
+
+_APP_START_TIME = time.time()
+
+
+def create_app() -> FastAPI:
+    validate_auth_settings()
+    app = FastAPI(title="EZ Minecraft Server Launcher", version="0.1.0")
+    runtime = RuntimeState()
+    app.state.runtime = runtime
+    app.state.console_manager = WebSocketManager()
+
+    def append_console_line(line: str) -> None:
+        app.state.console_manager.publish(line)
+
+    def update_install_state(status: str, progress: float, message: str) -> None:
+        runtime.install_status = status
+        runtime.install_progress = max(0.0, min(float(progress), 100.0))
+        runtime.install_message = message
 
     def ensure_server_installed(config: dict[str, Any]) -> str:
         loader = str(config.get("loader", "vanilla"))
@@ -744,7 +618,7 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     def root() -> HTMLResponse:
-        return render_dashboard_page("overview")
+        return _render_dashboard_page("overview")
 
     @app.get("/login")
     def login() -> HTMLResponse:
@@ -758,7 +632,7 @@ def create_app() -> FastAPI:
 
     @app.get("/dashboard/{section}")
     def dashboard_section(section: str) -> HTMLResponse:
-        return render_dashboard_page(section)
+        return _render_dashboard_page(section)
 
     @app.get("/dashboard.css")
     def dashboard_css() -> FileResponse:
@@ -788,7 +662,7 @@ def create_app() -> FastAPI:
         runtime.lan_address = netinfo.lan_ip()
         runtime.public_address = netinfo.public_ip()
         playit_cfg = playit.load_config()
-        runtime.playit_state = "configured" if playit_cfg.get("secret") else "not-configured"
+        runtime.playit_state = _playit_state(runtime, playit_cfg)
         runtime.playit_address = playit_cfg.get("address") or runtime.public_address
         return runtime.snapshot()
 
@@ -866,24 +740,35 @@ def create_app() -> FastAPI:
         runtime.state = "starting"
         runtime.operation = "starting"
 
+        process: Any = None
+
         def on_exit(code: int) -> None:
+            append_console_line(f"[server] exited with code {code}")
+            if runtime.process is not process:
+                return  # a newer process already replaced this one (e.g. after a restart)
             runtime.state = "stopped"
             runtime.operation = "idle"
             runtime.process = None
-            append_console_line(f"[server] exited with code {code}")
+            runtime.clear_players()
+
+        def on_output(line: str) -> None:
+            runtime.track_player_event(line)
+            append_console_line(line)
 
         target_dir = ensure_server_installed(config)
         update_properties(target_dir, **_server_properties_from_config(config))
 
         java_exe = java_manager.ensure_java(java_manager.required_java(version))
         args = downloaders.launch_args(loader, java_exe, target_dir, int(config.get("ram_mb", 2048)))
-        runtime.process = ServerProcess(
+        process = ServerProcess(
             args,
             cwd=target_dir,
-            on_output=append_console_line,
+            on_output=on_output,
             on_exit=on_exit,
         )
-        runtime.process.start()
+        runtime.clear_players()
+        runtime.process = process
+        process.start()
         runtime.state = "running"
         runtime.operation = "idle"
         append_console_line(f"[server] started with {loader} {version}")
@@ -903,8 +788,13 @@ def create_app() -> FastAPI:
 
     @app.post("/api/server/restart")
     def restart_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+        process = runtime.process
         stop_server(_)
-        return start_server(_)
+        if process is not None and not _wait_for_exit(process, RESTART_STOP_TIMEOUT_SEC):
+            append_console_line("[server] did not stop in time; killing the process")
+            process.kill()
+            _wait_for_exit(process, 10)
+        return start_server(None, _)
 
     @app.post("/api/server/command")
     def send_command(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
@@ -924,15 +814,14 @@ def create_app() -> FastAPI:
         world_dir = os.path.join(target_dir, "world")
         if not os.path.isdir(world_dir):
             return {"ok": False, "message": "No world directory found for backup."}
-        archive = os.path.join(target_dir, f"world-backup-{__import__('time').strftime('%Y%m%d-%H%M%S')}.zip")
-        import zipfile
+        archive = os.path.join(target_dir, f"world-backup-{time.strftime('%Y%m%d-%H%M%S')}.zip")
         with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for root, _, files in os.walk(world_dir):
                 for name in files:
                     abs_path = os.path.join(root, name)
                     rel_path = os.path.relpath(abs_path, target_dir)
                     zf.write(abs_path, rel_path)
-        return {"ok": True, "archive": archive}
+        return {"ok": True, "archive": archive, "message": f"Backup created: {os.path.basename(archive)}"}
 
     @app.get("/api/server/backups")
     def list_backups(_: str = Depends(require_auth)) -> dict[str, Any]:
@@ -940,27 +829,33 @@ def create_app() -> FastAPI:
         target_dir = _server_dir_for_config(config)
         backups = []
         if os.path.isdir(target_dir):
-            for entry in os.listdir(target_dir):
-                if entry.startswith("world-backup-") and entry.endswith(".zip"):
+            for entry in sorted(os.listdir(target_dir), reverse=True):
+                if _is_backup_name(entry):
                     backups.append(os.path.join(target_dir, entry))
         return {"backups": backups}
 
     @app.post("/api/server/backups/restore")
     def restore_backup(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
-        backup_path = str(payload.get("backup_path", "") or payload.get("name", "")).strip()
-        if not backup_path or not os.path.exists(backup_path):
-            raise HTTPException(status_code=400, detail="A valid backup path is required.")
-        config = _effective_config()
-        target_dir = _server_dir_for_config(config)
-        os.makedirs(target_dir, exist_ok=True)
-        world_dir = os.path.join(target_dir, "world")
-        if os.path.isdir(world_dir):
-            backup_name = f"world-backup-pre-restore-{__import__('time').strftime('%Y%m%d-%H%M%S')}"
-            os.rename(world_dir, os.path.join(target_dir, backup_name))
-        import zipfile
+        if runtime.process is not None and runtime.process.is_running():
+            raise HTTPException(status_code=409, detail="Stop the server before restoring a backup.")
+        # Only this server's own backups are accepted; a full path from the list is reduced to its name.
+        name = os.path.basename(str(payload.get("backup_path", "") or payload.get("name", "")).strip())
+        target_dir = _server_dir_for_config(_effective_config())
+        backup_path = os.path.join(target_dir, name)
+        if not (_is_backup_name(name) and os.path.isfile(backup_path)):
+            raise HTTPException(status_code=400, detail="A valid backup from the backup list is required.")
+
         with zipfile.ZipFile(backup_path, "r") as zf:
-            zf.extractall(target_dir)
-        return {"ok": True, "message": f"Backup restored from {backup_path}"}
+            members = zf.namelist()
+            unsafe = [m for m in members if not _is_safe_world_member(m)]
+            if unsafe:
+                raise HTTPException(status_code=400, detail=f"Backup contains files outside world/: {unsafe[0]}")
+            world_dir = os.path.join(target_dir, "world")
+            if os.path.isdir(world_dir):
+                backup_name = f"world-backup-pre-restore-{time.strftime('%Y%m%d-%H%M%S')}"
+                os.rename(world_dir, os.path.join(target_dir, backup_name))
+            zf.extractall(target_dir, members=members)
+        return {"ok": True, "message": f"Backup restored from {name}"}
 
     @app.post("/api/backups/restore")
     def legacy_restore_backup(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
@@ -989,10 +884,7 @@ def create_app() -> FastAPI:
     def upload_mods(files: list[UploadFile] = File(default=[]), _: str = Depends(require_auth)) -> dict[str, Any]:
         if not files:
             raise HTTPException(status_code=400, detail="No mod files were uploaded.")
-        config = _effective_config()
-        target_dir = _server_dir_for_config(config)
-        mod_target = os.path.join(target_dir, "mods") if str(config.get("loader", "vanilla")) in {"forge", "fabric", "neoforge"} else os.path.join(target_dir, "plugins")
-        os.makedirs(mod_target, exist_ok=True)
+        mod_target = _content_dir_for_config(_effective_config())
         saved = []
         for upload in files:
             name = os.path.basename(upload.filename or "")
@@ -1006,7 +898,9 @@ def create_app() -> FastAPI:
                         break
                     handle.write(chunk)
             saved.append(dest)
-        return {"ok": True, "saved": saved}
+        if not saved:
+            raise HTTPException(status_code=400, detail="Only .jar files can be uploaded.")
+        return {"ok": True, "saved": saved, "message": f"Uploaded {len(saved)} file(s)."}
 
     @app.get("/api/mods")
     def legacy_list_mods(_: str = Depends(require_auth)) -> dict[str, Any]:
@@ -1034,13 +928,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
 
         command = command_map[action]
-        if command.endswith("op") and not player:
-            raise HTTPException(status_code=400, detail="A player name is required for this action.")
-        if command.endswith("deop") and not player:
-            raise HTTPException(status_code=400, detail="A player name is required for this action.")
-        if command.endswith("kick") and not player:
-            raise HTTPException(status_code=400, detail="A player name is required for this action.")
-        if command.endswith("ban") and not player:
+        if action in {"op", "deop", "kick", "ban"} and not player:
             raise HTTPException(status_code=400, detail="A player name is required for this action.")
 
         runtime.process.send(command)
@@ -1064,18 +952,16 @@ def create_app() -> FastAPI:
         if not project_ref:
             raise HTTPException(status_code=400, detail="A Modrinth project slug or ID is required.")
         config = _effective_config()
-        target_dir = _server_dir_for_config(config)
         loader = str(config.get("loader", "vanilla"))
         version = str(config.get("version", "1.21.7"))
-        target_folder = os.path.join(target_dir, "mods") if loader in {"forge", "fabric", "neoforge"} else os.path.join(target_dir, "plugins")
-        os.makedirs(target_folder, exist_ok=True)
+        target_folder = _content_dir_for_config(config)
         installed = modrinth.install(project_ref, loader, version, target_folder, log=append_console_line)
-        return {"ok": True, "filename": installed}
+        return {"ok": True, "filename": installed, "message": f"Installed {installed}."}
 
     @app.get("/api/playit/status")
     def playit_status(_: str = Depends(require_auth)) -> dict[str, Any]:
         cfg = playit.load_config()
-        state = runtime.playit_state if runtime.playit_agent and runtime.playit_agent.is_running() else ("running" if cfg.get("secret") and cfg.get("address") else "configured" if cfg.get("secret") else "not-configured")
+        state = _playit_state(runtime, cfg)
         return {
             "configured": bool(cfg.get("secret")),
             "state": state,
@@ -1143,7 +1029,9 @@ def create_app() -> FastAPI:
 
     @app.get("/api/playit/config")
     def playit_config(_: str = Depends(require_auth)) -> dict[str, Any]:
-        return playit.load_config()
+        # Never expose the secret key over HTTP; it stays in playit_config.json on the host.
+        cfg = playit.load_config()
+        return {"address": cfg.get("address") or "", "secret_present": bool(cfg.get("secret"))}
 
     @app.websocket("/ws/console")
     async def console_websocket(websocket: WebSocket) -> None:

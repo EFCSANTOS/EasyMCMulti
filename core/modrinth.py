@@ -1,15 +1,15 @@
-"""Recherche et telechargement de mods/plugins depuis Modrinth (https://modrinth.com).
+"""Search and download mods/plugins from Modrinth (https://modrinth.com).
 
-API publique v2, sans cle. On filtre par loader et version de jeu.
+Public v2 API, no key required. Results are filtered by loader and game version.
 """
 import requests
 
 from .downloaders import download
 
 API = "https://api.modrinth.com/v2"
-HEADERS = {"User-Agent": "EZ-Minecraft-Launcher/1.0 (perso)"}
+HEADERS = {"User-Agent": "EZ-Minecraft-Launcher/1.0 (personal)"}
 
-# loader du launcher -> loaders Modrinth correspondants
+# launcher loader -> matching Modrinth loaders
 _LOADER_MAP = {
     "fabric": ["fabric"],
     "forge": ["forge"],
@@ -19,7 +19,7 @@ _LOADER_MAP = {
 
 
 def search(query, loader, game_version, limit=20):
-    """Renvoie une liste de projets : [{title, slug, description, downloads}]."""
+    """Return a list of projects: [{title, slug, description, downloads}]."""
     loaders = _LOADER_MAP.get(loader, [])
     facets = [[f"categories:{l}" for l in loaders]] if loaders else []
     if game_version:
@@ -57,7 +57,7 @@ def resolve_project_slug(project_ref):
 
 
 def best_file_url(project_ref, loader, game_version):
-    """Trouve le .jar a telecharger pour un projet (version compatible la plus recente)."""
+    """Find the .jar to download for a project (newest compatible version)."""
     slug = resolve_project_slug(project_ref)
     loaders = _LOADER_MAP.get(loader, [])
     import json
@@ -71,14 +71,14 @@ def best_file_url(project_ref, loader, game_version):
     r.raise_for_status()
     versions = r.json()
     if not versions:
-        raise RuntimeError("Aucune version compatible (loader/version de jeu).")
-    files = versions[0]["files"]  # la plus recente
+        raise RuntimeError("No compatible version (loader/game version).")
+    files = versions[0]["files"]  # the newest
     primary = next((f for f in files if f.get("primary")), files[0])
     return primary["url"], primary["filename"]
 
 
 def install(project_ref, loader, game_version, dest_dir, log=print):
-    """Telecharge le mod/plugin dans dest_dir. Renvoie le nom de fichier."""
+    """Download the mod/plugin into dest_dir. Returns the file name."""
     import os
     url, filename = best_file_url(project_ref, loader, game_version)
     download(url, os.path.join(dest_dir, filename), log=log)

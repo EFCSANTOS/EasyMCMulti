@@ -1,21 +1,21 @@
-"""Integration playit.gg : tunnel pour jouer a distance sans ouvrir de port sur la box.
+"""playit.gg integration: tunnel for remote play without opening a port on the router.
 
-IMPORTANT (agent v1.0.10+) : le binaire Windows de playit est un *daemon* pur. Il faut lui
-fournir une SECRET KEY (--secret) ; lance sans secret il attend une provision IPC et se ferme.
+IMPORTANT (agent v1.0.10+): the playit binary is a pure *daemon*. It must be given a
+SECRET KEY (--secret); started without one, it waits for IPC provisioning and exits.
 
-Au lieu de demander a l'utilisateur de bricoler le site playit a la main, on AUTOMATISE tout
-via l'API officielle (api.playit.gg) :
-  1. on genere un "claim code" (5 octets hex) et on ouvre https://playit.gg/claim/<code>
-  2. l'utilisateur clique "Allow" dans son navigateur (seule etape manuelle, = un login)
-  3. on echange le code contre une SECRET KEY permanente (/claim/exchange)
-  4. on cree tout seul un tunnel "Minecraft Java" -> localhost:25565 (/tunnels/create)
-  5. on recupere l'adresse publique allouee (/tunnels/list)
-  6. on lance le daemon : playit.exe --secret <KEY>
+Instead of asking the user to fiddle with the playit website by hand, everything is
+AUTOMATED through the official API (api.playit.gg):
+  1. generate a "claim code" (5 hex bytes) and open https://playit.gg/claim/<code>
+  2. the user clicks "Allow" in their browser (the only manual step, equivalent to a login)
+  3. exchange the code for a permanent SECRET KEY (/claim/exchange)
+  4. create a "Minecraft Java" tunnel -> localhost:25565 automatically (/tunnels/create)
+  5. fetch the allocated public address (/tunnels/list)
+  6. run the daemon: playit --secret <KEY>
 
-Secret + adresse sont stockes LOCALEMENT (EZ_Server_Data/playit_config.json), jamais commit.
+Secret + address are stored LOCALLY (EZ_Server_Data/playit_config.json), never committed.
 
-Refs API (client officiel) : https://github.com/playit-cloud/playit-api-java
-Auth : header  Authorization: Agent-Key <secret>
+API refs (official client): https://github.com/playit-cloud/playit-api-java
+Auth: header  Authorization: Agent-Key <secret>
 """
 import json
 import os
@@ -35,7 +35,6 @@ CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 API_BASE = "https://api.playit.gg"
 CLAIM_PAGE = "https://playit.gg/claim/{}"
-TUNNELS_URL = "https://playit.gg/account/tunnels"  # fallback manuel si la creation auto echoue
 
 _CONFIG_FILE = os.path.join(paths.DATA_DIR, "playit_config.json")
 
@@ -75,7 +74,7 @@ def _agent_path() -> str:
     return os.path.join(paths.DATA_DIR, _agent_binary_name())
 
 
-# ---------- Config locale (secret key + adresse du tunnel) ----------
+# ---------- Local config (secret key + tunnel address) ----------
 def load_config():
     try:
         with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -90,21 +89,17 @@ def save_config(secret, address=""):
         json.dump({"secret": secret, "address": address}, f, indent=2)
 
 
-def is_configured():
-    return bool(load_config().get("secret"))
-
-
 def saved_address():
     return load_config().get("address", "")
 
 
-# ---------- Appels API playit ----------
+# ---------- playit API calls ----------
 def _api(path, body, secret=None):
-    """POST JSON vers l'API playit. Leve RuntimeError en cas d'echec applicatif.
+    """POST JSON to the playit API. Raises RuntimeError on application-level failure.
 
-    ATTENTION : l'API renvoie souvent un HTTP 400 AVEC un corps JSON utile
-    (ex: {"status":"fail","data":"AgentVersionTooOld"}). Il faut donc lire le corps
-    AVANT de considerer le code HTTP, sinon on perd le vrai message d'erreur.
+    NOTE: the API often returns HTTP 400 WITH a useful JSON body
+    (e.g. {"status":"fail","data":"AgentVersionTooOld"}). The body must therefore be read
+    BEFORE looking at the HTTP status, otherwise the real error message is lost.
     """
     headers = {"Content-Type": "application/json"}
     if secret:
@@ -114,16 +109,16 @@ def _api(path, body, secret=None):
         data = r.json()
     except ValueError:
         r.raise_for_status()
-        raise RuntimeError(f"Reponse playit non-JSON (HTTP {r.status_code}) sur {path}")
+        raise RuntimeError(f"Non-JSON playit response (HTTP {r.status_code}) from {path}")
     if isinstance(data, dict) and data.get("status") in ("fail", "error"):
-        raise RuntimeError(f"API playit {path} : {data.get('data')}")
+        raise RuntimeError(f"playit API {path}: {data.get('data')}")
     if not r.ok:
-        raise RuntimeError(f"API playit {path} HTTP {r.status_code} : {data}")
+        raise RuntimeError(f"playit API {path} HTTP {r.status_code}: {data}")
     return data
 
 
 def claim_generate():
-    return secrets.token_hex(5)  # 5 octets -> 10 caracteres hex (format attendu par l'API)
+    return secrets.token_hex(5)  # 5 bytes -> 10 hex characters (format expected by the API)
 
 
 def claim_url(code):
@@ -137,10 +132,10 @@ def _claim_setup(code):
 
 
 def _claim_exchange(code):
-    """Renvoie la secret key si dispo, sinon None (claim pas encore valide).
+    """Return the secret key if available, otherwise None (claim not approved yet).
 
-    Tant que l'utilisateur n'a pas approuve, l'API repond 400 (ou status 'fail') :
-    on traite ca comme 'pas encore pret' et on laisse la boucle d'attente reessayer.
+    Until the user approves, the API answers 400 (or status 'fail'):
+    treat that as 'not ready yet' and let the polling loop retry.
     """
     try:
         res = _api("/claim/exchange", {"code": code})
@@ -163,7 +158,7 @@ def _find_mc_tunnel(secret):
 
 
 def _tunnel_address(t):
-    """Adresse publique a donner aux joueurs, ou None si pas encore allouee."""
+    """Public address to give to players, or None if not allocated yet."""
     alloc = t.get("alloc", {})
     if alloc.get("status") != "allocated":
         return None
@@ -171,7 +166,7 @@ def _tunnel_address(t):
     domain = d.get("assigned_domain")
     if not domain:
         return None
-    # minecraft-java a normalement un enregistrement SRV -> le domaine seul suffit.
+    # minecraft-java normally has an SRV record -> the bare domain is enough.
     if d.get("assigned_srv"):
         return domain
     port = d.get("port_start")
@@ -179,64 +174,64 @@ def _tunnel_address(t):
 
 
 def claim_interactive(log, should_cancel, timeout_sec=300):
-    """Genere un claim, ouvre la page d'autorisation, attend le clic 'Allow', renvoie le secret.
+    """Generate a claim, open the authorization page, wait for 'Allow', return the secret.
 
-    Sauvegarde le secret des qu'il est obtenu (l'adresse du tunnel viendra apres).
+    Saves the secret as soon as it is obtained (the tunnel address comes later).
     """
     code = claim_generate()
     url = claim_url(code)
-    log(f"Ouverture de la page d'autorisation playit : {url}")
+    log(f"Opening the playit authorization page: {url}")
     webbrowser.open(url)
-    log("Clique 'Allow' dans ton navigateur pour autoriser le launcher...")
+    log("Click 'Allow' in your browser to authorize the launcher...")
 
     deadline = time.time() + timeout_sec
     while True:
         if should_cancel():
-            raise RuntimeError("Configuration annulee.")
+            raise RuntimeError("Setup cancelled.")
         if time.time() > deadline:
-            raise RuntimeError("Delai depasse : autorisation non validee dans les temps.")
+            raise RuntimeError("Timed out: authorization was not approved in time.")
         state = _claim_setup(code)
         if state == "UserAccepted":
             break
         if state == "UserRejected":
-            raise RuntimeError("Autorisation refusee dans le navigateur.")
+            raise RuntimeError("Authorization was rejected in the browser.")
         time.sleep(1.5)
 
-    log("Autorise. Recuperation de la cle...")
+    log("Authorized. Fetching the key...")
     secret = None
     while secret is None:
         if time.time() > deadline:
-            raise RuntimeError("Delai depasse a l'echange de la cle.")
+            raise RuntimeError("Timed out while exchanging the key.")
         secret = _claim_exchange(code)
         if secret is None:
             time.sleep(1.5)
 
     save_config(secret, saved_address())
-    log("Cle playit obtenue.")
+    log("playit key obtained.")
     return secret
 
 
 def ensure_tunnel(secret, local_port, log, timeout_sec=120):
-    """Garantit un tunnel Minecraft Java -> localhost:local_port et renvoie l'adresse publique.
+    """Ensure a Minecraft Java tunnel -> localhost:local_port exists and return its public address.
 
-    IMPORTANT : l'API refuse de creer un tunnel tant que l'agent n'a pas tourne au moins
-    une fois (erreur 'AgentVersionTooOld'). Il faut donc avoir demarre le daemon AVANT
-    d'appeler cette fonction ; on reessaie le temps que l'agent s'enregistre.
+    IMPORTANT: the API refuses to create a tunnel until the agent has run at least
+    once (error 'AgentVersionTooOld'). The daemon must therefore be started BEFORE
+    calling this function; creation is retried while the agent registers.
     """
     deadline = time.time() + timeout_sec
     agent_id = _agent_id(secret)
 
-    # Reutilise un tunnel Minecraft existant s'il pointe deja vers le bon port local.
+    # Reuse an existing Minecraft tunnel if it already points to the right local port.
     t = _find_mc_tunnel(secret)
     if t is not None:
         existing = t.get("origin", {}).get("data", {}).get("local_port")
         if existing != local_port:
-            log(f"Tunnel existant pointe vers :{existing}, recreation vers :{local_port}...")
+            log(f"Existing tunnel points to :{existing}, recreating it for :{local_port}...")
             _api("/tunnels/delete", {"tunnel_id": t["id"]}, secret=secret)
             t = None
 
     if t is None:
-        log(f"Creation du tunnel Minecraft Java -> localhost:{local_port}...")
+        log(f"Creating Minecraft Java tunnel -> localhost:{local_port}...")
         while True:
             try:
                 _api("/tunnels/create", {
@@ -252,15 +247,15 @@ def ensure_tunnel(secret, local_port, log, timeout_sec=120):
                 break
             except RuntimeError as e:
                 if "AgentVersionTooOld" in str(e) and time.time() < deadline:
-                    log("Attente de l'enregistrement de l'agent playit...")
+                    log("Waiting for the playit agent to register...")
                     time.sleep(3)
                     continue
                 raise
 
-    log("Attente de l'attribution de l'adresse par playit...")
+    log("Waiting for playit to allocate an address...")
     while True:
         if time.time() > deadline:
-            raise RuntimeError("Le tunnel n'a pas recu d'adresse a temps.")
+            raise RuntimeError("The tunnel did not receive an address in time.")
         t = _find_mc_tunnel(secret)
         if t:
             addr = _tunnel_address(t)
@@ -269,7 +264,7 @@ def ensure_tunnel(secret, local_port, log, timeout_sec=120):
         time.sleep(2)
 
 
-# ---------- Telechargement de l'agent (daemon) ----------
+# ---------- Agent (daemon) download ----------
 def ensure_agent(log=print):
     """Download the PlayIt agent matching the current host platform.
 
@@ -284,7 +279,7 @@ def ensure_agent(log=print):
         return agent_path
 
     paths.ensure_dirs()
-    log("Recherche de l'agent playit.gg...")
+    log("Looking up the playit.gg agent...")
     rel = requests.get(RELEASES_API, timeout=30).json()
 
     wanted_name = _agent_binary_name().lower()
@@ -296,9 +291,9 @@ def ensure_agent(log=print):
             break
 
     if not asset:
-        raise RuntimeError(f"Binaire PlayIt non pris en charge pour cette plateforme : {wanted_name}")
+        raise RuntimeError(f"No PlayIt binary available for this platform: {wanted_name}")
 
-    log(f"Telechargement de {asset['name']}...")
+    log(f"Downloading {asset['name']}...")
     from .downloaders import download
     download(asset["browser_download_url"], agent_path, log=log)
     if os.name != "nt":
@@ -306,9 +301,9 @@ def ensure_agent(log=print):
     return agent_path
 
 
-# ---------- Lancement du daemon ----------
+# ---------- Daemon launch ----------
 class PlayitAgent:
-    """Lance le daemon playit avec la secret key et stream sa sortie."""
+    """Runs the playit daemon with the secret key and streams its output."""
 
     def __init__(self, on_output, on_exit):
         self.on_output = on_output
@@ -320,7 +315,7 @@ class PlayitAgent:
 
     def start(self, secret):
         if not secret:
-            raise RuntimeError("Aucune secret key playit configuree.")
+            raise RuntimeError("No playit secret key configured.")
         agent_path = _agent_path()
         self.proc = subprocess.Popen(
             [agent_path, "--secret", secret],

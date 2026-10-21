@@ -5,6 +5,10 @@ const appState = {
   latestVersionList: [],
 };
 
+// Browsers cannot send Basic auth on a WebSocket, so the console is polled over REST.
+const CONSOLE_POLL_MS = 2000;
+const STATUS_POLL_MS = 10000;
+
 const metricsState = {
   endpoint: null,
   paused: false,
@@ -33,7 +37,18 @@ function buildBasicAuth() {
   return 'Basic ' + btoa(`${user}:${pass}`);
 }
 
+// Feedback for user actions; the #action-status bar exists on every dashboard page.
 function setStatus(message, isError = false) {
+  const panel = document.getElementById('action-status');
+  if (panel) {
+    panel.textContent = message;
+    panel.hidden = !message;
+    panel.classList.toggle('is-error', isError);
+  }
+}
+
+// Server summary; #status-panel only exists on the overview page.
+function setServerSummary(message, isError = false) {
   const panel = document.getElementById('status-panel');
   if (panel) {
     panel.textContent = message;
@@ -96,7 +111,7 @@ function populateConfigForm(config) {
   if (ram) ram.value = config.ram_mb || 2048;
   if (port) port.value = config.server_port || 25565;
 
-  const knownVersions = config.available_versions || appState.latestVersionList;
+  const knownVersions = appState.latestVersionList;
   if (version) {
     const current = config.version || knownVersions[0] || '1.21.7';
     version.innerHTML = '';
@@ -117,10 +132,31 @@ function populateConfigForm(config) {
   }
 }
 
+async function loadVersions(loader) {
+  try {
+    const result = await fetchJson(`/api/versions/${encodeURIComponent(loader)}`);
+    appState.latestVersionList = result.versions || [];
+  } catch (error) {
+    appState.latestVersionList = [];
+    setStatus(`Version list unavailable: ${error.message}`, true);
+  }
+}
+
+async function onLoaderChange() {
+  const loader = document.getElementById('loader-select').value;
+  await loadVersions(loader);
+  // Keep the saved version selected only if the new loader offers it.
+  const saved = appState.config.loader === loader ? appState.config.version : null;
+  populateConfigForm({ ...appState.config, loader, version: saved || appState.latestVersionList[0] });
+}
+
 async function loadConfig() {
   try {
     const config = await fetchJson('/api/config');
     appState.config = config;
+    if (document.getElementById('version-select')) {
+      await loadVersions(config.loader || 'vanilla');
+    }
     populateConfigForm(config);
 
     const motd = document.getElementById('motd-input');
@@ -142,24 +178,25 @@ async function loadConfig() {
     if (motd) motd.value = config.motd || 'EZ Minecraft Server';
     if (maxplayers) maxplayers.value = config.max_players || 10;
     if (gamemode) gamemode.value = config.gamemode || 'survival';
-    if (difficulty) difficulty.value = config.difficulty || 'easy';
+    if (difficulty) difficulty.value = config.difficulty || 'normal';
     if (leveltype) leveltype.value = config.level_type || 'normal';
     if (viewdist) viewdist.value = config.view_distance || 10;
     if (simdist) simdist.value = config.simulation_distance || 10;
-    if (seed) seed.value = config.seed || '';
+    if (seed) seed.value = config.level_seed || '';
     if (online) online.checked = config.online_mode !== false;
     if (pvp) pvp.checked = config.pvp !== false;
     if (spawnMonsters) spawnMonsters.checked = config.spawn_monsters !== false;
     if (allowFlight) allowFlight.checked = !!config.allow_flight;
     if (nether) nether.checked = config.allow_nether !== false;
-    if (whitelist) whitelist.checked = !!config.whitelist;
-    if (commandBlocks) commandBlocks.checked = config.command_blocks !== false;
+    if (whitelist) whitelist.checked = !!config.white_list;
+    if (commandBlocks) commandBlocks.checked = config.enable_command_block !== false;
   } catch (error) {
     setStatus(`Failed to load config: ${error.message}`, true);
   }
 }
 
 async function loadStatus() {
+  if (!document.getElementById('status-panel') && !document.getElementById('playit-status-panel')) return;
   try {
     const status = await fetchJson('/api/status');
     appState.status = status;
@@ -167,43 +204,52 @@ async function loadStatus() {
       `State: ${status.state || 'unknown'}`,
       `Loader: ${status.loader || 'n/a'}`,
       `Version: ${status.version || 'n/a'}`,
-      `Port: ${status.server_port || 'n/a'}`,
-      `Players: ${status.players || 0}`,
-      `Address: ${status.public_address || 'n/a'}`,
+      `Port: ${appState.config.server_port || 'n/a'}`,
+      `Players: ${status.players || 0}${status.player_names && status.player_names.length ? ` (${status.player_names.join(', ')})` : ''}`,
+      `LAN: ${status.lan_address || 'n/a'}`,
+      `Public: ${status.public_address || 'n/a'}`,
     ].join(' | ');
-    setStatus(statusText);
+    setServerSummary(statusText);
 
-    if (status.playit_state) {
-      setPlayitStatus(`PlayIt: ${status.playit_state}${status.playit_address ? ` (${status.playit_address})` : ''}`);
+    const playitInfo = status.playit || {};
+    if (playitInfo.state) {
+      setPlayitStatus(`PlayIt: ${playitInfo.state}${playitInfo.address ? ` (${playitInfo.address})` : ''}`);
     }
   } catch (error) {
-    setStatus(`Status unavailable: ${error.message}`, true);
+    setServerSummary(`Status unavailable: ${error.message}`, true);
   }
 }
 
 async function refreshConsole() {
+  const output = document.getElementById('console-output');
+  if (!output) return;
   try {
     const data = await fetchJson('/api/console');
-    const output = document.getElementById('console-output');
-    if (output) {
-      output.textContent = (data.lines || []).join('\n');
-    }
+    const atBottom = output.scrollTop + output.clientHeight >= output.scrollHeight - 4;
+    output.textContent = (data.lines || []).join('\n') || 'Waiting for logs...';
+    if (atBottom) output.scrollTop = output.scrollHeight;
   } catch (error) {
-    // no-op; console is optional
+    // no-op; the next poll retries
   }
 }
 
+function showListPlaceholder(list, message) {
+  const option = document.createElement('option');
+  option.value = '';
+  option.disabled = true;
+  option.textContent = message;
+  list.appendChild(option);
+}
+
 async function loadBackups() {
+  const list = document.getElementById('backup-list');
+  if (!list) return;
   try {
-    const result = await fetchJson('/api/backups');
-    const list = document.getElementById('backup-list');
-    if (!list) return;
+    const result = await fetchJson('/api/server/backups');
     list.innerHTML = '';
     const items = result.backups || [];
     if (!items.length) {
-      const option = document.createElement('option');
-      option.textContent = 'No backups found';
-      list.appendChild(option);
+      showListPlaceholder(list, 'No backups found');
       return;
     }
     items.forEach((backup) => {
@@ -218,16 +264,14 @@ async function loadBackups() {
 }
 
 async function loadInstalledMods() {
+  const list = document.getElementById('mod-installed-list');
+  if (!list) return;
   try {
-    const result = await fetchJson('/api/mods');
-    const list = document.getElementById('mod-installed-list');
-    if (!list) return;
+    const result = await fetchJson('/api/server/mods');
     list.innerHTML = '';
     const items = result.mods || [];
     if (!items.length) {
-      const option = document.createElement('option');
-      option.textContent = 'No mods installed';
-      list.appendChild(option);
+      showListPlaceholder(list, 'No mods installed');
       return;
     }
     items.forEach((mod) => {
@@ -253,23 +297,16 @@ async function searchMods() {
     const list = document.getElementById('mod-search-results');
     if (!list) return;
     list.innerHTML = '';
-    const hits = result.items || result.hits || [];
+    const hits = result.items || [];
     if (!hits.length) {
-      const option = document.createElement('option');
-      option.textContent = 'No results found';
-      list.appendChild(option);
+      showListPlaceholder(list, 'No results found');
       return;
     }
     hits.forEach((hit) => {
       const option = document.createElement('option');
-      const slug = hit.slug || hit.project_id || hit.id || '';
-      option.value = JSON.stringify({
-        slug,
-        project_id: hit.project_id || hit.id || slug,
-        title: hit.title || hit.name || slug,
-        version: hit.latest_version || hit.version || '',
-      });
-      option.textContent = `${hit.title || hit.name || slug} (${hit.project_type || 'mod'})`;
+      option.value = hit.slug;
+      option.textContent = `${hit.title} (${Number(hit.downloads || 0).toLocaleString()} downloads)`;
+      option.title = hit.description || '';
       list.appendChild(option);
     });
   } catch (error) {
@@ -277,31 +314,46 @@ async function searchMods() {
   }
 }
 
-async function saveConfigFromForm() {
-  const form = document.getElementById('setup-form');
-  const formData = new FormData(form);
-  const payload = Object.fromEntries(formData.entries());
+// [element id, config key, kind] for every setting input; pages only render some of them.
+const CONFIG_FIELDS = [
+  ['loader-select', 'loader', 'text'],
+  ['version-select', 'version', 'text'],
+  ['ram-input', 'ram_mb', 'number'],
+  ['port-input', 'server_port', 'number'],
+  ['motd-input', 'motd', 'text'],
+  ['maxplayers-input', 'max_players', 'number'],
+  ['gamemode-input', 'gamemode', 'text'],
+  ['difficulty-input', 'difficulty', 'text'],
+  ['leveltype-input', 'level_type', 'text'],
+  ['viewdist-input', 'view_distance', 'number'],
+  ['simdist-input', 'simulation_distance', 'number'],
+  ['seed-input', 'level_seed', 'text'],
+  ['online-mode', 'online_mode', 'checkbox'],
+  ['pvp-mode', 'pvp', 'checkbox'],
+  ['spawn-monsters', 'spawn_monsters', 'checkbox'],
+  ['allow-flight', 'allow_flight', 'checkbox'],
+  ['nether-mode', 'allow_nether', 'checkbox'],
+  ['whitelist-mode', 'white_list', 'checkbox'],
+  ['command-blocks', 'enable_command_block', 'checkbox'],
+];
 
-  payload.ram_mb = Number(payload.ram_mb || 2048);
-  payload.server_port = Number(payload.server_port || 25565);
-  payload.online_mode = document.getElementById('online-mode').checked;
-  payload.pvp = document.getElementById('pvp-mode').checked;
-  payload.spawn_monsters = document.getElementById('spawn-monsters').checked;
-  payload.allow_flight = document.getElementById('allow-flight').checked;
-  payload.allow_nether = document.getElementById('nether-mode').checked;
-  payload.whitelist = document.getElementById('whitelist-mode').checked;
-  payload.command_blocks = document.getElementById('command-blocks').checked;
-  payload.motd = document.getElementById('motd-input').value;
-  payload.max_players = Number(document.getElementById('maxplayers-input').value || 10);
-  payload.gamemode = document.getElementById('gamemode-input').value;
-  payload.difficulty = document.getElementById('difficulty-input').value;
-  payload.level_type = document.getElementById('leveltype-input').value;
-  payload.view_distance = Number(document.getElementById('viewdist-input').value || 10);
-  payload.simulation_distance = Number(document.getElementById('simdist-input').value || 10);
-  payload.seed = document.getElementById('seed-input').value || '';
+function collectConfigFromPage() {
+  const payload = {};
+  CONFIG_FIELDS.forEach(([id, key, kind]) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+    if (kind === 'checkbox') payload[key] = element.checked;
+    else if (kind === 'number') payload[key] = Number(element.value);
+    else payload[key] = element.value;
+  });
+  return payload;
+}
+
+async function saveConfigFromForm() {
+  const payload = collectConfigFromPage();
 
   try {
-    await fetchJson('/api/config', 'PUT', payload);
+    appState.config = await fetchJson('/api/config', 'PUT', payload);
     setStatus('Configuration saved.');
     await loadStatus();
   } catch (error) {
@@ -341,13 +393,9 @@ async function restartServer() {
 
 async function createServer() {
   try {
-    const payload = {
-      loader: document.getElementById('loader-select').value,
-      version: document.getElementById('version-select').value,
-      ram_mb: Number(document.getElementById('ram-input').value || 2048),
-    };
-    const response = await fetchJson('/api/server/create', 'POST', payload);
-    setStatus(response.message || 'Server created.');
+    setStatus('Creating server (downloads can take a few minutes)...');
+    const response = await fetchJson('/api/server/create', 'POST', collectConfigFromPage());
+    setStatus(response.message || `Server ${response.loader} ${response.version} created.`);
     await loadConfig();
     await loadStatus();
   } catch (error) {
@@ -358,7 +406,7 @@ async function createServer() {
 async function backupServer() {
   try {
     const response = await fetchJson('/api/server/backup', 'POST');
-    setStatus(response.message || 'Backup created.');
+    setStatus(response.message || 'Backup created.', response.ok === false);
     await loadBackups();
   } catch (error) {
     setStatus(`Backup failed: ${error.message}`, true);
@@ -373,8 +421,9 @@ async function restoreBackup() {
   }
 
   try {
-    const response = await fetchJson('/api/backups/restore', 'POST', { name: list.value });
+    const response = await fetchJson('/api/server/backups/restore', 'POST', { backup_path: list.value });
     setStatus(response.message || 'Backup restored.');
+    await loadBackups();
   } catch (error) {
     setStatus(`Restore failed: ${error.message}`, true);
   }
@@ -402,14 +451,9 @@ async function installSelectedMod() {
   }
 
   try {
-    const payload = JSON.parse(list.value);
-    const slug = payload.slug || payload.project_id || payload.id;
-    if (!slug) {
-      throw new Error('Selected mod has no valid slug or project id.');
-    }
-
-    const response = await fetchJson('/api/modrinth/install', 'POST', { slug });
-    setStatus(response.message || 'Mod install started.');
+    setStatus('Installing mod...');
+    const response = await fetchJson('/api/modrinth/install', 'POST', { slug: list.value });
+    setStatus(response.message || 'Mod installed.');
     await loadInstalledMods();
   } catch (error) {
     setStatus(`Mod install failed: ${error.message}`, true);
@@ -427,17 +471,18 @@ async function uploadMods() {
   Array.from(input.files).forEach((file) => formData.append('files', file));
 
   try {
-    const response = await fetch('/api/mods/upload', {
+    const response = await fetch('/api/server/mods/upload', {
       method: 'POST',
       headers: { Authorization: buildBasicAuth() },
       body: formData,
     });
     const text = await response.text();
-    if (!response.ok) {
-      throw new Error(text || 'Upload failed');
-    }
     const json = text ? JSON.parse(text) : {};
+    if (!response.ok) {
+      throw new Error(json.detail || 'Upload failed');
+    }
     setStatus(json.message || 'Mods uploaded.');
+    input.value = '';
     await loadInstalledMods();
   } catch (error) {
     setStatus(`Upload failed: ${error.message}`, true);
@@ -445,6 +490,7 @@ async function uploadMods() {
 }
 
 async function configurePlayit() {
+  setStatus('Waiting for PlayIt authorization: approve it in the browser opened on the server machine...');
   try {
     const response = await fetchJson('/api/playit/configure', 'POST');
     setStatus(response.message || 'PlayIt configured.');
@@ -702,6 +748,7 @@ async function refreshMetrics() {
 }
 
 function bindMetrics() {
+  if (!document.getElementById('metrics')) return;
   const toggle = document.getElementById('metrics-toggle');
   if (toggle) {
     toggle.addEventListener('click', () => {
@@ -730,6 +777,11 @@ function bindEvents() {
       saveConfigFromForm();
     });
   }
+
+  const advancedSaveButton = document.getElementById('advanced-save-button');
+  if (advancedSaveButton) advancedSaveButton.addEventListener('click', () => saveConfigFromForm());
+  const loaderSelect = document.getElementById('loader-select');
+  if (loaderSelect) loaderSelect.addEventListener('change', () => onLoaderChange());
 
   const createButton = document.getElementById('create-button');
   if (createButton) createButton.addEventListener('click', () => createServer());
@@ -810,6 +862,10 @@ async function boot() {
   await loadBackups();
   await loadInstalledMods();
   await refreshConsole();
+  if (document.getElementById('console-output')) {
+    setInterval(() => refreshConsole(), CONSOLE_POLL_MS);
+  }
+  setInterval(() => loadStatus(), STATUS_POLL_MS);
 }
 
 document.addEventListener('DOMContentLoaded', boot);

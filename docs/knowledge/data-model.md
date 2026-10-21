@@ -8,11 +8,9 @@ No DB, no migrations. Files + in-memory `RuntimeState`.
 EZ_Server_Data/
   launcher_config.json     config profile (config_store._FILE)
   playit_config.json       {"secret", "address"} (playit._CONFIG_FILE) — plaintext secret
-  mail_config.json         SMTP creds (mailer._CREDS_FILE; unused by web app)
   playit-<os>-<arch>[.exe] PlayIt agent binary (playit._agent_path)
   java/jre-<feature>/      Temurin JRE per Java major (java_manager._install_dir)
   servers/<loader>-<version>/  one dir per loader+version; spaces → "_" (paths.server_dir)
-  crash_reports/           crash_reporter (unused by web app)
 ```
 Switching loader/version in config switches to a different server dir (and world).
 
@@ -40,6 +38,7 @@ Switching loader/version in config switches to a different server dir (and world
 | enable_command_block | bool | True |
 
 `_effective_config()` = defaults ∪ stored dict. `PUT /api/config` merges payload and saves.
+The dashboard's `CONFIG_FIELDS` table (`dashboard.js`) maps inputs to exactly these keys.
 No schema validation: any payload key is persisted; unknown keys are ignored by
 `_server_properties_from_config`. `config_store.save` silently drops `OSError`.
 
@@ -67,15 +66,18 @@ enable-command-block.
 - Restore renames existing `world/` → `world-backup-pre-restore-<ts>/`, then extracts zip.
 
 ## Mods
-- `mods/` for forge/fabric/neoforge; `plugins/` otherwise (incl. vanilla, which loads neither).
-  `core/paths.py::content_folder` has a different (unused) mapping.
+- `core/paths.py::content_folder`: `mods/` for fabric/forge/neoforge, `plugins/` for paper,
+  none for vanilla (upload/install → 400). Listing still scans both `mods/` and `plugins/`.
 - List = `.jar` entries; upload streams 64 KiB chunks; Modrinth install writes into the same folder.
 
 ## `RuntimeState` (in-memory)
-`snapshot()` exposes state, loader, version, players, lan_address, public_address, operation,
+`snapshot()` exposes state, loader, version, players (count), player_names (sorted), lan_address,
+public_address, operation,
 install_status, install_progress, install_message, playit.{state,address}. Not persisted.
-`players` is never updated (always 0); `console_history` is unused (history lives in
-`WebSocketManager.history`).
+Players: the server process's `on_output` calls `runtime.track_player_event(line)`, which matches
+`]: <name> joined|left the game` (regex `state._PLAYER_EVENT`; the name must directly follow `]: `
+so chat lines cannot spoof it). The set is cleared on start and on exit. Console history lives in
+`WebSocketManager.history` (the unused `RuntimeState.console_history` was removed).
 
 `state` values set by `app.py`: `stopped`, `ready` (briefly, create), `installing`, `starting`,
 `running`, `stopping`. `operation`: `idle`, `creating`, `installing`, `starting`, `stopping`.

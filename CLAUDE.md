@@ -15,7 +15,10 @@ python -m uvicorn webapp.app:app --host 0.0.0.0 --port 8000
 ```powershell
 .venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py
 ```
-Writes to the real `EZ_Server_Data/launcher_config.json` — see `docs/knowledge/testing.md`.
+Tests use a temporary data dir (autouse fixture) — see `docs/knowledge/testing.md`.
+
+## Language
+All code comments, log/error messages and UI text are English. No localization layer.
 
 ## Knowledge base
 Start at `docs/knowledge/index.md`. Known defects: `docs/knowledge/verification.md`.

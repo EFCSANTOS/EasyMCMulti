@@ -1,17 +1,32 @@
 import importlib
 import os
+import re
+import zipfile
 
 os.environ["EZ_WEBAPP_USERNAME"] = "admin"
 os.environ["EZ_WEBAPP_PASSWORD"] = "s3cret-pass"
 
+import pytest
 from fastapi.testclient import TestClient
 
+from core import config_store, paths, playit
 from webapp.app import create_app
 
 webapp_module = importlib.import_module("webapp.app")
 
 app = create_app()
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def isolated_data_dir(tmp_path, monkeypatch):
+    """Keep tests away from the real EZ_Server_Data (launcher config, PlayIt secret, servers)."""
+    data_dir = tmp_path / "EZ_Server_Data"
+    monkeypatch.setattr(paths, "DATA_DIR", str(data_dir))
+    monkeypatch.setattr(paths, "JAVA_DIR", str(data_dir / "java"))
+    monkeypatch.setattr(paths, "SERVERS_DIR", str(data_dir / "servers"))
+    monkeypatch.setattr(config_store, "_FILE", str(data_dir / "launcher_config.json"))
+    monkeypatch.setattr(playit, "_CONFIG_FILE", str(data_dir / "playit_config.json"))
 
 
 def test_health_endpoint():
@@ -49,15 +64,37 @@ def test_dashboard_sections_have_their_own_pages():
         assert "EZ Minecraft" in response.text
 
 
-def test_dashboard_uses_runtime_auth_defaults(monkeypatch):
-    monkeypatch.setenv("EZ_WEBAPP_USERNAME", "admin")
-    monkeypatch.setenv("EZ_WEBAPP_PASSWORD", "admin")
+def test_dashboard_does_not_embed_credentials():
     response = client.get("/")
     assert response.status_code == 200
-    assert 'value="admin"' in response.text
-    assert 'name="password" type="password" value="admin"' in response.text
-    assert "join('\\\\n')" in response.text
-    assert "join('\\\\n')" in response.text
+    assert 'type="password"' not in response.text
+    assert 'value="admin"' not in response.text
+
+
+def test_every_dashboard_page_has_action_status_bar():
+    for section in ("overview", "setup", "advanced", "mods", "remote", "backups", "console"):
+        response = client.get(f"/dashboard/{section}")
+        assert 'id="action-status"' in response.text
+
+
+def test_advanced_page_has_save_control():
+    response = client.get("/dashboard/advanced")
+    assert 'id="advanced-save-button"' in response.text
+
+
+def test_dashboard_js_only_calls_existing_api_routes():
+    js_path = os.path.join(os.path.dirname(webapp_module.__file__), "static", "js", "dashboard.js")
+    with open(js_path, "r", encoding="utf-8") as handle:
+        source = handle.read()
+    route_paths = {route.path for route in app.routes}
+    called = set(re.findall(r"['`](/api/[^'`?]*)", source))
+    assert called, "expected dashboard.js to call the API"
+    for url in called:
+        if "${" in url:
+            prefix = url.split("${", 1)[0]
+            assert any(path.startswith(prefix) and "{" in path for path in route_paths), url
+        else:
+            assert url in route_paths, url
 
 
 def test_console_history_endpoint_returns_messages():
@@ -97,6 +134,7 @@ def test_modrinth_install_accepts_project_id(monkeypatch):
         return "fake-mod.jar"
 
     monkeypatch.setattr(webapp_module.modrinth, "install", fake_install)
+    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {"loader": "fabric", "version": "1.21.7"})
 
     response = client.post(
         "/api/modrinth/install",
@@ -297,3 +335,120 @@ def test_server_lifecycle_start_and_stop():
 
     stop_response = client.post("/api/server/stop", auth=("admin", "s3cret-pass"))
     assert stop_response.status_code == 200
+
+
+def test_restart_waits_for_previous_process_to_exit(monkeypatch):
+    events = []
+
+    class StoppableProcess:
+        def __init__(self, *args, **kwargs):
+            self.running = False
+
+        def start(self):
+            self.running = True
+            events.append("start")
+
+        def is_running(self):
+            return self.running
+
+        def send(self, command):
+            return None
+
+        def stop(self):
+            self.running = False
+            events.append("stop")
+
+        def kill(self):
+            self.running = False
+
+    monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: True)
+    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required: "java")
+    monkeypatch.setattr(webapp_module.downloaders, "launch_args", lambda *args, **kwargs: ["java"])
+    monkeypatch.setattr(webapp_module, "update_properties", lambda server_dir, **kwargs: None)
+    monkeypatch.setattr(webapp_module, "ServerProcess", StoppableProcess)
+
+    previous = StoppableProcess()
+    previous.start()
+    app.state.runtime.process = previous
+    events.clear()
+
+    response = client.post("/api/server/restart", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    assert response.json()["message"] == "Server started."
+    assert events == ["stop", "start"]
+    assert app.state.runtime.process is not previous
+
+
+def test_mod_upload_rejected_for_vanilla(monkeypatch):
+    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {"loader": "vanilla", "version": "1.21.7"})
+    response = client.post(
+        "/api/server/mods/upload",
+        auth=("admin", "s3cret-pass"),
+        files={"files": ("demo.jar", b"jar-bytes", "application/java-archive")},
+    )
+    assert response.status_code == 400
+    assert "vanilla" in response.json()["detail"]
+
+
+def test_player_tracking_from_console_lines():
+    runtime = webapp_module.RuntimeState()
+    runtime.track_player_event("[12:00:00] [Server thread/INFO]: Steve joined the game")
+    runtime.track_player_event("[12:00:01] [Server thread/INFO]: Alex joined the game")
+    runtime.track_player_event("[12:00:02] [Server thread/INFO]: <Steve> Bob joined the game")
+    runtime.track_player_event("[12:00:03] [Server thread/INFO]: Alex left the game")
+    snapshot = runtime.snapshot()
+    assert snapshot["players"] == 1
+    assert snapshot["player_names"] == ["Steve"]
+
+
+def _make_backup(server_dir, name, members):
+    path = os.path.join(server_dir, name)
+    with zipfile.ZipFile(path, "w") as zf:
+        for member in members:
+            zf.writestr(member, "data")
+    return path
+
+
+def test_backup_restore_round_trip_and_validation(monkeypatch):
+    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {"loader": "vanilla", "version": "1.21.7"})
+    app.state.runtime.process = None
+    server_dir = paths.server_dir("vanilla", "1.21.7")
+    good = _make_backup(server_dir, "world-backup-20260101-000000.zip", ["world/level.dat"])
+    _make_backup(server_dir, "world-backup-evil.zip", ["world/../../escape.txt"])
+
+    listed = client.get("/api/server/backups", auth=("admin", "s3cret-pass")).json()["backups"]
+    assert good in listed
+
+    response = client.post("/api/server/backups/restore", auth=("admin", "s3cret-pass"), json={"backup_path": good})
+    assert response.status_code == 200
+    assert os.path.isfile(os.path.join(server_dir, "world", "level.dat"))
+
+    response = client.post("/api/server/backups/restore", auth=("admin", "s3cret-pass"),
+                           json={"backup_path": "world-backup-evil.zip"})
+    assert response.status_code == 400
+    assert not os.path.exists(os.path.join(paths.DATA_DIR, "escape.txt"))
+
+    outside = _make_backup(paths.DATA_DIR, "world-backup-outside.zip", ["world/level.dat"])
+    response = client.post("/api/server/backups/restore", auth=("admin", "s3cret-pass"), json={"backup_path": outside})
+    assert response.status_code == 400
+
+
+def test_playit_config_does_not_expose_secret(monkeypatch):
+    monkeypatch.setattr(webapp_module.playit, "load_config", lambda: {"secret": "top-secret", "address": "demo.example"})
+    response = client.get("/api/playit/config", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    assert "top-secret" not in response.text
+    assert response.json() == {"address": "demo.example", "secret_present": True}
+
+
+def test_wrong_password_is_rejected():
+    response = client.get("/api/status", auth=("admin", "wrong"))
+    assert response.status_code == 401
+
+
+def test_playit_status_is_not_running_without_agent(monkeypatch):
+    monkeypatch.setattr(webapp_module.playit, "load_config", lambda: {"secret": "demo-secret", "address": "demo.example"})
+    app.state.runtime.playit_agent = None
+    response = client.get("/api/playit/status", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    assert response.json()["state"] == "configured"

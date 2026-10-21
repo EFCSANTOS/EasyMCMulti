@@ -1,4 +1,4 @@
-"""Lancement et controle du processus serveur Minecraft + fichiers de config (eula, properties)."""
+"""Minecraft server process launch and control + config files (eula, properties)."""
 import os
 import subprocess
 import sys
@@ -8,13 +8,13 @@ CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
 def accept_eula(server_dir):
-    """Ecrit eula=true (obligatoire pour que le serveur Mojang demarre)."""
+    """Write eula=true (required for the Mojang server to start)."""
     with open(os.path.join(server_dir, "eula.txt"), "w", encoding="utf-8") as f:
         f.write("eula=true\n")
 
 
 def read_properties(server_dir):
-    """Lit server.properties et renvoie un dict {cle: valeur} (vide si absent)."""
+    """Read server.properties and return a {key: value} dict (empty if missing)."""
     path = os.path.join(server_dir, "server.properties")
     props = {}
     if os.path.exists(path):
@@ -28,35 +28,27 @@ def read_properties(server_dir):
 
 
 def update_properties(server_dir, **kwargs):
-    """Met a jour server.properties avec les cles fournies (cree le fichier si absent).
+    """Update server.properties with the given keys (creates the file if missing).
 
-    Les valeurs bool sont converties en true/false. Le serveur complete le reste au demarrage.
+    Bool values are written as true/false. The server fills in the rest on startup.
     """
-    path = os.path.join(server_dir, "server.properties")
-    props = {}
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.rstrip("\n")
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    props[k] = v
+    props = read_properties(server_dir)
     for k, v in kwargs.items():
         key = k.replace("_", "-")
         if isinstance(v, bool):
             v = "true" if v else "false"
         props[key] = str(v)
-    with open(path, "w", encoding="utf-8") as f:
+    with open(os.path.join(server_dir, "server.properties"), "w", encoding="utf-8") as f:
         for k, v in props.items():
             f.write(f"{k}={v}\n")
 
 
 class ServerProcess:
-    """Enveloppe autour du sous-processus serveur (commande deja construite).
+    """Wrapper around the server subprocess (command already built).
 
-    args              : liste d'arguments complete (java + options + jar/argsfile + nogui)
-    on_output(line)   : appele pour chaque ligne de console du serveur
-    on_exit(code)     : appele quand le serveur s'arrete
+    args              : full argument list (java + options + jar/argsfile + nogui)
+    on_output(line)   : called for each server console line
+    on_exit(code)     : called when the server exits
     """
 
     def __init__(self, args, cwd, on_output, on_exit):
@@ -99,7 +91,7 @@ class ServerProcess:
                 pass
 
     def stop(self):
-        """Arret propre : commande 'stop' (sauvegarde le monde)."""
+        """Graceful stop: sends the 'stop' command (saves the world)."""
         self.send("stop")
 
     def kill(self):

@@ -347,6 +347,16 @@ button:focus-visible {
   min-height: 1.4rem;
 }
 
+.action-status {
+  color: var(--text);
+  border-left: 3px solid #38bdf8;
+}
+
+.action-status.is-error {
+  color: #fca5a5;
+  border-left-color: #f87171;
+}
+
 .card-row {
   display: flex;
   justify-content: flex-start;

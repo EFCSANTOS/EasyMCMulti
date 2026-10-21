@@ -8,6 +8,6 @@
 | conventions.md | Writing code that must match existing patterns |
 | testing.md | Adding tests, assessing coverage, test side effects |
 | decisions.md | Questioning design choices; proposing alternatives |
-| verification.md | Known defects (JS↔API, security), doc conflicts, audit scope |
+| verification.md | GUI feature status, fixed/open defects, security findings, audit scope |
 
 Source of truth: repository files. Claims carry `path::symbol` references. Last full audit: 2026-10-22.

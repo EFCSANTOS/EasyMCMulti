@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
+import secrets
 
 from fastapi import HTTPException, status
 from fastapi.security import HTTPBasicCredentials
@@ -26,9 +27,16 @@ def get_expected_credentials() -> tuple[str, str]:
     return username, password
 
 
-def verify_credentials(credentials: HTTPBasicCredentials) -> str:
+def _credentials_match(username: str, password: str) -> bool:
+    """Constant-time comparison so response timing does not leak the expected credentials."""
     expected_username, expected_password = get_expected_credentials()
-    if credentials.username != expected_username or credentials.password != expected_password:
+    username_ok = secrets.compare_digest(username.encode("utf-8"), expected_username.encode("utf-8"))
+    password_ok = secrets.compare_digest(password.encode("utf-8"), expected_password.encode("utf-8"))
+    return username_ok and password_ok
+
+
+def verify_credentials(credentials: HTTPBasicCredentials) -> str:
+    if not _credentials_match(credentials.username, credentials.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed.",
@@ -54,8 +62,7 @@ def verify_basic_auth_header(auth_header: str | None) -> str:
     if separator != ":":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication failed.")
 
-    expected_username, expected_password = get_expected_credentials()
-    if username != expected_username or password != expected_password:
+    if not _credentials_match(username, password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed.",
