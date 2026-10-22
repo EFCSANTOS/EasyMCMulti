@@ -1,6 +1,7 @@
 """Server lifecycle (install/create/start/stop/restart), console commands and admin."""
 from __future__ import annotations
 
+import json
 import threading
 import time
 from typing import Any
@@ -10,7 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, Response
 from core import config_store, diagnose, downloaders, java_manager, players
 from webapp import common
 from webapp.services import Services, require_auth
-from webapp.validation import require_command, require_player, validate_config_update
+from webapp.validation import require_chat, require_command, require_player, validate_config_update
 
 
 def register(app: FastAPI, s: Services) -> None:
@@ -295,6 +296,19 @@ def register(app: FastAPI, s: Services) -> None:
     def restart_server(response: Response, _: str = Depends(require_auth)) -> dict[str, Any]:
         start_lifecycle_job("restarting", restart_job, "Server restart failed")
         return accepted(response, "Restarting the server…")
+
+    @app.post("/api/server/chat")
+    def send_chat(payload: dict[str, Any], username: str = Depends(require_auth)) -> dict[str, Any]:
+        """Say something in game as "[Dashboard] <user>: <message>" (FEAT-11)."""
+        message = require_chat(payload.get("message"))
+        if runtime.process is None or not runtime.process.is_running():
+            raise HTTPException(status_code=409, detail="Server is not running.")
+        # Built with json.dumps, never by concatenating the message into the command.
+        components = ["", {"text": "[Dashboard] ", "color": "gray"}, {"text": f"{username}: ", "color": "aqua"},
+                      {"text": message}]
+        runtime.process.send("tellraw @a " + json.dumps(components, ensure_ascii=False))
+        append_console_line(f"[chat] {username}: {message}")
+        return {"ok": True, "message": "Sent."}
 
     @app.post("/api/server/command")
     def send_command(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:

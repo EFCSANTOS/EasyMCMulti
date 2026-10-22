@@ -237,8 +237,9 @@ async function sendCommand(input) {
   if (!value) return;
   try {
     await fetchJson('/api/server/command', 'POST', { command: value });
+    rememberCommand(value);
     input.value = '';
-    await refreshConsole(true);
+    await refreshConsole();
   } catch (error) {
     setStatus(`Command failed: ${error.message}`, 'error');
   }

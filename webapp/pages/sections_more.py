@@ -277,7 +277,15 @@ _SECTION_CONSOLE_FULL = f"""
         <section id="console" class="card console-card">
           <div class="card-header">
             <h2>Server output</h2>
-            <label class="inline-check"><input id="console-autoscroll" type="checkbox" checked /> Auto-scroll</label>
+            <div class="card-tools">
+              <select id="console-filter" aria-label="Show">
+                <option value="all">Everything</option>
+                <option value="chat">Chat only</option>
+                <option value="problems">Warnings &amp; errors</option>
+              </select>
+              <input id="console-search" type="search" placeholder="Search" aria-label="Search the console" />
+              <label class="inline-check"><input id="console-autoscroll" type="checkbox" checked /> Auto-scroll</label>
+            </div>
           </div>
           <pre id="console-output" class="console console-tall">Waiting for logs...</pre>
           {_COMMAND_FORM}
