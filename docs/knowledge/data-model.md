@@ -26,6 +26,10 @@ so a power cut never leaves a truncated file. The previous version stays as `<fi
 (`fsutil.read_json`) fall back to it when the main file is damaged, rewrite the main file from it
 and log `[config] <file> was damaged; restored the previous copy.` to the console.
 
+**World backups** (server dir): `world-backup-<folder>-<ts>[-<label>].zip` (workflows.md §11).
+Config keys (FEAT-01): `backup_interval_hours` (6, 0–168, 0 = off), `backup_keep_recent` (8, 1–100),
+`backup_keep_daily` (7, 0–60), `backup_prune_manual` (False).
+
 **Mod pack cache** (FEAT-04, server dir): `ez-modpack.mrpack` (the last built pack) and
 `ez-modpack.json` (summary + `fingerprint`); safe to delete, rebuilt on the next export.
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from webapp.pages.sections_main import _COMMAND_FORM
-from webapp.pages.widgets import _copy_button, _icon
+from webapp.pages.widgets import _copy_button, _icon, _switch
 
 _SECTION_MODS = f"""
         <section id="mods" class="stack">
@@ -206,15 +206,52 @@ _SECTION_REMOTE = f"""
 """
 
 _SECTION_BACKUPS = f"""
-        <section id="backups" class="card">
-          <div class="card-header">
-            <div>
-              <h2>World backups</h2>
-              <p class="card-sub">Restoring moves the current world aside first, so nothing is lost. Stop the server before restoring.</p>
+        <section id="backups" class="stack">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>World backups</h2>
+                <p class="card-sub">Restoring moves the current world aside first, so nothing is lost. Stop the server before restoring.</p>
+              </div>
+              <button id="backup-button" class="btn btn-primary btn-sm" type="button">{_icon("archive")} Backup world</button>
             </div>
-            <button id="backup-button" class="btn btn-primary btn-sm" type="button">{_icon("archive")} Backup world</button>
+            <p id="backup-total" class="hint"></p>
+            <div id="backup-list" class="item-list"></div>
           </div>
-          <div id="backup-list" class="item-list"></div>
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>Automatic backups</h2>
+                <p class="card-sub">Backs up the world on a schedule while it is being played, and before deleting a
+                  world or updating. Old automatic backups are removed so storage doesn't fill up.</p>
+              </div>
+            </div>
+            <form id="backup-schedule-form" class="form-grid">
+              <div class="field">
+                <label for="backup-interval">Back up every</label>
+                <select id="backup-interval">
+                  <option value="0">Never (off)</option>
+                  <option value="1">Hour</option>
+                  <option value="3">3 hours</option>
+                  <option value="6">6 hours</option>
+                  <option value="12">12 hours</option>
+                  <option value="24">Day</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="backup-keep-recent">Keep the latest</label>
+                <input id="backup-keep-recent" type="number" min="1" max="100" value="8" />
+              </div>
+              <div class="field">
+                <label for="backup-keep-daily">Plus one per day for (days)</label>
+                <input id="backup-keep-daily" type="number" min="0" max="60" value="7" />
+              </div>
+              <div class="field field-action">
+                <button class="btn btn-primary" type="submit">Save</button>
+              </div>
+            </form>
+            {_switch("backup-prune-manual", "Also remove old manual backups", "Off: backups you made with the button are kept until you delete them.", False)}
+          </div>
         </section>
 """
 
