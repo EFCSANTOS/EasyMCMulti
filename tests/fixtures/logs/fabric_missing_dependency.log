@@ -1,0 +1,8 @@
+[12:00:01] [main/INFO]: Loading Minecraft 1.20.4 with Fabric Loader 0.15.11
+[12:00:01] [main/ERROR]: Incompatible mods found!
+net.fabricmc.loader.impl.FormattedException: Some of your mods are incompatible with the game or each other!
+A potential solution has been determined, this may resolve your problem:
+	 - Install sodium, any version.
+More details:
+	 - Mod 'Sodium Extra' (sodium-extra) 0.5.4+mc1.20.4 requires any version of mod 'Sodium' (sodium), which is missing!
+	 - Mod 'Mod Menu' (modmenu) 9.0.0 requires version 0.91.0 or later of fabric-api, which is missing!

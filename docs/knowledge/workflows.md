@@ -457,6 +457,30 @@ Core details (`core/playit.py`):
   `common._in_quiet_hours`): `launch_when_free` skips `autostart` and `crash restart` starts in that
   window (console `[schedule] quiet hours: … skipped`). Manual starts and the daily restart still work.
 
+## 25. Crash diagnosis and log files (FEAT-08)
+- `core/diagnose.py::diagnose(lines, crash_report)` — pure rule table, most specific first; items
+  `{code, title, message, action}`: `missing_dependency` (Fabric "Mod 'X' (x) … requires … of mod
+  'Y' (y), which is missing" and the bare-id form; Forge/NeoForge "Mod ID: 'y', Requested by: 'x', …
+  Actual version: '[MISSING]'" or a wrong version) → `install_mod {slug}`; `incompatible_mods`;
+  `client_only_mod` ("invalid dist DEDICATED_SERVER" / Fabric environment) → `remove_mod {file}` when
+  the jar is named; `wrong_java` (class file version → Java = version − 44); `out_of_memory` →
+  `open_setting setup/ram-input`; `port_in_use` → `kill_process {port}`; `world_locked`; `eula` →
+  `accept_eula`. `first_line(items)` = "Likely cause: …" for alerts.
+- `routes/diagnosis.py::run_diagnosis()` runs on every unexpected exit (in `on_exit`, before the
+  crash handling) over the last `DIAGNOSIS_LINES` (300) console lines + the newest
+  `crash-reports/*.txt` written since `runtime.last_start_at`; stores `runtime.diagnosis` /
+  `diagnosis_at`, logs `[diagnosis] …` lines; the crash / DOWN / stopped-unexpectedly alerts
+  append `first_line`. A start clears it. `GET /api/server/diagnosis` → `{items, at}`;
+  `/api/status` carries `diagnosis_at` so the dashboard reloads the card when it changes.
+- `POST /api/server/diagnosis/fix {kind}` (409 while running): `accept_eula` writes eula.txt;
+  `kill_process {port}` finds the listening PID with psutil and terminates it **only if the
+  process name contains "java"** (else 409 naming it; 404 if nothing listens). Install/remove use
+  the existing Modrinth install and mod delete routes.
+- UI: "Why the server stopped" card (Overview, Console) with one button per action (kill asks
+  first); Console → "Log files" lists `logs/*.log|.log.gz` and `crash-reports/*.txt` (name pattern
+  `^[\w.-]+\.(log|txt|log.gz)$`, folder must be one of the two) with View (last 2000 lines,
+  gz decompressed: `GET /api/server/logs/{folder}/{name}`) and Download (`?download=true`).
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

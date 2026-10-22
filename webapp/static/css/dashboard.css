@@ -1068,6 +1068,11 @@ select[aria-invalid="true"] {
   font-weight: 650;
 }
 
+/* Crash diagnosis card: stands out from the normal cards. */
+.callout-card {
+  border-left: 3px solid var(--critical);
+}
+
 /* ---------- Invite card ---------- */
 .invite-text {
   margin: 0 0 1rem;

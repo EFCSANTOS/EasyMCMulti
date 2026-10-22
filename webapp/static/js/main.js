@@ -64,6 +64,7 @@ function bindEvents() {
   on('world-upload-input', 'change', (event, input) => uploadWorld(input));
   on('world-create-form', 'submit', (event) => createWorld(event));
   bindPlayers();
+  on('logs-refresh-button', 'click', () => loadLogs());
   on('backup-schedule-form', 'submit', (event) => {
     event.preventDefault();
     saveBackupSchedule(event.submitter);
@@ -97,6 +98,7 @@ async function boot() {
   await loadConfig();
   await loadStatus();
   await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(), loadInvite(), loadModpack(),
+    loadDiagnosis(), loadLogs(),
     refreshConsole(true)]);
   initModBrowser(); // after loadInstalledMods so cards can show "Installed"
 

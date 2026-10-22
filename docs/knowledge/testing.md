@@ -1,9 +1,9 @@
 # Testing
 
 ## Layout
-`tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
+`tests/test_webapp_smoke.py` (+ `tests/fixtures/logs/` for FEAT-08); sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-160 passed (~32 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+165 passed (~33 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Patching
@@ -56,6 +56,9 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Diagnosis (FEAT-08): every rule against a real-format snippet in `tests/fixtures/logs/` (add a
+  fixture there for each new rule); crash → stored diagnosis + "Likely cause" in the alert, cleared on
+  start; EULA fix; kill only Java (fake psutil); log list/view (truncation, .gz), download, traversal.
 - Schedule (FEAT-06, `scheduler_tick(datetime)` with fixed times): warnings at 10/5/1 then one
   restart a day; a late joiner hears the real minutes left; no restart when >30 min late; idle stop
   only after N empty minutes, cancelled by a join, `stopped_reason` shown and cleared, friends told

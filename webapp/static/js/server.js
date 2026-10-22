@@ -191,6 +191,7 @@ async function loadStatus() {
   }
   renderStatus(appState.status);
   reportFinishedOperation(previous, appState.status);
+  if ((appState.status.diagnosis_at || 0) !== (previous.diagnosis_at || 0)) await loadDiagnosis();
   if (document.getElementById('playit-status-panel')) await loadPlayitStatus();
   if (document.getElementById('remote-dashboard-toggle')) await loadRemoteDashboard();
 }
