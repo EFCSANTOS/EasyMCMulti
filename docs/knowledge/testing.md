@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-103 passed (~23 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+109 passed (~26 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Data isolation
@@ -50,6 +50,10 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Atomic writes (FIX-03): `.bak` kept and no `.tmp` left for every settings file; a truncated
+  `launcher_config.json` is restored from `.bak`, repaired on disk and logged; a failed replace
+  leaves the original intact; `PUT /api/config` → 500 on a disk error. Patch inside
+  `monkeypatch.context()` — `monkeypatch.undo()` would also undo the data-dir redirect.
 - Lifecycle jobs (FIX-02/04): create returns 202 within 2 s and installs on the thread (gated fake
   `prepare`); every lifecycle route → 409 "Busy" while one runs; 4 concurrent starts → one 202 and
   one process; a failed install → `install_status="failed"` + `operation_error` + console line; the

@@ -40,6 +40,11 @@
 - Routes `/api/<domain>[/<action>]`; UI `/dashboard/{section}`.
 - Tests `test_<feature>_<expectation>`.
 
+## Files
+- Write settings/metadata with `fsutil.write_json_atomic` / `write_text_atomic` and read them with
+  `fsutil.read_json(path, default)` — never a bare `open(path, "w")` for anything the app needs to
+  come back up (a truncated config silently switches to defaults and a different server dir).
+
 ## Windows specifics
 - `CREATE_NO_WINDOW` to hide console.
 - ctypes `GlobalMemoryStatusEx` fallback when `psutil` missing.

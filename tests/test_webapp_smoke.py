@@ -12,7 +12,7 @@ os.environ["EZ_WEBAPP_PASSWORD"] = "s3cret-pass"
 import pytest
 from fastapi.testclient import TestClient
 
-from core import config_store, notifier, paths, playit
+from core import config_store, fsutil, notifier, paths, playit
 from webapp import auth
 from webapp.app import create_app
 
@@ -1733,3 +1733,74 @@ def test_crash_restart_waits_for_running_job_then_skips_if_started(slow_install)
 def test_install_banner_is_on_every_page():
     for section in ("overview", "setup", "advanced", "worlds", "mods", "remote", "backups", "console"):
         assert client.get(f"/dashboard/{section}").text.count('id="install-banner"') == 1, section
+
+
+# ---------- Atomic writes and damaged-file recovery (FIX-03) ----------
+def test_config_save_is_atomic_and_keeps_a_backup():
+    config_store.save({"loader": "paper", "version": "1.21.4"})
+    config_store.save({"loader": "fabric", "version": "1.21.4"})
+    path = config_store._FILE
+    assert config_store.load()["loader"] == "fabric"
+    assert json.load(open(path + ".bak", encoding="utf-8"))["loader"] == "paper"
+    assert not os.path.exists(path + ".tmp")
+
+
+def test_damaged_config_is_restored_from_backup_and_logged():
+    config_store.save({"loader": "paper", "version": "1.21.4"})
+    config_store.save({"loader": "paper", "version": "1.21.4", "motd": "x"})
+    with open(config_store._FILE, "w", encoding="utf-8") as handle:
+        handle.write('{"loader": "pap')  # power cut mid-write (pre-FIX-03 style)
+    app.state.console_manager.history.clear()
+    assert config_store.load()["loader"] == "paper"
+    assert json.load(open(config_store._FILE, encoding="utf-8"))["loader"] == "paper"  # repaired on disk
+    lines = client.get("/api/console", auth=("admin", "s3cret-pass")).json()["lines"]
+    assert any("launcher_config.json was damaged; restored the previous copy" in line for line in lines)
+
+
+def test_failed_write_leaves_the_original_intact(monkeypatch):
+    config_store.save({"loader": "paper"})
+
+    def broken_replace(src, dst):
+        raise OSError(28, "No space left on device")
+
+    with monkeypatch.context() as patch, pytest.raises(OSError):
+        patch.setattr(fsutil.os, "replace", broken_replace)
+        config_store.save({"loader": "fabric"})
+    assert config_store.load()["loader"] == "paper"
+    assert not os.path.exists(config_store._FILE + ".tmp")
+
+
+def test_put_config_reports_disk_errors(monkeypatch):
+    def full_disk(data):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(config_store, "save", full_disk)
+    response = client.put("/api/config", auth=("admin", "s3cret-pass"), json={"motd": "hi"})
+    assert response.status_code == 500
+    assert "disk full" in response.json()["detail"]
+
+
+def test_missing_file_without_backup_is_quiet(tmp_path):
+    app.state.console_manager.history.clear()
+    assert fsutil.read_json(str(tmp_path / "nothing.json"), {"a": 1}) == {"a": 1}
+    assert not any("damaged" in line for line in app.state.console_manager.history)
+
+
+def test_atomic_writes_cover_every_settings_file(tmp_path):
+    notifier.save_config({"email_to": "me@example.com"})
+    notifier.save_config({"email_to": "you@example.com"})
+    playit.save_config("ab12cd34ef", "a.example")
+    playit.save_config("ab12cd34ef", "b.example")
+    from core import modrinth, server_process, worlds
+    worlds._save_meta(str(tmp_path), {"world": {"name": "One"}})
+    worlds._save_meta(str(tmp_path), {"world": {"name": "Two"}})
+    modrinth._save_record(str(tmp_path), {"p1": {"filename": "a.jar"}})
+    modrinth._save_record(str(tmp_path), {"p1": {"filename": "b.jar"}})
+    server_process.update_properties(str(tmp_path), motd="one")
+    server_process.update_properties(str(tmp_path), motd="two")
+    for path in (notifier._CONFIG_FILE, playit._CONFIG_FILE, str(tmp_path / worlds.META_FILE),
+                 str(tmp_path / modrinth.RECORD_FILE), str(tmp_path / "server.properties")):
+        assert os.path.exists(path + ".bak"), path
+        assert not os.path.exists(path + ".tmp"), path
+    assert server_process.read_properties(str(tmp_path))["motd"] == "two"
+    assert worlds.load_meta(str(tmp_path))["world"]["name"] == "Two"

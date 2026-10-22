@@ -18,6 +18,13 @@ EZ_Server_Data/
 ```
 Switching loader/version in config switches to a different server dir (and world).
 
+**Atomic writes (FIX-03).** Every settings/metadata file — `launcher_config.json`,
+`notify_config.json`, `playit_config.json`, `ez-worlds.json`, `.ez-modrinth.json`,
+`server.properties` — is written by `core/fsutil.py` (`<file>.tmp` → flush + fsync → `os.replace`),
+so a power cut never leaves a truncated file. The previous version stays as `<file>.bak`; readers
+(`fsutil.read_json`) fall back to it when the main file is damaged, rewrite the main file from it
+and log `[config] <file> was damaged; restored the previous copy.` to the console.
+
 ## Config profile (`core/config_store`, schema `webapp/app.py::_default_config`)
 | Key | Type | Default |
 |---|---|---|
@@ -55,7 +62,8 @@ dashboard tunnel may remain in old configs; it is ignored.
 `_effective_config()` = defaults ∪ stored dict. `PUT /api/config` merges payload and saves.
 The dashboard's `CONFIG_FIELDS` table (`dashboard.js`) maps inputs to exactly these keys.
 No schema validation: any payload key is persisted; unknown keys are ignored by
-`_server_properties_from_config`. `config_store.save` silently drops `OSError`.
+`_server_properties_from_config`. `config_store.save` raises `OSError` (disk full, …);
+`PUT /api/config` turns it into 500 "Could not save settings (disk full?)".
 
 ## `server.properties`
 Produced by `_server_properties_from_config` and written by `update_properties`:
