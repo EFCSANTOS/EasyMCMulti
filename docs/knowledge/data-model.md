@@ -9,6 +9,7 @@ EZ_Server_Data/
   launcher_config.json     config profile (config_store._FILE)
   playit_config.json       {"secret", "address"} (playit._CONFIG_FILE) — plaintext secret
   cloudflared-<os>-<arch>  Cloudflare tunnel binary, downloaded on Windows/Linux (cloudflared.ensure_binary)
+  notify_config.json       alert settings (notifier._CONFIG_FILE) — plaintext SMTP app password; last_link
   playit-<os>-<arch>[.exe] PlayIt agent binary (playit._agent_path)
   java/jre-<feature>/      Temurin JRE per Java major (java_manager._install_dir)
   servers/<loader>-<version>/  one dir per loader+version; spaces → "_" (paths.server_dir)
@@ -39,7 +40,7 @@ Switching loader/version in config switches to a different server dir (and world
 | enable_command_block | bool | True |
 
 Always-on keys (in `_default_config`, edited on Server setup → Always-on): `autostart_server`
-(False), `autostart_playit` (False), `auto_restart` (True), `remote_dashboard` (False; Remote
+(False), `autostart_playit` (False), `auto_restart` (True), `remote_dashboard` (**True**; Remote
 access page, `POST /api/remote-dashboard`). A stale `dashboard_tunnel` key from the removed PlayIt
 dashboard tunnel may remain in old configs; it is ignored.
 

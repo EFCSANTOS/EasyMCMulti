@@ -193,8 +193,32 @@ Core details (`core/playit.py`):
 - Only cloudflared `ERR`/`WRN` lines reach the console (`[cloudflare] …`), plus the final link.
 - Unexpected exit while wanted (`runtime.web_tunnel_wanted`) → state `error` + retry after
   `WEB_TUNNEL_RETRY_SEC` (15 s), indefinitely; the new link differs.
-- Autostart restores it when `remote_dashboard` is on; shutdown stops it (config stays on).
+- Autostart restores it when `remote_dashboard` is on — **default True** since 2026-10-22 (owner
+  decision), so it comes up on every boot unless switched off; shutdown stops it (config stays on).
+  Each new link is emailed when alerts are configured (§17).
 - The link is HTTPS but login is still Basic auth without lockout → verification.md "Must fix".
+
+## 17. Alerts (email + heartbeat)
+- Settings: `core/notifier.py`, file `EZ_Server_Data/notify_config.json` (keys `notifier.DEFAULTS` +
+  internal `last_link`). `GET /api/notifications` → `public_config()` (no `smtp_password`, adds
+  `password_set`); `PUT` merges (empty `smtp_password` keeps the saved one; `last_link` cannot be
+  set from the API); `POST /api/notifications/test` sends a test email and/or pings the heartbeat
+  (400 if neither is configured, 502 with the reason on failure). Server setup → Alerts card.
+- `notify(category, subject, body, throttle=True)` (inside `create_app`): only when
+  `email_ready()` and `notify_<category>` is on (`server` / `link` / `tunnels`); same subject at most
+  once per `ALERT_REPEAT_SEC` (600 s); sends on a daemon thread via SMTP (STARTTLS on 587, SSL on
+  465); logs `[notify] email sent|failed`. Body adds host name, time, current dashboard link.
+- Hooks: crash (`Minecraft server crashed`), limit reached (`… DOWN (auto-restart paused)`), restart
+  failed / back online, unexpected exit with auto-restart off, autostart failures, new Cloudflare
+  link (`link`, unthrottled, only when it differs from `last_link`), Cloudflare link down / failed
+  to start, PlayIt agent stopped unexpectedly (`tunnels`).
+- PlayIt agent crash (2026-10-22): `on_agent_exit` restarts `start_agent_and_tunnels` after
+  `PLAYIT_RETRY_SEC` (30 s). Deliberate stops go through `stop_playit_agent()`, which clears
+  `runtime.playit_agent` before `stop()`, so the exit isn't treated as a crash. `runtime.shutting_down`
+  (set first in `shutdown()`) suppresses restarts and the heartbeat.
+- Heartbeat: `heartbeat_loop` thread started by `autostart()`; GETs `heartbeat_url` every
+  `HEARTBEAT_INTERVAL_SEC` (60 s). Meant for healthchecks.io-style dead-man's switches: covers
+  outages the app can't report itself (device off, no internet, process killed).
 
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash

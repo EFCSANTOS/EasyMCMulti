@@ -98,6 +98,23 @@ close it. In the dashboard, open **Server setup → Always-on** and turn on:
 - **Restart after a crash** (on by default: waits 10 s, pauses after 3 crashes in 10 minutes)
 - **Start the PlayIt tunnel with the dashboard**
 
+The dashboard's https link (**Remote access** page) is **on by default** and comes back by itself
+after every boot; each restart gives a new link.
+
+### Alerts (free)
+
+Open **Server setup → Alerts**:
+
+- **Email me** — sends alerts from your Gmail using an *app password*
+  ([myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords), needs 2-step
+  verification). Alerts: server crashed / back online / down (auto-restart paused), **new dashboard
+  link** (with the link), PlayIt or dashboard link stopped unexpectedly. Each alert is sent at most
+  once every 10 minutes. Other providers: open "Other email provider" and set the SMTP server/port.
+- **Heartbeat URL** — for when the whole phone goes down (powered off, no internet, app killed) and
+  can't send anything. Create a free check at [healthchecks.io](https://healthchecks.io), paste its
+  ping URL; the dashboard checks in every minute and healthchecks.io emails you when it stops.
+- **Send test** checks both.
+
 On Windows, the same Always-on switches work; to start the dashboard at logon, add `run.bat` to
 Task Scheduler with `EZ_WEBAPP_USERNAME`/`EZ_WEBAPP_PASSWORD` set as user environment variables.
 

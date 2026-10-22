@@ -11,7 +11,7 @@ os.environ["EZ_WEBAPP_PASSWORD"] = "s3cret-pass"
 import pytest
 from fastapi.testclient import TestClient
 
-from core import config_store, paths, playit
+from core import config_store, notifier, paths, playit
 from webapp.app import create_app
 
 webapp_module = importlib.import_module("webapp.app")
@@ -29,6 +29,7 @@ def isolated_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "SERVERS_DIR", str(data_dir / "servers"))
     monkeypatch.setattr(config_store, "_FILE", str(data_dir / "launcher_config.json"))
     monkeypatch.setattr(playit, "_CONFIG_FILE", str(data_dir / "playit_config.json"))
+    monkeypatch.setattr(notifier, "_CONFIG_FILE", str(data_dir / "notify_config.json"))
 
 
 def test_health_endpoint():
@@ -719,7 +720,7 @@ def test_auto_restart_can_be_disabled(fake_server, monkeypatch):
     assert len(fake_server) == 1
 
 
-def test_autostart_launches_server_and_playit(fake_server, fake_playit, monkeypatch):
+def test_autostart_launches_server_and_playit(fake_server, fake_playit, fake_cloudflared, monkeypatch):
     original = webapp_module._effective_config
     monkeypatch.setattr(webapp_module, "_effective_config",
                         lambda: {**original(), "autostart_server": True, "autostart_playit": True})
@@ -748,6 +749,7 @@ def test_shutdown_stops_server_and_tunnel(fake_server, fake_playit):
     assert not fake_server[0].is_running()
     assert not agent.is_running()
     assert app.state.runtime.stop_requested is True
+    app.state.runtime.shutting_down = False
 
 
 def test_always_on_settings_render_on_setup_page():
@@ -829,3 +831,99 @@ def test_playit_status_is_not_running_without_agent(monkeypatch):
     response = client.get("/api/playit/status", auth=("admin", "s3cret-pass"))
     assert response.status_code == 200
     assert response.json()["state"] == "configured"
+
+
+# ---------- Alerts ----------
+@pytest.fixture
+def sent_emails(monkeypatch):
+    """Enable email alerts and capture what would be sent."""
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(notifier, "send_email", lambda config, subject, body: sent.append((subject, body)))
+    notifier.save_config({"email_enabled": True, "email_to": "me@example.com",
+                          "smtp_user": "bot@gmail.com", "smtp_password": "abcd efgh"})
+    yield sent
+
+
+def test_crash_sends_email_and_repeats_are_throttled(fake_server, sent_emails):
+    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    fake_server[0].exit(1)
+    assert _wait_until(lambda: any("crashed" in subject for subject, _ in sent_emails))
+    assert _wait_until(lambda: any("back online" in subject for subject, _ in sent_emails))
+    assert _wait_until(lambda: len(fake_server) == 2)
+    fake_server[1].exit(1)  # same alert again within 10 minutes -> not emailed twice
+    assert _wait_until(lambda: len(fake_server) == 3)
+    time.sleep(0.2)
+    assert sum("Minecraft server crashed" in subject for subject, _ in sent_emails) == 1
+
+
+def test_auto_restart_paused_sends_down_alert(fake_server, sent_emails):
+    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    app.state.runtime.crash_times = [time.monotonic()] * webapp_module.CRASH_RESTART_LIMIT
+    fake_server[0].exit(1)
+    assert _wait_until(lambda: any("DOWN" in subject for subject, _ in sent_emails))
+
+
+def test_new_dashboard_link_is_emailed_once_per_link(fake_cloudflared, sent_emails):
+    client.post("/api/remote-dashboard", auth=("admin", "s3cret-pass"), json={"enabled": True})
+    assert _wait_until(lambda: any("New dashboard link" in s for s, _ in sent_emails))
+    link_mail = next(body for subject, body in sent_emails if "New dashboard link" in subject)
+    assert "https://demo-1.trycloudflare.com" in link_mail
+
+    fake_cloudflared[0].crash()  # tunnel drops and comes back with a new link
+    assert _wait_until(lambda: sum("New dashboard link" in s for s, _ in sent_emails) == 2)
+    assert any("went down" in subject for subject, _ in sent_emails)
+    assert notifier.load_config()["last_link"] == "https://demo-2.trycloudflare.com"
+
+
+def test_alert_settings_never_return_the_password():
+    notifier.save_config({"smtp_user": "bot@gmail.com", "smtp_password": "secret-app-pass"})
+    response = client.get("/api/notifications", auth=("admin", "s3cret-pass"))
+    assert "secret-app-pass" not in response.text
+    assert response.json()["password_set"] is True
+
+    client.put("/api/notifications", auth=("admin", "s3cret-pass"),
+               json={"email_to": "me@example.com", "smtp_password": ""})
+    assert notifier.load_config()["smtp_password"] == "secret-app-pass"  # empty keeps the saved one
+
+
+def test_alert_test_endpoint(monkeypatch):
+    response = client.post("/api/notifications/test", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 400
+
+    pinged = []
+    monkeypatch.setattr(notifier, "ping_heartbeat", lambda url: pinged.append(url) or True)
+    notifier.save_config({"heartbeat_url": "https://hc-ping.com/abc"})
+    response = client.post("/api/notifications/test", auth=("admin", "s3cret-pass"))
+    assert response.status_code == 200
+    assert pinged == ["https://hc-ping.com/abc"]
+
+
+def test_playit_agent_crash_restarts_and_alerts(fake_playit, sent_emails, monkeypatch):
+    monkeypatch.setattr(webapp_module, "PLAYIT_RETRY_SEC", 0)
+    agents = []
+
+    class TrackedAgent(DummyAgent):
+        def __init__(self, on_output=None, on_exit=None):
+            super().__init__(on_output, on_exit)
+            self.on_exit = on_exit
+            agents.append(self)
+
+    monkeypatch.setattr(webapp_module.playit, "PlayitAgent", TrackedAgent)
+    playit.save_config("demo-secret", "")
+    client.post("/api/playit/start", auth=("admin", "s3cret-pass"))
+    agents[0].running = False
+    agents[0].on_exit(1)  # unexpected exit
+    assert _wait_until(lambda: len(agents) == 2 and agents[1].is_running())
+    assert any("PlayIt tunnel stopped unexpectedly" in subject for subject, _ in sent_emails)
+
+    client.post("/api/playit/stop", auth=("admin", "s3cret-pass"))  # deliberate: no restart
+    agents[1].on_exit(1)
+    time.sleep(0.2)
+    assert len(agents) == 2
+
+
+def test_remote_dashboard_is_on_by_default():
+    assert webapp_module._default_config()["remote_dashboard"] is True
+    text = client.get("/dashboard/setup").text
+    for element_id in ("alerts-form", "alerts-email-enabled", "alerts-heartbeat-url", "alerts-test-button"):
+        assert f'id="{element_id}"' in text

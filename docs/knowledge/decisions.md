@@ -32,6 +32,10 @@
     account, automatic. Trade-offs: random link that changes on restart; quick tunnels have no
     uptime guarantee. Shipped with the existing Basic auth by owner decision; lockout/sessions
     tracked as **must fix** (verification.md).
+24. Alerts (2026-10-22): plain SMTP (Gmail app password) rather than a third-party notification
+    service, since the owner asked for email; a healthchecks.io-style heartbeat covers outages the
+    app cannot report itself. Alerts are throttled per subject (10 min) except new-link mails.
+    The remote dashboard link is **on by default** at the owner's request.
 23. 24/7 operation (2026-10-22): crash auto-restart on by default but rate-limited (3 per 10 min)
     so a broken server can't loop; deliberate stops never count as crashes; the dashboard stops
     Minecraft on shutdown so service restarts don't orphan Java. On Termux, supervision is

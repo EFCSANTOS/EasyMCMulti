@@ -59,6 +59,8 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
   Minecraft tunnel only.
 - `cloudflared.py` — `ensure_binary`, `find_url`, `QuickTunnel` (Cloudflare quick tunnel for the
   web dashboard; workflows.md §16).
+- `notifier.py` — alert settings (`load_config`/`save_config`/`public_config`), `send_email`
+  (smtplib), `ping_heartbeat` (workflows.md §17).
 - `netinfo.py` — `lan_ip()` (UDP "connect" to 8.8.8.8, fallback `127.0.0.1`), `public_ip()`
   (`api.ipify.org`, 10 s timeout, returns `"unavailable"` on error; successful lookups cached for
   `PUBLIC_IP_TTL_SEC` = 300 s because the dashboard polls `/api/status`).

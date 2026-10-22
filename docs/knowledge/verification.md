@@ -9,16 +9,18 @@ encrypted in transit, but:
 - Cloudflare sees traffic in clear at its edge (TLS terminates there).
 
 Owner decision 2026-10-22: ship remote access with the current login, fix in an upcoming commit.
+**Priority raised:** since 2026-10-22 the link is **on by default** (`remote_dashboard` default
+True), so every install is reachable from the internet unless the owner switches it off.
 Required fix: server-side login sessions (HttpOnly, Secure, SameSite cookie, expiry), failed-login
 lockout / backoff (per client IP from `CF-Connecting-IP` when behind the tunnel), minimum password
 length enforced at startup when remote access is enabled, and stop storing the password
-client-side. Mitigations shipped meanwhile: off by default, confirm dialog + callout on the Remote
-page, random unlisted link, `termux-setup.sh` requires a 12+ character password. Marked in code at
+client-side. Mitigations shipped meanwhile: confirm dialog + callout on the Remote page, random
+unlisted link that changes on every restart, `termux-setup.sh` requires a 12+ character password. Marked in code at
 `webapp/auth.py` ("MUST FIX").
 
 ## Fetch status
 Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/dashboard.js`, `templates/*.html`),
-`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 53 passed.
+`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 60 passed.
 UI redesign (2026-10-22) verified with headless Edge screenshots at 1440 px and 390 px.
 Same day: cleanup + English-only pass + GUI feature check (see "Fixed 2026-10-22").
 Not audited line-by-line: `webapp/static/css/dashboard.css` (presentation only).
@@ -60,6 +62,7 @@ WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 | System metrics charts | Works (overview only) |
 | Player count + names | Works — parsed from server join/leave console lines |
 | Always-on (autostart server/PlayIt, crash restart) | Works in tests and a live uvicorn boot; not yet run on a device |
+| Alerts (email, heartbeat) + PlayIt agent auto-restart | Works in tests with stubbed SMTP/HTTP; **real Gmail send and healthchecks.io ping not yet tried** (needs the owner's credentials) |
 
 ## Fixed 2026-10-22
 - Mod upload posted to non-existent `/api/mods/upload` → now `/api/server/mods/upload`.
@@ -104,7 +107,9 @@ Open / by design:
   static shells only; all data goes through authenticated `/api/*` (decisions.md).
 - Credentials live in browser `sessionStorage` and travel as Basic auth (plain HTTP on the LAN,
   HTTPS through the Cloudflare link); **must fix** before relying on remote access (top of this file).
-- `playit_config.json` stores the secret in plaintext on the host.
+- `playit_config.json` stores the secret in plaintext on the host; `notify_config.json` stores the
+  SMTP app password in plaintext (never returned by the API). Use an app password, not the account
+  password, so it can be revoked on its own.
 
 ## Unverified / needs inspection
 - License terms beyond "All rights reserved".

@@ -591,6 +591,68 @@ async function configurePlayit(button) {
   });
 }
 
+// ---------- Alerts (email + heartbeat) ----------
+// [element id, notify_config key, kind]. The SMTP password is write-only: never filled from the server.
+const ALERT_FIELDS = [
+  ['alerts-email-enabled', 'email_enabled', 'checkbox'],
+  ['alerts-email-to', 'email_to', 'text'],
+  ['alerts-smtp-user', 'smtp_user', 'text'],
+  ['alerts-smtp-host', 'smtp_host', 'text'],
+  ['alerts-smtp-port', 'smtp_port', 'number'],
+  ['alerts-notify-server', 'notify_server', 'checkbox'],
+  ['alerts-notify-link', 'notify_link', 'checkbox'],
+  ['alerts-notify-tunnels', 'notify_tunnels', 'checkbox'],
+  ['alerts-heartbeat-url', 'heartbeat_url', 'text'],
+];
+
+function renderAlerts(settings) {
+  ALERT_FIELDS.forEach(([id, key, kind]) => {
+    const element = document.getElementById(id);
+    if (kind === 'checkbox') element.checked = Boolean(settings[key]);
+    else element.value = settings[key] ?? '';
+  });
+  const password = document.getElementById('alerts-smtp-password');
+  password.value = '';
+  password.placeholder = settings.password_set ? 'Saved (leave empty to keep it)' : '16-character app password';
+}
+
+async function loadAlerts() {
+  if (!document.getElementById('alerts-form')) return;
+  try {
+    renderAlerts(await fetchJson('/api/notifications'));
+  } catch (error) {
+    setStatus(`Alert settings unavailable: ${error.message}`, 'error');
+  }
+}
+
+function collectAlerts() {
+  const payload = {};
+  ALERT_FIELDS.forEach(([id, key, kind]) => {
+    const element = document.getElementById(id);
+    if (kind === 'checkbox') payload[key] = element.checked;
+    else if (kind === 'number') payload[key] = Number(element.value);
+    else payload[key] = element.value.trim();
+  });
+  const password = document.getElementById('alerts-smtp-password').value.replace(/\s+/g, '');
+  if (password) payload.smtp_password = password; // Gmail shows app passwords with spaces
+  return payload;
+}
+
+async function saveAlerts(button) {
+  await runAction(button, 'Saving…', async () => {
+    renderAlerts(await fetchJson('/api/notifications', 'PUT', collectAlerts()));
+    return 'Alert settings saved.';
+  });
+}
+
+async function testAlerts(button) {
+  await runAction(button, 'Sending test…', async () => {
+    renderAlerts(await fetchJson('/api/notifications', 'PUT', collectAlerts()));
+    const response = await fetchJson('/api/notifications/test', 'POST');
+    return response.message;
+  });
+}
+
 // ---------- Remote dashboard (Cloudflare) ----------
 const REMOTE_LABELS = { off: 'Off', starting: 'Starting…', running: 'Online', error: 'Problem' };
 
@@ -896,6 +958,11 @@ function bindEvents() {
   });
   on('advanced-save-button', 'click', (event, button) => saveConfigFromForm(button));
   on('always-on-save-button', 'click', (event, button) => saveConfigFromForm(button));
+  on('alerts-form', 'submit', (event) => {
+    event.preventDefault();
+    saveAlerts(document.getElementById('alerts-save-button'));
+  });
+  on('alerts-test-button', 'click', (event, button) => testAlerts(button));
   on('loader-select', 'change', () => onLoaderChange());
   on('create-button', 'click', (event, button) => createServer(button));
 
@@ -943,7 +1010,7 @@ async function boot() {
   bindMetrics();
   await loadConfig();
   await loadStatus();
-  await Promise.all([loadBackups(), loadInstalledMods(), refreshConsole(true)]);
+  await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), refreshConsole(true)]);
 
   if (document.getElementById('console-output')) setInterval(refreshConsole, CONSOLE_POLL_MS);
   setInterval(loadStatus, STATUS_POLL_MS);

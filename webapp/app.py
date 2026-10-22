@@ -5,6 +5,7 @@ import glob
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 import os
+import platform
 import threading
 import time
 import zipfile
@@ -19,7 +20,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from core import cloudflared, config_store, downloaders, java_manager, modrinth, netinfo, paths, playit
+from core import cloudflared, config_store, downloaders, java_manager, modrinth, netinfo, notifier, paths, playit
 from core.server_process import ServerProcess, accept_eula, update_properties
 from webapp.auth import validate_auth_settings, verify_basic_auth_header, verify_credentials
 from webapp.state import RuntimeState
@@ -35,6 +36,10 @@ CRASH_WINDOW_SEC = 600
 # Port uvicorn listens on; run.bat / run.sh pass the same value. Used for the remote dashboard tunnel.
 WEB_PORT = int(os.getenv("EZ_WEBAPP_PORT", "8000"))
 WEB_TUNNEL_RETRY_SEC = 15
+# Alerts: the same alert is emailed at most once per ALERT_REPEAT_SEC; heartbeat every HEARTBEAT_INTERVAL_SEC.
+ALERT_REPEAT_SEC = 600
+PLAYIT_RETRY_SEC = 30
+HEARTBEAT_INTERVAL_SEC = 60
 FALLBACK_VERSIONS = {
     "vanilla": ["1.21.7", "1.21.6", "1.21.5", "1.21.4", "1.21.3", "1.21.2", "1.21.1", "1.20.4"],
     "paper": ["1.21.7", "1.21.6", "1.21.4", "1.21.1", "1.20.4"],
@@ -95,8 +100,9 @@ def _default_config() -> dict[str, Any]:
         "autostart_server": False,
         "autostart_playit": False,
         "auto_restart": True,
-        # Cloudflare link to the dashboard (Remote access page); restored on dashboard start.
-        "remote_dashboard": False,
+        # Cloudflare link to the dashboard (Remote access page); on by default (owner decision
+        # 2026-10-22) so the link comes up by itself after every boot. See the must-fix note in auth.py.
+        "remote_dashboard": True,
     }
 
 
@@ -530,6 +536,68 @@ _SECTION_ALWAYS_ON = f"""
         </section>
 """
 
+_SECTION_ALERTS = f"""
+        <section id="alerts" class="card">
+          <div class="card-header">
+            <div>
+              <h2>Alerts</h2>
+              <p class="card-sub">Get an email when the server crashes, the dashboard link changes or a tunnel has a problem.</p>
+            </div>
+          </div>
+          <form id="alerts-form" autocomplete="off">
+            <div class="switch-list">
+              {_switch("alerts-email-enabled", "Email me", "Uses your Gmail (or any SMTP) account to send the alerts.", False)}
+            </div>
+            <div class="form-grid alerts-grid">
+              <div class="field">
+                <label for="alerts-email-to">Send alerts to</label>
+                <input id="alerts-email-to" type="email" placeholder="you@example.com" />
+              </div>
+              <div class="field">
+                <label for="alerts-smtp-user">Send from (Gmail address)</label>
+                <input id="alerts-smtp-user" type="email" placeholder="yourname@gmail.com" />
+              </div>
+              <div class="field">
+                <label for="alerts-smtp-password">App password</label>
+                <input id="alerts-smtp-password" type="password" autocomplete="new-password" placeholder="16-character app password" />
+              </div>
+            </div>
+            <p class="hint">Gmail: create an app password at myaccount.google.com/apppasswords (needs 2-step verification).
+              It is not your normal password and only works for sending mail.</p>
+            <details class="advanced-smtp">
+              <summary>Other email provider</summary>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="alerts-smtp-host">SMTP server</label>
+                  <input id="alerts-smtp-host" value="smtp.gmail.com" />
+                </div>
+                <div class="field">
+                  <label for="alerts-smtp-port">SMTP port</label>
+                  <input id="alerts-smtp-port" type="number" min="1" max="65535" value="587" />
+                  <p class="hint">587 (STARTTLS) or 465 (SSL).</p>
+                </div>
+              </div>
+            </details>
+            <div class="switch-list alerts-events">
+              {_switch("alerts-notify-server", "Server crashes and outages", "Crash, auto-restart paused, back online.", True)}
+              {_switch("alerts-notify-link", "New dashboard link", "Emails the new https link after every restart or reboot.", True)}
+              {_switch("alerts-notify-tunnels", "Tunnel problems", "PlayIt or the dashboard link stopped unexpectedly.", True)}
+            </div>
+            <div class="field heartbeat-field">
+              <label for="alerts-heartbeat-url">Heartbeat URL (optional, for when the whole phone goes down)</label>
+              <input id="alerts-heartbeat-url" type="url" placeholder="https://hc-ping.com/your-check-id" />
+              <p class="hint">Create a free check at healthchecks.io and paste its ping URL. The dashboard checks in every
+                minute; if it stops (phone off, no internet, app killed), healthchecks.io emails you.</p>
+            </div>
+            <div class="form-actions">
+              <p class="hint">Each alert is sent at most once every 10 minutes.</p>
+              <button id="alerts-test-button" class="btn btn-ghost" type="button">Send test</button>
+              <button id="alerts-save-button" class="btn btn-primary" type="submit">Save</button>
+            </div>
+          </form>
+        </section>
+"""
+
 _SECTION_MODS = f"""
         <section id="mods" class="two-col">
           <div class="card">
@@ -691,7 +759,7 @@ _SECTION_CONSOLE_FULL = f"""
 
 _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
     "overview": (_SECTION_OVERVIEW_TILES, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
-    "setup": (_SECTION_SETUP, _SECTION_ALWAYS_ON),
+    "setup": (_SECTION_SETUP, _SECTION_ALWAYS_ON, _SECTION_ALERTS),
     "advanced": (_SECTION_ADVANCED,),
     "mods": (_SECTION_MODS,),
     "remote": (_SECTION_REMOTE,),
@@ -796,6 +864,44 @@ def create_app() -> FastAPI:
 
     def append_console_line(line: str) -> None:
         app.state.console_manager.publish(line)
+
+    # ---------- Alerts (email + heartbeat) ----------
+    last_alert_at: dict[str, float] = {}
+
+    def notify(category: str, subject: str, body: str, throttle: bool = True) -> None:
+        """Email an alert in the background if enabled for `category` (server / link / tunnels).
+
+        The same subject is sent at most once per ALERT_REPEAT_SEC so a flapping service can't spam.
+        """
+        config = notifier.load_config()
+        if not notifier.email_ready(config) or not config.get(f"notify_{category}", True):
+            return
+        now = time.monotonic()
+        if throttle and now - last_alert_at.get(subject, -ALERT_REPEAT_SEC) < ALERT_REPEAT_SEC:
+            return
+        last_alert_at[subject] = now
+        full_body = (
+            f"{body}\n\n"
+            f"Host: {platform.node() or 'unknown'}\n"
+            f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Dashboard: {runtime.web_tunnel_url or f'http://{netinfo.lan_ip()}:{WEB_PORT} (LAN)'}\n"
+        )
+
+        def send() -> None:
+            try:
+                notifier.send_email(config, f"[EZ Minecraft] {subject}", full_body)
+                append_console_line(f"[notify] email sent: {subject}")
+            except Exception as exc:
+                append_console_line(f"[notify] email failed: {exc}")
+
+        threading.Thread(target=send, name="notify", daemon=True).start()
+
+    def heartbeat_loop() -> None:
+        while not runtime.shutting_down:
+            url = notifier.load_config().get("heartbeat_url")
+            if url:
+                notifier.ping_heartbeat(url)
+            time.sleep(HEARTBEAT_INTERVAL_SEC)
 
     def update_install_state(status: str, progress: float, message: str) -> None:
         runtime.install_status = status
@@ -955,15 +1061,19 @@ def create_app() -> FastAPI:
         attempt = len(runtime.crash_times)
         if attempt > CRASH_RESTART_LIMIT:
             runtime.state = "crashed"
-            append_console_line(
-                f"[server] crashed {attempt} times in {CRASH_WINDOW_SEC // 60} minutes; automatic restart paused. "
-                "Check the log above, fix the problem and press Start."
+            message = (
+                f"The server crashed {attempt} times in {CRASH_WINDOW_SEC // 60} minutes; automatic restart paused. "
+                "Check the console log, fix the problem and press Start."
             )
+            append_console_line(f"[server] {message}")
+            notify("server", "Minecraft server is DOWN (auto-restart paused)", message)
             return
-        append_console_line(
-            f"[server] crashed (exit code {code}); restarting in {CRASH_RESTART_DELAY_SEC} s "
-            f"(attempt {attempt} of {CRASH_RESTART_LIMIT})"
+        message = (
+            f"The server crashed (exit code {code}); restarting in {CRASH_RESTART_DELAY_SEC} s "
+            f"(attempt {attempt} of {CRASH_RESTART_LIMIT})."
         )
+        append_console_line(f"[server] {message}")
+        notify("server", "Minecraft server crashed", message)
         timer = threading.Timer(CRASH_RESTART_DELAY_SEC, restart_after_crash)
         timer.daemon = True
         timer.start()
@@ -977,6 +1087,9 @@ def create_app() -> FastAPI:
             runtime.state = "stopped"
             runtime.operation = "idle"
             append_console_line(f"[server] automatic restart failed: {exc}")
+            notify("server", "Minecraft server is DOWN (restart failed)", f"Automatic restart failed: {exc}")
+            return
+        notify("server", "Minecraft server is back online", "The server was restarted automatically after a crash.")
 
     def launch_server(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Install if needed and start the Minecraft server (used by the API, crash restart and autostart)."""
@@ -1002,8 +1115,13 @@ def create_app() -> FastAPI:
             runtime.operation = "idle"
             runtime.process = None
             runtime.clear_players()
-            if code != 0 and not runtime.stop_requested and _effective_config().get("auto_restart"):
+            if code == 0 or runtime.stop_requested:
+                return
+            if _effective_config().get("auto_restart"):
                 handle_crash(code)
+            else:
+                notify("server", "Minecraft server stopped unexpectedly",
+                       f"The server exited with code {code}. Automatic restart is off.")
 
         def on_output(line: str) -> None:
             runtime.track_player_event(line)
@@ -1242,16 +1360,38 @@ def create_app() -> FastAPI:
         """Start the agent if needed, ensure the Minecraft tunnel and save its address."""
         if not (runtime.playit_agent and runtime.playit_agent.is_running()):
             playit.ensure_agent(log=playit_log)
-            runtime.playit_agent = playit.PlayitAgent(
-                on_output=append_console_line,
-                on_exit=lambda code: _playit_on_exit(app.state.console_manager, runtime, code),
-            )
-            runtime.playit_agent.start(secret)
+            agent: Any = None
+
+            def on_agent_exit(code: int) -> None:
+                # Deliberate stops clear runtime.playit_agent first, so only a crash still finds itself here.
+                if runtime.playit_agent is not agent:
+                    append_console_line(f"[playit] exited with code {code}")
+                    return
+                _playit_on_exit(app.state.console_manager, runtime, code)
+                if runtime.shutting_down:
+                    return
+                message = f"The PlayIt agent exited (code {code}); restarting it in {PLAYIT_RETRY_SEC} s."
+                playit_log(message)
+                notify("tunnels", "PlayIt tunnel stopped unexpectedly", message)
+                timer = threading.Timer(PLAYIT_RETRY_SEC, lambda: run_in_background("PlayIt tunnel", lambda: start_agent_and_tunnels(secret)))
+                timer.daemon = True
+                timer.start()
+
+            agent = playit.PlayitAgent(on_output=append_console_line, on_exit=on_agent_exit)
+            runtime.playit_agent = agent
+            agent.start(secret)
         config = _effective_config()
         address = playit.ensure_tunnel(secret, int(config.get("server_port", 25565)), playit_log)
         playit.save_config(secret, address)
         runtime.playit_state = "running"
         runtime.playit_address = address
+
+    def stop_playit_agent() -> None:
+        """Deliberate stop: forget the agent first so its exit is not treated as a crash."""
+        agent = runtime.playit_agent
+        runtime.playit_agent = None
+        if agent is not None and agent.is_running():
+            agent.stop()
 
     def claim_and_connect() -> None:
         """Background PlayIt setup: wait for the user's approval, then bring the tunnels up."""
@@ -1280,9 +1420,7 @@ def create_app() -> FastAPI:
             return playit_info("PlayIt setup already in progress.")
         if (payload or {}).get("reset"):
             # Link a different account: stop the agent and forget the saved secret first.
-            if runtime.playit_agent and runtime.playit_agent.is_running():
-                runtime.playit_agent.stop()
-            runtime.playit_agent = None
+            stop_playit_agent()
             playit.forget_config()
             playit_log("Saved PlayIt account removed.")
         cfg = playit.load_config()
@@ -1318,9 +1456,7 @@ def create_app() -> FastAPI:
     def stop_playit(_: str = Depends(require_auth)) -> dict[str, Any]:
         if runtime.playit_setup in {"awaiting-approval", "connecting"}:
             runtime.playit_cancel = True
-        if runtime.playit_agent and runtime.playit_agent.is_running():
-            runtime.playit_agent.stop()
-        runtime.playit_agent = None
+        stop_playit_agent()
         cfg = playit.load_config()
         runtime.playit_state = "stopped"
         runtime.playit_address = cfg.get("address") or runtime.playit_address
@@ -1359,6 +1495,10 @@ def create_app() -> FastAPI:
             runtime.web_tunnel_url = url
             runtime.web_tunnel_state = "running"
             web_log(f"Dashboard reachable at {url}")
+            if url != notifier.load_config().get("last_link"):
+                notifier.save_config({"last_link": url})
+                notify("link", "New dashboard link", f"Your dashboard is now at:\n\n{url}\n\n"
+                       "The old link no longer works. New links can take up to a minute to open.", throttle=False)
 
         def on_output(line: str) -> None:
             if " ERR " in line or " WRN " in line:  # cloudflared is chatty; keep problems only
@@ -1375,6 +1515,8 @@ def create_app() -> FastAPI:
             runtime.web_tunnel_state = "error"
             runtime.web_tunnel_error = f"cloudflared exited (code {code}); retrying in {WEB_TUNNEL_RETRY_SEC} s"
             web_log(runtime.web_tunnel_error)
+            notify("tunnels", "Dashboard link went down",
+                   f"{runtime.web_tunnel_error}. You will get the new link by email when it is back.")
             timer = threading.Timer(WEB_TUNNEL_RETRY_SEC, retry_web_tunnel)
             timer.daemon = True
             timer.start()
@@ -1390,6 +1532,7 @@ def create_app() -> FastAPI:
             runtime.web_tunnel_state = "error"
             runtime.web_tunnel_error = str(exc)
             web_log(f"Start failed: {exc}")
+            notify("tunnels", "Dashboard link could not start", str(exc))
 
     def retry_web_tunnel() -> None:
         if runtime.web_tunnel_wanted and _effective_config().get("remote_dashboard"):
@@ -1429,6 +1572,8 @@ def create_app() -> FastAPI:
                 action()
             except Exception as exc:
                 append_console_line(f"[autostart] {name} failed: {exc}")
+                category = "server" if name == "Minecraft server" else "tunnels"
+                notify(category, f"{name} failed to start", str(exc))
 
         threading.Thread(target=worker, name=f"autostart-{name}", daemon=True).start()
 
@@ -1436,6 +1581,7 @@ def create_app() -> FastAPI:
         """Bring up what the Always-on settings ask for. EZ_NO_AUTOSTART=1 skips it (debugging)."""
         if os.getenv("EZ_NO_AUTOSTART") == "1":
             return
+        threading.Thread(target=heartbeat_loop, name="heartbeat", daemon=True).start()
         config = _effective_config()
         secret = playit.load_config().get("secret")
         if config.get("autostart_playit") and secret:
@@ -1450,6 +1596,7 @@ def create_app() -> FastAPI:
 
     def shutdown() -> None:
         """Stop Minecraft and the PlayIt agent with the dashboard, so no orphan keeps the port or world lock."""
+        runtime.shutting_down = True
         runtime.stop_requested = True
         process = runtime.process
         if process is not None and process.is_running():
@@ -1457,12 +1604,42 @@ def create_app() -> FastAPI:
             process.stop()
             if not _wait_for_exit(process, SHUTDOWN_STOP_TIMEOUT_SEC):
                 process.kill()
-        if runtime.playit_agent is not None and runtime.playit_agent.is_running():
-            runtime.playit_agent.stop()
+        stop_playit_agent()
         stop_web_tunnel()
+
+    @app.get("/api/notifications")
+    def get_notifications(_: str = Depends(require_auth)) -> dict[str, Any]:
+        return notifier.public_config()
+
+    @app.put("/api/notifications")
+    def save_notifications(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        payload.pop("last_link", None)
+        notifier.save_config(payload)
+        return notifier.public_config()
+
+    @app.post("/api/notifications/test")
+    def test_notifications(_: str = Depends(require_auth)) -> dict[str, Any]:
+        config = notifier.load_config()
+        results = []
+        if config.get("email_to") and config.get("smtp_user") and config.get("smtp_password"):
+            try:
+                notifier.send_email(config, "[EZ Minecraft] Test alert",
+                                    "Alerts are working. You will get an email like this when the server "
+                                    "crashes, the dashboard link changes, or a tunnel has a problem.")
+                results.append("Test email sent.")
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"Email failed: {exc}") from exc
+        if config.get("heartbeat_url"):
+            if not notifier.ping_heartbeat(config["heartbeat_url"]):
+                raise HTTPException(status_code=502, detail="Heartbeat URL did not answer.")
+            results.append("Heartbeat ping OK.")
+        if not results:
+            raise HTTPException(status_code=400, detail="Fill in the email settings or a heartbeat URL first.")
+        return {"ok": True, "message": " ".join(results)}
 
     app.state.autostart = autostart
     app.state.shutdown = shutdown
+    app.state.notify = notify
 
     @app.websocket("/ws/console")
     async def console_websocket(websocket: WebSocket) -> None:

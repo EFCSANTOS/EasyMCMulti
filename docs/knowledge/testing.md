@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-53 passed (~2.5 s, `.venv` Python 3.14.7). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
+60 passed (~3 s, `.venv` Python 3.14.7). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Data isolation
 Autouse fixture `isolated_data_dir` redirects `paths.DATA_DIR/JAVA_DIR/SERVERS_DIR`,
@@ -51,6 +51,12 @@ this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.j
   toggle on/off, restart after unexpected exit, missing-binary error; `QuickTunnel._reader` announces
   the URL only after registration; URL parsing and release asset names. A live check against a
   throwaway local server lives outside the suite (needs internet).
+- Alerts (`sent_emails` fixture stubs `notifier.send_email` and enables email): crash mail + 10-min
+  throttle, DOWN mail at the crash limit, one mail per new dashboard link (+ "went down"), password
+  never returned and kept when blank, test endpoint (400 / heartbeat ping), PlayIt agent crash →
+  restart + mail while a deliberate stop doesn't restart, `remote_dashboard` default on.
+  `isolated_data_dir` also redirects `notifier._CONFIG_FILE`. Tests using autostart must include
+  `fake_cloudflared` (the link is on by default and would otherwise download cloudflared).
 - Platform: system Java selection, Termux missing-Java hint, `unix_args.txt` vs `win_args.txt`,
   metrics with blocked CPU counters, `termux-chroot` agent wrapping.
 - Always-on (`fake_server` fixture + `RecordingProcess`, whose `exit(code)` fires `on_exit`;

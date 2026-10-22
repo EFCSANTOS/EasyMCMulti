@@ -40,6 +40,7 @@ class RuntimeState:
     # True once a stop was asked for (button, restart, console "stop", shutdown); a non-zero exit
     # without it counts as a crash. crash_times holds monotonic timestamps of recent crashes.
     stop_requested: bool = False
+    shutting_down: bool = False
     crash_times: list[float] = field(default_factory=list)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
