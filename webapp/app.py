@@ -44,6 +44,9 @@ WEB_TUNNEL_RETRY_SEC = 15
 # Alerts: the same alert is emailed at most once per ALERT_REPEAT_SEC; heartbeat every HEARTBEAT_INTERVAL_SEC.
 ALERT_REPEAT_SEC = 600
 PLAYIT_RETRY_SEC = 30
+# More than PLAYIT_CRASH_LIMIT agent exits within PLAYIT_CRASH_WINDOW_SEC pause automatic restarts.
+PLAYIT_CRASH_LIMIT = 3
+PLAYIT_CRASH_WINDOW_SEC = 600
 PLAYIT_KEY_REJECTED = ("playit.gg rejected the saved secret key (InvalidAgentKey). This happens when the agent was "
                        "deleted on playit.gg or the key was revoked. Click \"Change account\" to link this launcher again.")
 MODRINTH_PAGE_SIZE = 20
@@ -1074,7 +1077,7 @@ def create_app() -> FastAPI:
                 update_install_state("installing", 100.0, f"Installing {loader} {version}...")
 
         try:
-            java_exe = java_manager.ensure_java(java_manager.required_java(version))
+            java_exe = java_manager.ensure_java(java_manager.required_java(version), log=install_log)
             downloaders.prepare(loader, version, target_dir, java_exe, log=install_log, progress=install_progress)
             accept_eula(target_dir)
         except Exception as exc:
@@ -1273,7 +1276,8 @@ def create_app() -> FastAPI:
         target_dir = ensure_server_installed(config)
         update_properties(target_dir, **_server_properties_from_config(config))
 
-        java_exe = java_manager.ensure_java(java_manager.required_java(version))
+        java_exe = java_manager.ensure_java(java_manager.required_java(version),
+                                            log=lambda message: append_console_line(f"[java] {message}"))
         args = downloaders.launch_args(loader, java_exe, target_dir, int(config.get("ram_mb", 2048)))
         process = ServerProcess(
             args,
@@ -1672,13 +1676,18 @@ def create_app() -> FastAPI:
 
     def start_agent_and_tunnels(secret: str) -> None:
         """Start the agent if needed, ensure the Minecraft tunnel and save its address."""
+        cancel_playit_restart()  # this start supersedes any pending automatic restart
         key_rejected = threading.Event()
         if not (runtime.playit_agent and runtime.playit_agent.is_running()):
             playit.ensure_agent(log=playit_log)
+            playit.kill_stale_agents(log=playit_log)  # only one agent may run per device
             agent: Any = None
+            last_error = [""]
 
             def on_agent_output(line: str) -> None:
                 append_console_line(line)
+                if "error" in line.lower():
+                    last_error[0] = line.strip()
                 if key_rejected.is_set() or not playit.is_key_rejected(line):
                     return
                 # A rejected key never recovers by retrying: stop the agent (deliberately, so it is not
@@ -1700,12 +1709,22 @@ def create_app() -> FastAPI:
                 _playit_on_exit(app.state.console_manager, runtime, code)
                 if runtime.shutting_down:
                     return
+                now = time.monotonic()
+                runtime.playit_crash_times = [t for t in runtime.playit_crash_times if now - t < PLAYIT_CRASH_WINDOW_SEC]
+                runtime.playit_crash_times.append(now)
+                if len(runtime.playit_crash_times) > PLAYIT_CRASH_LIMIT:
+                    message = (f"The PlayIt agent stopped {len(runtime.playit_crash_times)} times in "
+                               f"{PLAYIT_CRASH_WINDOW_SEC // 60} minutes, so automatic restarts are paused. "
+                               f"Last error: {last_error[0] or f'exit code {code}'}. Click Start tunnel to try again.")
+                    runtime.playit_setup = "error"
+                    runtime.playit_error = message
+                    playit_log(message)
+                    notify("tunnels", "PlayIt tunnel DOWN (auto-restart paused)", message)
+                    return
                 message = f"The PlayIt agent exited (code {code}); restarting it in {PLAYIT_RETRY_SEC} s."
                 playit_log(message)
                 notify("tunnels", "PlayIt tunnel stopped unexpectedly", message)
-                timer = threading.Timer(PLAYIT_RETRY_SEC, lambda: run_in_background("PlayIt tunnel", lambda: start_agent_and_tunnels(secret)))
-                timer.daemon = True
-                timer.start()
+                schedule_playit_restart(secret)
 
             agent = playit.PlayitAgent(on_output=on_agent_output, on_exit=on_agent_exit)
             runtime.playit_agent = agent
@@ -1725,8 +1744,23 @@ def create_app() -> FastAPI:
         runtime.playit_state = "running"
         runtime.playit_address = address
 
+    def schedule_playit_restart(secret: str) -> None:
+        """Restart the agent after PLAYIT_RETRY_SEC; replaces any restart already pending."""
+        cancel_playit_restart()
+        timer = threading.Timer(PLAYIT_RETRY_SEC, lambda: run_in_background("PlayIt tunnel", lambda: start_agent_and_tunnels(secret)))
+        timer.daemon = True
+        runtime.playit_restart_timer = timer
+        timer.start()
+
+    def cancel_playit_restart() -> None:
+        timer = runtime.playit_restart_timer
+        runtime.playit_restart_timer = None
+        if timer is not None:
+            timer.cancel()
+
     def stop_playit_agent() -> None:
         """Deliberate stop: forget the agent first so its exit is not treated as a crash."""
+        cancel_playit_restart()
         agent = runtime.playit_agent
         runtime.playit_agent = None
         if agent is not None and agent.is_running():
@@ -1791,6 +1825,7 @@ def create_app() -> FastAPI:
         if runtime.playit_setup == "error":  # a new attempt clears the previous failure
             runtime.playit_setup = "idle"
             runtime.playit_error = ""
+        runtime.playit_crash_times.clear()  # a manual start re-arms automatic restarts
         try:
             start_agent_and_tunnels(cfg["secret"])
         except Exception as exc:

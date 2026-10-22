@@ -42,6 +42,9 @@ class RuntimeState:
     update_info: dict[str, Any] | None = None
     update_notified_hash: str = ""
     playit_cancel: bool = False
+    # One pending agent restart at most (threading.Timer); recent agent crashes (monotonic times).
+    playit_restart_timer: Any = None
+    playit_crash_times: list[float] = field(default_factory=list)
     process: Any = None
     # True once a stop was asked for (button, restart, console "stop", shutdown); a non-zero exit
     # without it counts as a crash. crash_times holds monotonic timestamps of recent crashes.

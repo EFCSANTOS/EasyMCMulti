@@ -164,6 +164,15 @@ maps to MC commands (`time set day`, `weather clear`, `save-all`, …); sends + 
   pending approval (setup → `idle`, no error); a changed secret stops the agent. A cancelled claim now
   ends in `setup="idle"` instead of `"error"`.
 - Agent exit → `_playit_on_exit` sets state stopped + console line.
+- Leftover agents / restart loop (2026-10-22, seen on Termux: `playitd error: IPC error: Another
+  instance is already running` → every new agent exits at once, and restart chains stacked up):
+  `start_agent_and_tunnels` calls `playit.kill_stale_agents` before starting (processes whose
+  cmdline/exe is our `_agent_path()`: `/proc` scan on POSIX, psutil on Windows); the agent runs in
+  its own session/process group so `stop()` `killpg`s the termux-chroot/proot wrapper and the agent
+  together. One pending restart at most (`runtime.playit_restart_timer`, cancelled by any start or
+  deliberate stop); more than `PLAYIT_CRASH_LIMIT` (3) exits in `PLAYIT_CRASH_WINDOW_SEC` (600 s)
+  → restarts paused, `setup="error"` with the agent's last error line, "DOWN" alert; Start tunnel
+  re-arms. `ensure_agent` installs `proot` on Termux when `termux-chroot` is missing.
 - Rejected key (2026-10-22, seen in the field: agent logs `ApiError(Auth(InvalidAgentKey))` forever
   while our own API calls with the same key still succeed and `/tunnels/create` keeps answering
   `AgentVersionTooOld`): `start_agent_and_tunnels` watches agent output via
@@ -198,7 +207,7 @@ Core details (`core/playit.py`):
   on a thread (returns immediately, state `starting`); disabled → `stop_web_tunnel`.
 - `start_web_tunnel`: `cloudflared.ensure_binary` (PATH, else download
   `cloudflared-<os>-<arch>[.exe]` from GitHub latest release into `DATA_DIR`; on Termux it never
-  downloads and asks for `pkg install cloudflared`) → `QuickTunnel.start(binary, WEB_PORT)` runs
+  downloads but runs `hostenv.termux_install("cloudflared")`) → `QuickTunnel.start(binary, WEB_PORT)` runs
   `cloudflared tunnel --no-autoupdate --url http://127.0.0.1:<port>`.
 - `QuickTunnel` announces the URL (`on_url`) only after both the `https://….trycloudflare.com` line
   **and** "Registered tunnel connection" were seen: announcing earlier lets browsers cache NXDOMAIN

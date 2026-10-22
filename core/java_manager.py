@@ -2,8 +2,8 @@
 
 Windows: the user does not have to install ANYTHING: a portable Eclipse Temurin JRE is
 downloaded into EZ_Server_Data/java and used directly.
-Linux / Termux (Android): an installed Java is used (Termux: `pkg install openjdk-21`).
-Temurin's Linux builds need glibc and cannot run on Android, so nothing is downloaded there.
+Linux / Termux (Android): an installed Java is used. Termux installs the missing openjdk-N package
+automatically; Temurin's Linux builds need glibc and cannot run on Android, so nothing is downloaded.
 Each Minecraft version needs a specific Java.
 """
 import glob
@@ -21,6 +21,8 @@ ADOPTIUM = (
     "https://api.adoptium.net/v3/binary/latest/{feature}/ga/"
     "windows/x64/jre/hotspot/normal/eclipse?project=jdk"
 )
+# Java versions packaged by Termux (openjdk-17, openjdk-21, openjdk-25); installed on demand.
+TERMUX_JAVA_VERSIONS = (17, 21, 25)
 
 
 def required_java(mc_version):
@@ -115,6 +117,12 @@ def find_system_java(feature):
     return None, None
 
 
+def termux_java_package(feature):
+    """Termux package providing Java `feature` (or the closest newer one), or None."""
+    newer = [v for v in TERMUX_JAVA_VERSIONS if v >= feature]
+    return f"openjdk-{newer[0]}" if newer else None
+
+
 def _ensure_system_java(feature, log):
     exe, major = find_system_java(feature)
     if exe:
@@ -124,9 +132,17 @@ def _ensure_system_java(feature, log):
             log(f"Using installed Java {feature}.")
         return exe
     if hostenv.is_termux():
-        hint = f"Install it in Termux with: pkg install openjdk-{feature}"
-    else:
-        hint = f"Install Java {feature} (e.g. openjdk-{feature}-jre-headless) or set JAVA_HOME."
+        package = termux_java_package(feature)
+        if feature < min(TERMUX_JAVA_VERSIONS) or package is None:
+            raise RuntimeError(f"Java {feature} is not available in Termux, so this Minecraft version can't run "
+                               f"on Android. Choose Minecraft 1.17 or newer.")
+        hostenv.termux_install(package, log)  # raises with a manual hint if it fails
+        exe, major = find_system_java(feature)
+        if exe:
+            log(f"Using Java {major}.")
+            return exe
+        raise RuntimeError(f"{package} was installed but no Java {feature}+ was found in {hostenv.termux_prefix()}/lib/jvm.")
+    hint = f"Install Java {feature} (e.g. openjdk-{feature}-jre-headless) or set JAVA_HOME."
     raise RuntimeError(f"Java {feature} or newer is required for this Minecraft version. {hint}")
 
 
