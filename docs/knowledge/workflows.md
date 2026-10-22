@@ -255,16 +255,27 @@ Core details (`core/playit.py`):
   Each new link is emailed when alerts are configured (§17).
 - Login through the link uses sessions + lockout (§1).
 
-## 17. Alerts (email + heartbeat)
+## 17. Alerts (email + Discord + heartbeat)
 - Settings: `core/notifier.py`, file `EZ_Server_Data/notify_config.json` (keys `notifier.DEFAULTS` +
-  internal `last_link`). `GET /api/notifications` → `public_config()` (no `smtp_password`, adds
-  `password_set`); `PUT` merges (empty `smtp_password` keeps the saved one; `last_link` cannot be
-  set from the API); `POST /api/notifications/test` sends a test email and/or pings the heartbeat
-  (400 if neither is configured, 502 with the reason on failure). Server setup → Alerts card.
-- `notify(category, subject, body, throttle=True)` (inside `create_app`): only when
-  `email_ready()` and `notify_<category>` is on (`server` / `link` / `tunnels` / `updates` / `security`); same subject at most
-  once per `ALERT_REPEAT_SEC` (600 s); sends on a daemon thread via SMTP (STARTTLS on 587, SSL on
-  465); logs `[notify] email sent|failed`. Body adds host name, time, current dashboard link.
+  internal `last_link`). `GET /api/notifications` → `public_config()` (no secrets: adds
+  `password_set`, `discord_owner_set`, `discord_friends_set`); `PUT` merges — secrets
+  (`SECRET_KEYS`: SMTP password, both webhook URLs) keep the saved value when empty and are removed
+  with `null`; webhook URLs must match `DISCORD_WEBHOOK` (else 400); `last_link` cannot be set from
+  the API. `POST /api/notifications/test` sends a test email, posts to each configured webhook and/or
+  pings the heartbeat (400 if nothing is configured, 502 with the reason on failure). Server setup →
+  Alerts card.
+- `notify(category, subject, body, throttle=True)` (`services.py`): when `notify_<category>` is on
+  (`server` / `link` / `tunnels` / `updates` / `security`) and email is ready and/or the **owner**
+  webhook is set; same subject at most once per `ALERT_REPEAT_SEC` (600 s); sends on a daemon thread
+  via SMTP (STARTTLS on 587, SSL on 465) and `send_discord`; logs `[notify] email|Discord (owner)
+  sent|failed`. Body adds host name, time, current dashboard link.
+- **Friends** webhook (FEAT-05), `notify_friends(kind, text)` gated by `friends_notify_<kind>`:
+  `status` — "Server is online: <Loader> <version> at <address>" after a start, "Server is offline."
+  on a deliberate stop, crash / unexpected-stop messages; `players` — joins/leaves from
+  `track_player_event` batched for `FRIENDS_BATCH_SEC` (30 s) into one "A, B joined · C left" (join
+  and leave inside one batch cancel out); `link` — the new status page link (never the dashboard
+  link). `send_discord` posts `{content (≤ 2000), allowed_mentions: {parse: []}}` (no @everyone from
+  player names) and waits once on a 429 (`retry_after`, ≤ 10 s).
 - Hooks: crash (`Minecraft server crashed`), limit reached (`… DOWN (auto-restart paused)`), restart
   failed / back online, unexpected exit with auto-restart off, autostart failures, new Cloudflare
   link (`link`, unthrottled, only when it differs from `last_link`), Cloudflare link down / failed

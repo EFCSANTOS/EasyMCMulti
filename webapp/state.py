@@ -70,11 +70,11 @@ class RuntimeState:
             if operation is not None:
                 self.operation = operation
 
-    def track_player_event(self, line: str) -> None:
-        """Update online_players from a server console line (join/leave messages)."""
+    def track_player_event(self, line: str) -> tuple[str, str] | None:
+        """Update online_players from a server console line; returns (name, "joined"|"left") or None."""
         match = _PLAYER_EVENT.search(line)
         if not match:
-            return
+            return None
         name, event = match.groups()
         with self.lock:
             if event == "joined":
@@ -83,6 +83,7 @@ class RuntimeState:
                 self.online_players.discard(name)
         if event == "joined":
             self.note_player(name, rejected=False)
+        return name, event
 
     def note_player(self, name: str, rejected: bool) -> None:
         """Remember a player who joined or was refused, newest first, at most RECENT_PLAYERS_LIMIT."""

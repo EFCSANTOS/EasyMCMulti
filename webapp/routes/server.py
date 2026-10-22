@@ -198,15 +198,20 @@ def register(app: FastAPI, s: Services) -> None:
             runtime.process = None
             runtime.clear_players()
             if code == 0 or runtime.stop_requested:
+                s.notify_friends("status", "Server is offline.")
                 return
             if common._effective_config().get("auto_restart"):
+                s.notify_friends("status", "Server crashed; it restarts by itself in a moment.")
                 handle_crash(code)
             else:
+                s.notify_friends("status", "Server stopped unexpectedly and is offline.")
                 notify("server", "Minecraft server stopped unexpectedly",
                        f"The server exited with code {code}. Automatic restart is off.")
 
         def on_output(line: str) -> None:
-            runtime.track_player_event(line)
+            event = runtime.track_player_event(line)
+            if event:
+                s.player_event(*event)
             refused = players.rejected_name(line)
             if refused:
                 runtime.note_player(refused, rejected=True)
@@ -230,6 +235,9 @@ def register(app: FastAPI, s: Services) -> None:
         process.start()
         runtime.set_state("running", "idle")
         append_console_line(f"[server] started with {loader} {version}")
+        address = s.join_address(config)
+        s.notify_friends("status", f"Server is online: {common.LOADER_LABELS.get(loader, loader)} {version}"
+                         + (f" at {address}" if address else "") + ".")
         return "Server started."
 
     def request_stop() -> str:
