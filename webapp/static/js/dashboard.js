@@ -1,12 +1,12 @@
 const appState = {
-  auth: { username: '', password: '' },
+  username: '',
   config: {},
   status: {},
   latestVersionList: [],
   busy: false,
 };
 
-// Browsers cannot send Basic auth on a WebSocket, so the console is polled over REST.
+// The console is polled over REST (the /ws/console socket also accepts the session cookie).
 const CONSOLE_POLL_MS = 2000;
 const STATUS_POLL_MS = 5000;
 const METRICS_POLL_MS = 2000;
@@ -35,44 +35,33 @@ const metricsState = {
 };
 
 // ---------- Auth & HTTP ----------
-function readSessionCredentials() {
-  try {
-    const username = sessionStorage.getItem('ez_auth_username') || '';
-    const password = sessionStorage.getItem('ez_auth_password') || '';
-    appState.auth = { username, password };
-  } catch (error) {
-    appState.auth = { username: '', password: '' };
-  }
-  return appState.auth;
-}
-
-function buildBasicAuth() {
-  const { username, password } = appState.auth.username ? appState.auth : readSessionCredentials();
-  return 'Basic ' + btoa(`${username}:${password}`);
-}
-
-function signOut() {
-  try {
-    sessionStorage.removeItem('ez_auth_username');
-    sessionStorage.removeItem('ez_auth_password');
-  } catch (error) {
-    // storage unavailable; nothing to clear
-  }
+// Auth is an HttpOnly session cookie set by POST /api/login; the browser sends it on its own.
+function goToLogin() {
   window.location.href = '/login';
 }
 
+async function signOut() {
+  try {
+    await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+  } catch (error) {
+    // offline: the session expires on its own
+  }
+  goToLogin();
+}
+
 async function fetchJson(url, method = 'GET', body = null) {
-  const options = { method, headers: { Authorization: buildBasicAuth() } };
+  const options = { method, credentials: 'same-origin', headers: {} };
   if (body instanceof FormData) {
     options.body = body;
-  } else if (body !== null) {
+  } else if (body !== null || method !== 'GET') {
+    // State changes always send JSON: the server refuses other content types (CSRF guard).
     options.headers['Content-Type'] = 'application/json';
-    options.body = JSON.stringify(body);
+    options.body = JSON.stringify(body || {});
   }
 
   const response = await fetch(url, options);
   if (response.status === 401) {
-    signOut();
+    goToLogin();
     throw new Error('Session expired. Please sign in again.');
   }
   const text = await response.text();
@@ -787,7 +776,7 @@ async function deleteWorld(world, button) {
 async function downloadWorld(world, button) {
   await runAction(button, `Preparing ${world.name}.zip…`, async () => {
     const response = await fetch(`/api/worlds/${encodeURIComponent(world.folder)}/download`, {
-      headers: { Authorization: buildBasicAuth() },
+      credentials: 'same-origin',
     });
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || `HTTP ${response.status}`);
     const url = URL.createObjectURL(await response.blob());
@@ -811,7 +800,6 @@ function uploadWorld(input) {
   form.append('name', file.name.replace(/\.zip$/i, ''));
   const request = new XMLHttpRequest();
   request.open('POST', '/api/worlds/upload');
-  request.setRequestHeader('Authorization', buildBasicAuth());
   request.upload.onprogress = (event) => {
     if (event.lengthComputable) {
       const percent = Math.round((event.loaded / event.total) * 100);
@@ -974,6 +962,7 @@ const ALERT_FIELDS = [
   ['alerts-notify-link', 'notify_link', 'checkbox'],
   ['alerts-notify-tunnels', 'notify_tunnels', 'checkbox'],
   ['alerts-notify-updates', 'notify_updates', 'checkbox'],
+  ['alerts-notify-security', 'notify_security', 'checkbox'],
   ['alerts-heartbeat-url', 'heartbeat_url', 'text'],
 ];
 
@@ -1172,6 +1161,9 @@ function renderRemoteDashboard(info) {
   const errorBox = document.getElementById('remote-dashboard-error');
   errorBox.hidden = !(info.enabled && info.error);
   errorBox.textContent = info.error || '';
+
+  const weakPassword = document.getElementById('remote-dashboard-weak-password');
+  if (weakPassword) weakPassword.hidden = !(info.enabled && info.weak_password);
 }
 
 async function loadRemoteDashboard() {
@@ -1186,8 +1178,8 @@ async function toggleRemoteDashboard(toggle) {
   const enabled = toggle.checked;
   if (enabled && !window.confirm(
     'Share this dashboard on the internet?\n\n'
-    + 'The https link is encrypted, but anyone who gets it can try to sign in, and there is no '
-    + 'lockout for wrong passwords yet. Continue only with a long, unique password.',
+    + 'The https link is encrypted, but anyone who gets it can try to sign in. Wrong passwords '
+    + 'are locked out after 5 tries, but use a long, unique password.',
   )) {
     toggle.checked = false;
     return;
@@ -1515,13 +1507,13 @@ function bindEvents() {
 }
 
 async function boot() {
-  readSessionCredentials();
-  if (!appState.auth.username || !appState.auth.password) {
-    window.location.href = '/login';
-    return;
+  try {
+    appState.username = (await fetchJson('/api/session')).username;
+  } catch (error) {
+    if (error.message.startsWith('Session expired')) return; // redirecting to /login
   }
   const session = document.getElementById('session-status');
-  if (session) session.textContent = `Signed in as ${appState.auth.username}`;
+  if (session && appState.username) session.textContent = `Signed in as ${appState.username}`;
 
   bindEvents();
   bindMetrics();
