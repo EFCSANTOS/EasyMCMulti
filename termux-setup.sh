@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # One-time installer for EZ Minecraft Server on Android (Termux).
+# Works on a brand-new Termux (F-Droid or GitHub build) with nothing else installed:
 #
-#   curl -fsSL https://raw.githubusercontent.com/EFCSANTOS/EasyMCMulti/main/termux-setup.sh | bash
+#   pkg install -y curl
+#   curl -fsSL https://raw.githubusercontent.com/EFCSANTOS/EasyMCMulti/main/termux-setup.sh -o termux-setup.sh
+#   bash termux-setup.sh
+#
+# (Piping straight into bash also works: curl -fsSL <url> | bash)
 #
 # Safe to re-run: it updates the code and dependencies and keeps your login (.env).
 # Overrides: EZ_REPO_URL, EZ_BRANCH, EZ_APP_DIR, EZ_JAVA_PACKAGE (default openjdk-21).
@@ -19,27 +24,36 @@ if [ -z "${TERMUX_VERSION:-}" ] && [[ "${PREFIX:-}" != *com.termux* ]]; then
   fail "Run this inside the Termux app (install Termux from F-Droid or GitHub, not the Play Store)."
 fi
 
+# Package commands must never prompt: when run as `curl ... | bash`, stdin is this script, so a
+# prompt (e.g. "configuration file modified, keep or replace?") would swallow the rest of it.
+# --force-confdef/--force-confold answer those prompts automatically; </dev/null guards the rest.
+export DEBIAN_FRONTEND=noninteractive
+APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+
+say "Updating Termux packages (a fresh install needs this before anything else)..."
+pkg update -y </dev/null
+apt-get "${APT_OPTS[@]}" full-upgrade </dev/null
+
 say "Installing system packages (Python, Java, build tools)..."
-pkg update -y
 # rust + binutils: pydantic-core (used by FastAPI) is compiled on the phone.
 # proot: provides termux-chroot, which lets the PlayIt agent resolve DNS on Android.
-pkg install -y python git "$JAVA_PACKAGE" rust binutils proot termux-tools
+apt-get "${APT_OPTS[@]}" install python git "$JAVA_PACKAGE" rust binutils proot termux-tools </dev/null
 
 say "Fetching the app into $APP_DIR..."
 if [ -d "$APP_DIR/.git" ]; then
-  git -C "$APP_DIR" pull --ff-only
+  git -C "$APP_DIR" pull --ff-only </dev/null
 else
-  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$APP_DIR" </dev/null
 fi
 cd "$APP_DIR"
 
 say "Installing Python packages (first run compiles some of them: 10-20 minutes is normal)..."
-[ -x .venv/bin/python ] || python -m venv .venv
+[ -x .venv/bin/python ] || python -m venv .venv </dev/null
 export ANDROID_API_LEVEL="$(getprop ro.build.version.sdk)"
-.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install --upgrade pip </dev/null
 # psutil is skipped: Android blocks the CPU counters it reads; memory comes from /proc/meminfo.
 grep -v '^psutil' requirements.txt > .requirements-termux.txt
-.venv/bin/python -m pip install -r .requirements-termux.txt
+.venv/bin/python -m pip install -r .requirements-termux.txt </dev/null
 rm -f .requirements-termux.txt
 
 if [ ! -f .env ]; then

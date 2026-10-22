@@ -56,14 +56,19 @@ For development (tests): `python -m pip install -r requirements-dev.txt`.
 
 ## Android (Termux) quick install
 
-1. Install **Termux** from F-Droid or GitHub (the Play Store version is outdated).
-2. In Termux, run:
+1. Install **Termux** from [F-Droid](https://f-droid.org/packages/com.termux/) or
+   [GitHub releases](https://github.com/termux/termux-app/releases). Avoid the old Google Play
+   build: its package repositories may not work.
+2. Open Termux and run these three lines (works on a brand-new Termux with nothing else installed):
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/EFCSANTOS/EasyMCMulti/main/termux-setup.sh | bash
+   pkg install -y curl
+   curl -fsSL https://raw.githubusercontent.com/EFCSANTOS/EasyMCMulti/main/termux-setup.sh -o termux-setup.sh
+   bash termux-setup.sh
    ```
 
-   To install another branch: `curl -fsSL https://raw.githubusercontent.com/EFCSANTOS/EasyMCMulti/development/termux-setup.sh | EZ_BRANCH=development bash`.
+   To install the `development` branch instead, use `.../EasyMCMulti/development/termux-setup.sh` in
+   the second line and run the third as `EZ_BRANCH=development bash termux-setup.sh`.
 
 The script installs Python, Java 21 and build tools, downloads the app, compiles the Python
 packages (10–20 minutes the first time), asks for a dashboard username and password, and adds an
@@ -78,6 +83,9 @@ Notes for phones:
 - Minecraft 1.17 – 1.21.x is supported (Java 17/21 from Termux). 1.16 and older need Java 8, which Termux does not provide.
 - Give the server 1536–2048 MB in **Server setup**; a phone needs about 3 GB free RAM.
 - Keep Termux running and exclude it from Android battery optimization. `ezmc` holds a wake lock while running.
+- Android 12+ may kill the server with `[Process completed (signal 9)]` (the "phantom process
+  killer"). On Android 14+ turn on **Developer options → Disable child process restrictions**; on
+  Android 12–13 run once from a PC: `adb shell settings put global settings_enable_monitor_phantom_procs false`.
 - CPU usage shows 0% on Android (the system blocks that counter); memory usage works.
 
 ---

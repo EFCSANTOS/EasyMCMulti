@@ -161,8 +161,12 @@ Core details (`core/playit.py`):
 - `PlayitAgent.start(secret)` runs `agent_command(secret)`; `stop()` = `terminate()`.
 
 ## 15. Termux (Android) install
-`termux-setup.sh` (one-liner in README): `pkg install python git openjdk-21 rust binutils proot
-termux-tools` → clone/pull into `~/EasyMCMulti` (`EZ_REPO_URL`, `EZ_BRANCH` default `main`,
+`termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
+also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`
+(`DEBIAN_FRONTEND=noninteractive`, dpkg `--force-confdef --force-confold`), because under
+`curl | bash` stdin is the script itself and any prompt would consume it. Steps: `pkg update` →
+`apt-get full-upgrade` (fresh bootstraps need it) → `apt-get install python git openjdk-21 rust
+binutils proot termux-tools` → clone/pull into `~/EasyMCMulti` (`EZ_REPO_URL`, `EZ_BRANCH` default `main`,
 `EZ_APP_DIR`, `EZ_JAVA_PACKAGE`) → `.venv` → `pip install` requirements minus `psutil` with
 `ANDROID_API_LEVEL` set (pydantic-core compiles via Rust/maturin, 10–20 min) → prompts for login
 (12+ char password) into `.env` (mode 600, `%q`-quoted) → installs `$PREFIX/bin/ezmc` → offers to

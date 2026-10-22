@@ -117,3 +117,5 @@ Supported hosts: Windows (primary), Linux and Termux on Android (added 2026-10-2
 - Android blocks `/proc/stat`: CPU shows 0; memory comes from `/proc/meminfo`
   (`app._memory_usage`). Android may also suspend Termux; `run.sh` takes a wake lock.
 - PlayIt on Termux uses the Linux binary wrapped in `termux-chroot` (`playit.agent_command`).
+- Android 12+ "phantom process killer" can SIGKILL Termux child processes (Java, PlayIt agent);
+  the user must disable it (README Android notes). The app cannot work around it.
