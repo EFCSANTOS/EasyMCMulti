@@ -1,9 +1,11 @@
-"""Listes de versions et telechargement des .jar serveur pour chaque loader.
+"""Version lists and server .jar downloads for each loader.
 
-Loaders supportes :
-- vanilla : serveur officiel Mojang
-- paper   : serveur optimise (plugins Bukkit/Spigot), tres bon pour jouer entre potes
-- fabric  : serveur moddable (mods Fabric)
+Supported loaders:
+- vanilla  : official Mojang server
+- paper    : optimized server (Bukkit/Spigot plugins), great for playing with friends
+- fabric   : moddable server (Fabric mods)
+- forge    : moddable server (Forge mods, installed via the Forge installer)
+- neoforge : moddable server (NeoForge mods, installed via the NeoForge installer)
 """
 import glob
 import os
@@ -21,15 +23,15 @@ NEOFORGE_VERSIONS = "https://maven.neoforged.net/api/maven/versions/releases/net
 NEOFORGE_MAVEN = "https://maven.neoforged.net/releases/net/neoforged/neoforge"
 
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
-JAR_LOADERS = ("vanilla", "paper", "fabric")          # se lancent avec -jar server.jar
-INSTALLER_LOADERS = ("forge", "neoforge")             # passent par un installeur
+JAR_LOADERS = ("vanilla", "paper", "fabric")          # launched with -jar server.jar
+INSTALLER_LOADERS = ("forge", "neoforge")             # go through an installer
 
-# Cache simple pour eviter de re-telecharger le manifest vanilla a chaque fois.
+# Simple cache to avoid re-downloading the vanilla manifest every time.
 _vanilla_meta_urls = {}
 
 
 def download(url, dest, log=print, progress=None):
-    """Telecharge url vers dest (fichier .part puis renomme une fois complet)."""
+    """Download url to dest (writes a .part file, then renames it once complete)."""
     tmp = dest + ".part"
     with requests.get(url, stream=True, timeout=120) as r:
         r.raise_for_status()
@@ -59,26 +61,26 @@ def vanilla_versions(include_snapshots=False):
 def vanilla_server_url(version):
     meta_url = _vanilla_meta_urls.get(version)
     if not meta_url:
-        vanilla_versions(include_snapshots=True)  # remplit le cache
+        vanilla_versions(include_snapshots=True)  # fills the cache
         meta_url = _vanilla_meta_urls[version]
     meta = requests.get(meta_url, timeout=30).json()
     server = meta.get("downloads", {}).get("server")
     if not server:
-        raise RuntimeError(f"Pas de serveur disponible pour la version {version}.")
+        raise RuntimeError(f"No server available for version {version}.")
     return server["url"]
 
 
 # ---------- PAPER ----------
 def paper_versions():
     data = requests.get(PAPER_API, timeout=30).json()
-    return list(reversed(data["versions"]))  # plus recentes en premier
+    return list(reversed(data["versions"]))  # newest first
 
 
 def paper_server_url(version):
     builds = requests.get(f"{PAPER_API}/versions/{version}/builds", timeout=30).json()["builds"]
     if not builds:
-        raise RuntimeError(f"Aucun build Paper pour {version}.")
-    b = builds[-1]  # dernier build
+        raise RuntimeError(f"No Paper build for {version}.")
+    b = builds[-1]  # latest build
     name = b["downloads"]["application"]["name"]
     return f"{PAPER_API}/versions/{version}/builds/{b['build']}/downloads/{name}"
 
@@ -94,7 +96,7 @@ def fabric_server_url(game_version):
     loader = next(l["version"] for l in loaders if l["stable"])
     installers = requests.get(f"{FABRIC_META}/versions/installer", timeout=30).json()
     installer = next(i["version"] for i in installers if i["stable"])
-    # Fabric fournit directement un .jar serveur pret a lancer.
+    # Fabric serves a ready-to-run server .jar directly.
     return f"{FABRIC_META}/versions/loader/{game_version}/{loader}/{installer}/server/jar"
 
 
@@ -104,14 +106,14 @@ def _forge_promos():
 
 
 def forge_versions():
-    """Liste des versions Minecraft supportees par Forge (plus recentes en premier)."""
+    """Minecraft versions supported by Forge (newest first)."""
     promos = _forge_promos()
-    mcs = {k.rsplit("-", 1)[0] for k in promos}  # enleve -latest / -recommended
+    mcs = {k.rsplit("-", 1)[0] for k in promos}  # strip -latest / -recommended
     return sorted(mcs, key=_version_key, reverse=True)
 
 
 def forge_build(mc_version):
-    """Numero de build Forge pour une version MC (recommended sinon latest)."""
+    """Forge build number for an MC version (recommended, otherwise latest)."""
     promos = _forge_promos()
     return promos.get(f"{mc_version}-recommended") or promos.get(f"{mc_version}-latest")
 
@@ -119,7 +121,7 @@ def forge_build(mc_version):
 def forge_installer_url(mc_version):
     build = forge_build(mc_version)
     if not build:
-        raise RuntimeError(f"Pas de build Forge pour {mc_version}.")
+        raise RuntimeError(f"No Forge build for {mc_version}.")
     v = f"{mc_version}-{build}"
     return f"{FORGE_MAVEN}/{v}/forge-{v}-installer.jar"
 
@@ -130,13 +132,13 @@ def _neoforge_all():
 
 
 def _neoforge_to_mc(ver):
-    """Deduit la version MC depuis la version NeoForge.
+    """Derive the MC version from a NeoForge version.
 
-    Ancien schema (1.x) : '21.1.73' -> '1.21.1', '21.0.167' -> '1.21'.
-    Nouveau schema (>=2026, ex MC '26.2') : '26.2.0.7' -> '26.2'.
+    Old scheme (1.x): '21.1.73' -> '1.21.1', '21.0.167' -> '1.21'.
+    New scheme (>=2026, e.g. MC '26.2'): '26.2.0.7' -> '26.2'.
     """
     a, b = ver.split(".")[:2]
-    if int(a) >= 25:  # nouveau versioning Minecraft (annee-based)
+    if int(a) >= 25:  # new year-based Minecraft versioning
         return f"{a}.{b}"
     return f"1.{a}" if b == "0" else f"1.{a}.{b}"
 
@@ -147,10 +149,10 @@ def neoforge_versions():
 
 
 def neoforge_build(mc_version):
-    """Derniere version NeoForge pour la version MC donnee."""
+    """Latest NeoForge version for the given MC version."""
     matches = [v for v in _neoforge_all() if _neoforge_to_mc(v) == mc_version]
     if not matches:
-        raise RuntimeError(f"Pas de build NeoForge pour {mc_version}.")
+        raise RuntimeError(f"No NeoForge build for {mc_version}.")
     return sorted(matches, key=_version_key)[-1]
 
 
@@ -160,14 +162,14 @@ def neoforge_installer_url(mc_version):
 
 
 def _version_key(v):
-    """Cle de tri numerique tolerante (ex '1.21.10' > '1.21.9')."""
+    """Lenient numeric sort key (e.g. '1.21.10' > '1.21.9')."""
     out = []
     for part in v.replace("-", ".").split("."):
         out.append(int(part) if part.isdigit() else 0)
     return out
 
 
-# ---------- Installation Forge/NeoForge ----------
+# ---------- Forge/NeoForge installation ----------
 def _run(args, cwd, log):
     proc = subprocess.Popen(
         args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -178,7 +180,9 @@ def _run(args, cwd, log):
 
 
 def _find_args_file(sdir):
-    matches = glob.glob(os.path.join(sdir, "libraries", "**", "win_args.txt"), recursive=True)
+    """Modern Forge/NeoForge launch-arguments file (win_args.txt on Windows, unix_args.txt elsewhere)."""
+    name = "win_args.txt" if sys.platform == "win32" else "unix_args.txt"
+    matches = glob.glob(os.path.join(sdir, "libraries", "**", name), recursive=True)
     return matches[0] if matches else None
 
 
@@ -192,43 +196,43 @@ def _already_installed(loader, sdir):
 
 
 def prepare(loader, version, sdir, java_exe, log=print, progress=None):
-    """Telecharge (et installe pour forge/neoforge) le serveur dans sdir."""
+    """Download (and, for forge/neoforge, install) the server into sdir."""
     if _already_installed(loader, sdir):
-        log("Serveur deja installe.")
+        log("Server already installed.")
         return
 
     if loader in JAR_LOADERS:
         jar = os.path.join(sdir, "server.jar")
-        log("Recherche du serveur...")
+        log("Looking up the server...")
         url = server_jar_url(loader, version)
-        log("Telechargement du serveur...")
+        log("Downloading the server...")
         download(url, jar, log=log, progress=progress)
         return
 
-    # forge / neoforge : telecharger l'installeur puis l'executer
+    # forge / neoforge: download the installer, then run it
     url = forge_installer_url(version) if loader == "forge" else neoforge_installer_url(version)
     installer = os.path.join(sdir, "installer.jar")
-    log("Telechargement de l'installeur...")
+    log("Downloading the installer...")
     download(url, installer, log=log, progress=progress)
-    log("Installation du serveur (peut prendre quelques minutes)...")
+    log("Installing the server (this can take a few minutes)...")
     code = _run([java_exe, "-jar", "installer.jar", "--installServer"], sdir, log)
     if code != 0:
-        raise RuntimeError(f"L'installeur {loader} a echoue (code {code}).")
-    log("Installation terminee.")
+        raise RuntimeError(f"The {loader} installer failed (exit code {code}).")
+    log("Installation complete.")
 
 
 def launch_args(loader, java_exe, sdir, ram_mb):
-    """Construit la commande complete de lancement du serveur."""
+    """Build the full server launch command."""
     base = [java_exe, f"-Xms{ram_mb}M", f"-Xmx{ram_mb}M"]
     if loader in JAR_LOADERS:
         return base + ["-jar", "server.jar", "nogui"]
     args_file = _find_args_file(sdir)
-    if args_file:  # forge/neoforge modernes : fichier d'arguments
+    if args_file:  # modern forge/neoforge: arguments file
         return base + ["@" + os.path.relpath(args_file, sdir), "nogui"]
     jars = [j for j in glob.glob(os.path.join(sdir, "forge-*.jar")) if "installer" not in j]
-    if jars:  # vieux forge : jar lancable directement
+    if jars:  # old forge: directly runnable jar
         return base + ["-jar", os.path.basename(jars[0]), "nogui"]
-    raise RuntimeError("Commande de lancement introuvable (installation incomplete ?).")
+    raise RuntimeError("Launch command not found (incomplete installation?).")
 
 
 # ---------- Dispatch ----------
@@ -243,7 +247,7 @@ def list_versions(loader, include_snapshots=False):
         return forge_versions()
     if loader == "neoforge":
         return neoforge_versions()
-    raise ValueError(f"Loader inconnu : {loader}")
+    raise ValueError(f"Unknown loader: {loader}")
 
 
 def server_jar_url(loader, version):
@@ -253,4 +257,4 @@ def server_jar_url(loader, version):
         return paper_server_url(version)
     if loader == "fabric":
         return fabric_server_url(version)
-    raise ValueError(f"Loader sans jar direct : {loader}")
+    raise ValueError(f"Loader has no direct server jar: {loader}")
