@@ -59,9 +59,22 @@ grep -v '^psutil' requirements.txt > .requirements-termux.txt
 .venv/bin/python -m pip install -r .requirements-termux.txt </dev/null
 rm -f .requirements-termux.txt
 
-if [ ! -f .env ]; then
+env_has_login() {
+  [ -f .env ] || return 1
+  (
+    unset EZ_WEBAPP_USERNAME EZ_WEBAPP_PASSWORD
+    . ./.env
+    [ -n "${EZ_WEBAPP_USERNAME:-}" ] && [ -n "${EZ_WEBAPP_PASSWORD:-}" ]
+  ) 2>/dev/null
+}
+
+if ! env_has_login; then
   say "Choose the dashboard login"
-  read -rp "Username: " ez_user </dev/tty
+  while :; do
+    read -rp "Username: " ez_user </dev/tty
+    [ -n "$ez_user" ] && break
+    echo "The username cannot be empty."
+  done
   while :; do
     read -rsp "Password (12+ characters): " ez_pass </dev/tty
     echo

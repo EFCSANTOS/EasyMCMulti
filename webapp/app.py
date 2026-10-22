@@ -788,6 +788,19 @@ _SECTION_REMOTE = f"""
               <li><strong>Start</strong> the tunnel whenever the server is running.</li>
               <li>Share the address above with your friends.</li>
             </ol>
+            <details id="playit-json" class="advanced-smtp">
+              <summary>Edit config (JSON)</summary>
+              <div class="field">
+                <label for="playit-json-input">playit_config.json</label>
+                <textarea id="playit-json-input" rows="5" spellcheck="false" autocomplete="off"></textarea>
+                <p class="hint">Paste a secret key from playit.gg into "secret", or leave it empty to keep the saved key
+                  (it is never shown here). Saving cancels a pending approval.</p>
+              </div>
+              <div class="form-actions">
+                <button id="playit-json-reload" class="btn btn-ghost" type="button">Reload</button>
+                <button id="playit-json-save" class="btn btn-primary" type="button">Save config</button>
+              </div>
+            </details>
             <div class="form-actions">
               <button id="playit-config-button" class="btn btn-ghost" type="button">Configure</button>
               <button id="playit-stop-button" class="btn btn-ghost" type="button">Stop tunnel</button>
@@ -1704,8 +1717,12 @@ def create_app() -> FastAPI:
             runtime.playit_setup = "idle"
             playit_log("Setup complete; tunnel running.")
         except Exception as exc:
-            runtime.playit_setup = "error"
             runtime.playit_claim_url = None
+            if runtime.playit_cancel:
+                runtime.playit_setup = "idle"
+                playit_log("Setup cancelled.")
+                return
+            runtime.playit_setup = "error"
             runtime.playit_error = str(exc)
             playit_log(f"Setup failed: {exc}")
 
@@ -1766,6 +1783,40 @@ def create_app() -> FastAPI:
         # Never expose the secret key over HTTP; it stays in playit_config.json on the host.
         cfg = playit.load_config()
         return {"address": cfg.get("address") or "", "secret_present": bool(cfg.get("secret"))}
+
+    @app.put("/api/playit/config")
+    def save_playit_config(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        """Edit playit_config.json by hand: paste a secret key from playit.gg or fix the address.
+
+        A blank or missing secret keeps the saved one (it is never sent to the browser).
+        Cancels a pending approval; a changed secret stops the running agent.
+        """
+        unknown = set(payload) - {"secret", "address"}
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Unknown keys: {', '.join(sorted(unknown))}. Allowed: secret, address.")
+        secret = payload.get("secret") or ""
+        address = payload.get("address") or ""
+        if not isinstance(secret, str) or not isinstance(address, str):
+            raise HTTPException(status_code=400, detail="secret and address must be text.")
+        if runtime.playit_setup == "connecting":
+            raise HTTPException(status_code=409, detail="PlayIt is connecting; wait for it to finish, then save.")
+        if runtime.playit_setup == "awaiting-approval":
+            runtime.playit_cancel = True
+            runtime.playit_setup = "idle"
+            runtime.playit_claim_url = None
+        runtime.playit_error = ""
+
+        saved = playit.load_config().get("secret") or ""
+        secret = secret.strip() or saved
+        if not secret:
+            raise HTTPException(status_code=400, detail="No saved secret key: paste one into \"secret\".")
+        if secret != saved:
+            stop_playit_agent()
+            runtime.playit_state = "stopped"
+        playit.save_config(secret, address.strip())
+        runtime.playit_address = address.strip() or runtime.playit_address
+        playit_log("PlayIt config saved from the dashboard.")
+        return playit_info("PlayIt config saved. Click Start tunnel to use it.")
 
     # ---------- Remote dashboard (Cloudflare quick tunnel) ----------
     def web_log(line: str) -> None:

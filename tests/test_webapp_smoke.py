@@ -821,6 +821,38 @@ def test_playit_config_does_not_expose_secret(monkeypatch):
     assert response.json() == {"address": "demo.example", "secret_present": True}
 
 
+def test_playit_config_put_saves_and_keeps_secret_when_blank(fake_playit):
+    auth = ("admin", "s3cret-pass")
+    assert client.put("/api/playit/config", auth=auth, json={"secret": "", "address": ""}).status_code == 400
+    response = client.put("/api/playit/config", auth=auth, json={"secret": "pasted-key", "address": "a.example"})
+    assert response.status_code == 200
+    assert response.json()["configured"] is True
+    assert "pasted-key" not in response.text
+    response = client.put("/api/playit/config", auth=auth, json={"secret": "", "address": "b.example"})
+    assert response.status_code == 200
+    assert playit.load_config() == {"secret": "pasted-key", "address": "b.example"}
+    assert client.put("/api/playit/config", auth=auth, json={"secret": "x", "extra": 1}).status_code == 400
+
+
+def test_playit_config_put_cancels_pending_approval(fake_playit, monkeypatch):
+    def fake_claim(log, should_cancel, timeout_sec=300, on_url=None):
+        on_url("https://playit.gg/claim/abc123")
+        while not should_cancel():
+            time.sleep(0.01)
+        raise RuntimeError("Setup cancelled.")
+
+    monkeypatch.setattr(webapp_module.playit, "claim_interactive", fake_claim)
+    auth = ("admin", "s3cret-pass")
+    assert client.post("/api/playit/configure", auth=auth).json()["setup"] == "awaiting-approval"
+    response = client.put("/api/playit/config", auth=auth, json={"secret": "pasted-key"})
+    assert response.status_code == 200
+    assert response.json()["setup"] == "idle"
+    time.sleep(0.1)
+    status = client.get("/api/playit/status", auth=auth).json()
+    assert status["setup"] == "idle" and status["error"] == ""
+    assert client.post("/api/playit/start", auth=auth).json()["state"] == "running"
+
+
 def test_wrong_password_is_rejected():
     response = client.get("/api/status", auth=("admin", "wrong"))
     assert response.status_code == 401

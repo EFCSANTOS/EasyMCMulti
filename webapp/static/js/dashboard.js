@@ -935,6 +935,33 @@ async function configurePlayit(button) {
   });
 }
 
+async function loadPlayitJson() {
+  const input = document.getElementById('playit-json-input');
+  const cfg = await fetchJson('/api/playit/config');
+  // The secret never leaves the host; an empty value keeps it on save.
+  input.value = JSON.stringify({ secret: '', address: cfg.address || '' }, null, 2);
+}
+
+async function savePlayitJson(button) {
+  let body;
+  try {
+    body = JSON.parse(document.getElementById('playit-json-input').value);
+  } catch (error) {
+    setStatus(`Invalid JSON: ${error.message}`, 'error');
+    return;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    setStatus('The config must be a JSON object, e.g. {"secret": "", "address": ""}.', 'error');
+    return;
+  }
+  await runAction(button, 'Saving PlayIt config…', async () => {
+    const response = await fetchJson('/api/playit/config', 'PUT', body);
+    renderPlayit(response);
+    await loadPlayitJson();
+    return response.message || 'Saved.';
+  });
+}
+
 // ---------- Alerts (email + heartbeat) ----------
 // [element id, notify_config key, kind]. The SMTP password is write-only: never filled from the server.
 const ALERT_FIELDS = [
@@ -1452,6 +1479,14 @@ function bindEvents() {
   });
 
   on('playit-config-button', 'click', (event, button) => configurePlayit(button));
+  on('playit-json', 'toggle', (event, details) => {
+    if (details.open) loadPlayitJson().catch((error) => setStatus(error.message, 'error'));
+  });
+  on('playit-json-reload', 'click', (event, button) => runAction(button, null, async () => {
+    await loadPlayitJson();
+    return 'PlayIt config reloaded.';
+  }));
+  on('playit-json-save', 'click', (event, button) => savePlayitJson(button));
   on('remote-dashboard-toggle', 'change', (event, toggle) => toggleRemoteDashboard(toggle));
   on('playit-start-button', 'click', (event, button) => playitAction('/api/playit/start', 'Starting tunnel…')(button));
   on('playit-stop-button', 'click', (event, button) => playitAction('/api/playit/stop', 'Stopping tunnel…')(button));
