@@ -72,6 +72,8 @@ def register(app: FastAPI, s: Services) -> None:
             runtime.update_state = "idle"
             runtime.update_message = "Already up to date."
             return
+        runtime.update_message = "Backing up the world before restarting..."
+        s.safety_backup("update")  # best effort: a failure is alerted, the update goes on
         resume = {
             "server": bool(runtime.process is not None and runtime.process.is_running()),
             "playit": bool(runtime.playit_agent is not None and runtime.playit_agent.is_running()),

@@ -2,11 +2,20 @@
 // Plain scripts that share one global scope, loaded in order by webapp/pages/layout.py::SCRIPTS.
 
 // ---------- Backups ----------
-function describeBackup(path) {
-  const name = path.split(/[\\/]/).pop();
-  const match = name.match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/);
-  const date = match ? new Date(match[1], match[2] - 1, match[3], match[4], match[5], match[6]) : null;
-  return { name, when: date ? date.toLocaleString() : name };
+const BACKUP_LABELS = { manual: 'Manual', auto: 'Scheduled', 'auto-pre-update': 'Before an update',
+  'auto-pre-delete': 'Before deleting a world' };
+
+function renderBackupSchedule(schedule) {
+  const interval = document.getElementById('backup-interval');
+  if (!interval || !schedule) return;
+  interval.value = String(schedule.interval_hours);
+  if (interval.value !== String(schedule.interval_hours)) {
+    interval.appendChild(el('option', null, `${schedule.interval_hours} hours`)).value = String(schedule.interval_hours);
+    interval.value = String(schedule.interval_hours);
+  }
+  document.getElementById('backup-keep-recent').value = schedule.keep_recent;
+  document.getElementById('backup-keep-daily').value = schedule.keep_daily;
+  document.getElementById('backup-prune-manual').checked = Boolean(schedule.prune_manual);
 }
 
 async function loadBackups() {
@@ -14,13 +23,33 @@ async function loadBackups() {
   if (!list) return;
   try {
     const result = await fetchJson('/api/server/backups');
-    renderItems(list, result.backups || [], (path) => {
-      const { name, when } = describeBackup(path);
-      return itemRow(when, null, name, rowButton('Restore', 'btn-ghost', (button) => restoreBackup(path, when, button)));
+    const items = result.items || [];
+    renderItems(list, items, (backup) => {
+      const when = new Date(backup.created).toLocaleString();
+      const kind = BACKUP_LABELS[backup.label] || (backup.auto ? 'Automatic' : 'Manual');
+      return itemRow(when, `${kind} · ${backup.folder || 'world'}`, formatBytes(backup.size),
+        rowButton('Restore', 'btn-ghost', (button) => restoreBackup(backup.path, when, button)));
     }, 'No backups yet. Create one before making big changes.');
+    const total = document.getElementById('backup-total');
+    if (total) total.textContent = items.length ? `${items.length} backup(s), ${formatBytes(result.total_size)} in total.` : '';
+    renderBackupSchedule(result.schedule);
   } catch (error) {
     setStatus(`Backup list unavailable: ${error.message}`, 'error');
   }
+}
+
+async function saveBackupSchedule(button) {
+  await runAction(button, 'Saving…', async () => {
+    await fetchJson('/api/config', 'PUT', {
+      backup_interval_hours: Number(document.getElementById('backup-interval').value),
+      backup_keep_recent: Number(document.getElementById('backup-keep-recent').value),
+      backup_keep_daily: Number(document.getElementById('backup-keep-daily').value),
+      backup_prune_manual: document.getElementById('backup-prune-manual').checked,
+    });
+    await loadBackups();
+    const hours = Number(document.getElementById('backup-interval').value);
+    return hours ? `Automatic backups every ${hours} hour(s) while the world is played.` : 'Automatic backups are off.';
+  });
 }
 
 async function backupServer(button) {

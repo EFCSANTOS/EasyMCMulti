@@ -113,6 +113,7 @@ const ALERT_FIELDS = [
   ['alerts-notify-tunnels', 'notify_tunnels', 'checkbox'],
   ['alerts-notify-updates', 'notify_updates', 'checkbox'],
   ['alerts-notify-security', 'notify_security', 'checkbox'],
+  ['alerts-notify-backup', 'notify_backup', 'checkbox'],
   ['alerts-heartbeat-url', 'heartbeat_url', 'text'],
   ['alerts-friends-status', 'friends_notify_status', 'checkbox'],
   ['alerts-friends-players', 'friends_notify_players', 'checkbox'],

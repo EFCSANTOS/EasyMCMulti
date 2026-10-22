@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-147 passed (~30 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+155 passed (~30 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Patching
@@ -56,6 +56,11 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Backups (FEAT-01): name parsing (old and labelled); retention picks the right set and spares
+  manual backups; `backup_tick` with a patched clock only backs up a changing world and sends
+  `save-off`/`save-all flush`/`save-on`; manual vs safety labels and pruning; low disk → 500 +
+  alert; deleting a world makes an `auto-pre-delete` backup and is refused when it fails; config ranges.
+- Dashboard scripts: no top-level name defined twice across the shared-scope scripts.
 - Discord (FEAT-05, `discord_posts` fixture stubs `notifier.send_discord`, batch window 0.05 s):
   webhook URLs write-only and validated; owner alerts only to the owner hook; friends hook gets
   online (with address)/offline/joins and never a trycloudflare link; status page link to friends;

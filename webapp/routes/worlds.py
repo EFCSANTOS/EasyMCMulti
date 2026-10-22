@@ -116,6 +116,9 @@ def register(app: FastAPI, s: Services) -> None:
         sdir = checked_world(folder)
         if folder == common._active_world(common._effective_config()):
             raise HTTPException(status_code=409, detail="Switch to another world before deleting this one.")
+        if os.path.isdir(os.path.join(sdir, folder)) and not s.safety_backup("delete", folder):
+            raise HTTPException(status_code=500, detail="The safety backup failed, so the world was not deleted. "
+                                                        "See the console for the reason.")
         worlds.delete(sdir, folder)
         return worlds_payload("World deleted.")
 

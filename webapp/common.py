@@ -17,7 +17,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - installed in project venv for runtime metrics
     psutil = None
 
-from core import config_store, downloaders, paths, worlds
+from core import backups, config_store, downloaders, paths, worlds
 # Re-exported for the routers (common.ServerProcess, …) so tests can patch them here.
 from core.server_process import ServerProcess, accept_eula, update_properties  # noqa: F401
 from webapp.state import RuntimeState
@@ -31,6 +31,10 @@ CRASH_RESTART_DELAY_SEC = 10
 CRASH_RESTART_LIMIT = 3
 CRASH_WINDOW_SEC = 600
 LOADER_LABELS = {"vanilla": "Vanilla", "paper": "Paper", "fabric": "Fabric", "forge": "Forge", "neoforge": "NeoForge"}
+# Scheduled backups (FEAT-01): how often the scheduler checks, and how long to wait for the server
+# to confirm "save-all flush" before zipping anyway.
+BACKUP_CHECK_SEC = 60
+BACKUP_SAVE_TIMEOUT_SEC = 30
 # Friends Discord channel: joins/leaves within this window are sent as one message.
 FRIENDS_BATCH_SEC = 30
 # Background lifecycle callers (crash restart, autostart) wait at most this long for a running
@@ -123,6 +127,11 @@ def _default_config() -> dict[str, Any]:
         "status_page_token": "",
         "status_page_show_names": True,
         "status_page_show_lan": False,
+        # Backups (FEAT-01): every N hours while the world changes (0 = off); retention.
+        "backup_interval_hours": 6,
+        "backup_keep_recent": 8,
+        "backup_keep_daily": 7,
+        "backup_prune_manual": False,
     }
 
 
@@ -242,7 +251,7 @@ def _playit_state(runtime: RuntimeState, cfg: dict[str, Any]) -> str:
 
 
 def _is_backup_name(name: str) -> bool:
-    return name.startswith("world-backup-") and name.endswith(".zip")
+    return name.startswith(backups.PREFIX) and name.endswith(".zip")
 
 
 def _is_safe_world_member(member: str) -> bool:

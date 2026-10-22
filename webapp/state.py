@@ -55,6 +55,8 @@ class RuntimeState:
     # without it counts as a crash. crash_times holds monotonic timestamps of recent crashes.
     stop_requested: bool = False
     shutting_down: bool = False
+    # The world changed since the last backup (the server ran); the backup scheduler only acts then.
+    backup_dirty: bool = False
     crash_times: list[float] = field(default_factory=list)
     # Outcome of the last background lifecycle job (create/start/restart/world switch), for the UI.
     operation_error: str = ""

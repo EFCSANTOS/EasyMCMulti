@@ -78,6 +78,10 @@ class ConfigUpdate(BaseModel):
     status_page_show_names: bool | None = None
     status_page_show_lan: bool | None = None
     # status_page_token is deliberately absent: only POST /api/status-page creates tokens.
+    backup_interval_hours: int | None = Field(None, ge=0, le=168)
+    backup_keep_recent: int | None = Field(None, ge=1, le=100)
+    backup_keep_daily: int | None = Field(None, ge=0, le=60)
+    backup_prune_manual: bool | None = None
 
     @field_validator("ram_mb")
     @classmethod

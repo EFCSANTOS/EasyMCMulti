@@ -142,10 +142,30 @@ The Remote page additionally calls `GET /api/playit/status` for the real tunnel 
 Aliases `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/metrics` →
 `{cpu, ram, ramTotal, uptime}` (psutil or Windows ctypes fallback).
 
-## 11. Backups
-- Create: zip the **active** world (+ dimension folders) → `world-backup-<folder>-<ts>.zip`
-  (see §19); not generated yet → `{ok:false}`.
-- List: `GET /api/server/backups` → `{backups:[...]}`; legacy `GET /api/backups`.
+## 11. Backups (FEAT-01: schedule, retention, safety backups)
+- Names (`core/backups.py`): `world-backup-<folder>-<YYYYmmdd-HHMMSS>[-<label>].zip`; labels
+  `manual` (button), `auto` (schedule), `auto-pre-<reason>` (`update`, `delete`). Older names
+  without a label (or without a folder) parse as `manual`.
+- Create (`routes/backups.py::create_backup(label, folder=None, wait=False)`): one at a time
+  (`backup_lock`; manual while one runs → 409); world not generated → `{ok:false}`; **low-disk guard**:
+  free space < 2 × the last backup of that world → refused + `backup` alert. Server running (active
+  world): `save-off` → `save-all flush` → wait for "Saved the game|world" (`wait_for_console`,
+  `BACKUP_SAVE_TIMEOUT_SEC` 30 s; on timeout zip anyway with a console note) → zip → `save-on`.
+  Server stopped: zip under the lifecycle lock (nobody can start it mid-zip). Then prune and log
+  `[backup] created …; removed N old backup(s)`.
+- Retention (`to_prune`, per world folder): keep the newest `backup_keep_recent` (8) plus the newest
+  of each of the last `backup_keep_daily` (7) days; manual backups only when `backup_prune_manual`.
+- Schedule: `backup_loop` (started by autostart) calls `backup_tick` every `BACKUP_CHECK_SEC` (60 s):
+  off when `backup_interval_hours` is 0 (default 6); `runtime.backup_dirty` is set while the server
+  runs and cleared by a backup made while it is stopped, so an unchanged world isn't backed up again;
+  due when the newest backup of the active world is older than the interval.
+- Safety backups: `s.safety_backup(reason, folder=None)` before deleting a world (failure → the
+  delete is refused, 500) and before the self-update restart (failure → alert, update continues).
+  Restore keeps its own safety copy (the folder rename below).
+- Failures: console `[backup] … failed: …` + `notify("backup", "Backup failed", …)`.
+- List: `GET /api/server/backups` → `{backups:[paths], items:[{name, path, folder, label, size,
+  created, auto}], total_size, schedule}`; legacy `GET /api/backups`. Backups page: list with kind,
+  world, size; total; "Automatic backups" card (interval, keep latest, keep per day, prune manual).
 - Restore: 409 if a lifecycle job runs (Busy) or the server runs; holds the lifecycle lock while
   extracting; `backup_path`/`name` reduced to basename, must be a
   `world-backup-*.zip` in the current server dir; every zip member must be under `world/` (else 400);
@@ -331,8 +351,8 @@ Core details (`core/playit.py`):
   `saves/<name>/`, plain `<name>/` and root-level zips; ignores `__MACOSX`), imports matching
   `_nether`/`_the_end` siblings, extracts member-by-member with path checks (rejects `..`, absolute,
   drive letters) and removes partial output on failure.
-- Backups follow the active world: `world-backup-<folder>-<ts>.zip` via `worlds.export_zip`
-  (`save-all flush` first if running); restore accepts any members under valid world folder names
+- Backups follow the active world: `world-backup-<folder>-<ts>-<label>.zip` via `worlds.export_zip`
+  (quiet save first if running, §11); restore accepts any members under valid world folder names
   and renames each existing folder to `<folder>-pre-restore-<ts>` before extracting.
 - Worlds are per server dir (loader + version), like before.
 
