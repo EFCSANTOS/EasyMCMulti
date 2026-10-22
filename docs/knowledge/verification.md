@@ -45,6 +45,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
 | Mod browser (browse/category/sort/details, install + dependencies, remove), upload jars | Works; live read-only check against Modrinth; vanilla → 400 with explanation |
+| Players (whitelist on/off, add/remove, operators with level, unban, recently seen) | Works in tests (commands while running, JSON + offline/Mojang UUIDs while stopped) and in headless Edge (stopped server, desktop + phone width); not yet tried against a real running server |
 | Worlds (upload, switch, rename, download, delete, new) | Works in tests (incl. real zip handling); not yet tried with a large real world over the Cloudflare link (~100 MB upload limit) |
 | PlayIt configure / start / stop / status | Works; configure runs in the background and the dashboard shows the approval link (open from any device); "Change account" resets |
 | Remote dashboard (Cloudflare) | Works: live-checked on Windows 2026-10-22 (download, registration-gated link, request served through `trycloudflare.com`); login has sessions + lockout |

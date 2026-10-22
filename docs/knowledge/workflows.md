@@ -343,6 +343,30 @@ Core details (`core/playit.py`):
 - UI: toolbar (search, category, sort), card grid with icon/author/stats/chips/Install, "Load more",
   `<dialog id="mod-details">` filled with DOM nodes (textContent only).
 
+## 21. Players (Players page, FEAT-02)
+- Lists are the server's own files in the server dir (`core/players.py::FILES`): `whitelist.json`,
+  `ops.json`, `banned-players.json`, `banned-ips.json`; per server dir, like worlds.
+- `GET /api/players/lists` → `{whitelist:[{name}], ops:[{name, level}], bans:[{name, reason}],
+  ips:[{ip, reason}], recent:[{name, last_seen, rejected, whitelisted}], whitelist_enabled,
+  online_mode, server_running, message}`.
+- `POST /api/players/{whitelist|ops|bans|ips}` `{action, name|ip, level?, reason?}`; names through
+  `require_player`, IPs through `ipaddress`, reason one line ≤ 100, level 1–4. Actions: whitelist
+  add/remove/enable/disable, ops add/remove, bans add/remove, ips remove.
+  - **Server running:** console command (`whitelist add`, `op`, `deop`, `ban <name> <reason>`,
+    `pardon`, `pardon-ip`), then wait up to `SYNC_WAIT_SEC` (3 s) for the server to rewrite the file.
+    `op` uses the server's default level (other levels only while stopped).
+  - **Server stopped:** edit the JSON under the lifecycle lock (409 Busy otherwise) with
+    `players.add/remove` (atomic writes). UUID: Mojang profile API in online mode (unknown name →
+    400; Bedrock "." names refused while stopped), else the offline UUID (`offline_uuid`: MD5 of
+    `OfflinePlayer:<name>` as UUID v3). Removing an unlisted name → 404.
+  - `enable`/`disable`: saves `white_list` in the config (applied to `server.properties` on the next
+    start) and, if running, sends `whitelist on|off`.
+- Recently seen: `RuntimeState.recent_players` (in memory, newest 20): joins (`track_player_event`)
+  and whitelist refusals (`players.rejected_name`, three log formats anchored to the line prefix so
+  chat can't fake them) from the server output.
+- UI (`static/js/players.js`): whitelist switch + warning when off, add forms (native `pattern`
+  matches `require_player`), rows with Remove / Unban / "Add to whitelist" (textContent only).
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`
