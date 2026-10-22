@@ -9,7 +9,7 @@ const appState = {
   busy: false,
 };
 
-// The console is polled over REST (the /ws/console socket also accepts the session cookie).
+// Fallback poll interval for the console when its WebSocket can't connect (see console.js).
 const CONSOLE_POLL_MS = 2000;
 const STATUS_POLL_MS = 5000;
 // While a server operation runs in the background (install, start, restart), poll faster.
@@ -28,7 +28,7 @@ const STATE_LABELS = {
   error: 'Unreachable',
 };
 const BUSY_STATES = new Set(['starting', 'stopping', 'installing']);
-const RUNNING_ONLY_SELECTOR = '#command-form input, #command-form button, #admin button';
+const RUNNING_ONLY_SELECTOR = '#command-form input, #command-form button, #chat-form input, #chat-form button, #admin button';
 
 const metricsState = {
   paused: false,

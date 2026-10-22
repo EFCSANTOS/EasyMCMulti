@@ -2770,3 +2770,36 @@ def test_status_handler_has_no_runtime_assignments():
     source = open(os.path.join(os.path.dirname(webapp_module.__file__), "routes", "system.py"), encoding="utf-8").read()
     handler = source[source.index("def status_payload"):source.index('@app.get("/api/console")')]
     assert not re.search(r"runtime\.\w+\s*=[^=]", handler)
+
+
+# ---------- Live console and chat (FEAT-11) ----------
+def test_console_since_returns_only_newer_lines():
+    manager = app.state.console_manager
+    manager.publish("first line")
+    mark = client.get("/api/console", auth=AUTH).json()["last"]
+    manager.publish("second line")
+    manager.publish("third line")
+    newer = client.get(f"/api/console?since={mark}", auth=AUTH).json()
+    assert newer["lines"] == ["second line", "third line"] and newer["last"] == mark + 2
+    assert client.get(f"/api/console?since={newer['last']}", auth=AUTH).json()["lines"] == []
+    assert client.get("/api/console?since=0", auth=AUTH).json()["lines"][-1] == "third line"
+
+
+def test_chat_uses_tellraw_json_and_validates(fake_server):
+    assert client.post("/api/server/chat", auth=AUTH, json={"message": "hi"}).status_code == 409
+    _start()
+    tricky = 'hi "all" \ ok'
+    assert client.post("/api/server/chat", auth=AUTH, json={"message": tricky}).status_code == 200
+    command = fake_server[0].sent[-1]
+    assert command.startswith("tellraw @a ")
+    assert json.loads(command[len("tellraw @a "):])[-1] == {"text": tricky}
+    assert json.loads(command[len("tellraw @a "):])[2] == {"text": "admin: ", "color": "aqua"}
+    for bad in ("line\nbreak", "", "x" * 201):
+        assert client.post("/api/server/chat", auth=AUTH, json={"message": bad}).status_code == 400
+    assert any(line == f"[chat] admin: {tricky}" for line in app.state.console_manager.history)
+
+
+def test_console_page_has_filters_and_overview_has_chat():
+    console = client.get("/dashboard/console").text
+    assert 'id="console-filter"' in console and 'id="console-search"' in console
+    assert 'id="chat-form"' in client.get("/dashboard/overview").text

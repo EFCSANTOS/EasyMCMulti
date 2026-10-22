@@ -47,8 +47,11 @@ def register(app: FastAPI, s: Services) -> None:
         return status_payload(common._effective_config())
 
     @app.get("/api/console")
-    def console_history(_: str = Depends(require_auth)) -> dict[str, Any]:
-        return {"lines": list(app.state.console_manager.history)}
+    def console_history(since: int | None = None, _: str = Depends(require_auth)) -> dict[str, Any]:
+        """Console history; with ?since=<n> only the lines after sequence number n (FEAT-11)."""
+        manager = app.state.console_manager
+        lines = list(manager.history) if since is None else manager.lines_since(since)
+        return {"lines": lines, "last": manager.last_seq}
 
     @app.get("/api/config")
     def get_config(_: str = Depends(require_auth)) -> dict[str, Any]:

@@ -89,7 +89,13 @@ async function loadLogs() {
 }
 
 // ---------- Console ----------
-let lastConsoleSignature = '';
+// Live over the /ws/console WebSocket (session cookie); if that fails, poll /api/console?since=<n>
+// for new lines only, and try the socket again every CONSOLE_WS_RETRY_MS.
+const CONSOLE_DOM_LIMIT = 2000;
+const CONSOLE_WS_RETRY_MS = 30000;
+const COMMAND_HISTORY_KEY = 'ez_command_history';
+const COMMAND_HISTORY_LIMIT = 50;
+const consoleState = { socket: null, last: 0, pollTimer: null, filter: 'all', search: '', historyIndex: -1 };
 
 function consoleLineClass(line) {
   if (line.startsWith('> ')) return 'line-cmd';
@@ -99,29 +105,158 @@ function consoleLineClass(line) {
   return '';
 }
 
-async function refreshConsole(forceScroll = false) {
+function consoleLineKind(line) {
+  if (/\]: (?:\[Not Secure\] )?<[^>]+> /.test(line) || line.startsWith('[chat] ')) return 'chat';
+  const cls = consoleLineClass(line);
+  return cls === 'line-error' || cls === 'line-warn' ? 'problem' : 'other';
+}
+
+function consoleLineVisible(span) {
+  if (consoleState.filter === 'chat' && span.dataset.kind !== 'chat') return false;
+  if (consoleState.filter === 'problems' && span.dataset.kind !== 'problem') return false;
+  return !consoleState.search || span.textContent.toLowerCase().includes(consoleState.search);
+}
+
+// Appends lines (or replaces everything); keeps at most CONSOLE_DOM_LIMIT lines in the page.
+function appendConsoleLines(lines, replace = false) {
   const output = document.getElementById('console-output');
   if (!output) return;
+  const autoscroll = document.getElementById('console-autoscroll');
+  const atBottom = output.scrollTop + output.clientHeight >= output.scrollHeight - 8;
+  if (replace || !output.firstElementChild) output.replaceChildren(); // also drops "Waiting for logs..."
+  const fragment = document.createDocumentFragment();
+  lines.forEach((line) => {
+    const span = el('span', consoleLineClass(line), `${line}\n`);
+    span.dataset.kind = consoleLineKind(line);
+    span.hidden = !consoleLineVisible(span);
+    fragment.appendChild(span);
+  });
+  output.appendChild(fragment);
+  while (output.childElementCount > CONSOLE_DOM_LIMIT) output.firstElementChild.remove();
+  if (!output.childElementCount) output.textContent = 'Waiting for logs...';
+  if (autoscroll ? autoscroll.checked : atBottom) output.scrollTop = output.scrollHeight;
+}
+
+function applyConsoleFilter() {
+  const filter = document.getElementById('console-filter');
+  const search = document.getElementById('console-search');
+  consoleState.filter = filter ? filter.value : 'all';
+  consoleState.search = search ? search.value.trim().toLowerCase() : '';
+  document.querySelectorAll('#console-output span').forEach((span) => { span.hidden = !consoleLineVisible(span); });
+}
+
+// Full reload of the kept history (start, and when switching from the socket back to polling).
+async function reloadConsole() {
   try {
     const data = await fetchJson('/api/console');
-    const lines = data.lines || [];
-    const signature = `${lines.length}:${lines[lines.length - 1] || ''}`;
-    if (signature === lastConsoleSignature && !forceScroll) return;
-    lastConsoleSignature = signature;
-
-    const autoscroll = document.getElementById('console-autoscroll');
-    const atBottom = output.scrollTop + output.clientHeight >= output.scrollHeight - 8;
-    const fragment = document.createDocumentFragment();
-    if (!lines.length) fragment.appendChild(document.createTextNode('Waiting for logs...'));
-    lines.forEach((line) => {
-      const span = el('span', consoleLineClass(line), `${line}\n`);
-      fragment.appendChild(span);
-    });
-    output.replaceChildren(fragment);
-    if (forceScroll || (autoscroll ? autoscroll.checked : atBottom)) output.scrollTop = output.scrollHeight;
+    appendConsoleLines(data.lines || [], true);
+    consoleState.last = data.last || 0;
   } catch (error) {
     // the next poll retries
   }
+}
+
+async function refreshConsole() {
+  if (consoleState.socket && consoleState.socket.readyState === WebSocket.OPEN) return; // lines arrive live
+  try {
+    const data = await fetchJson(`/api/console?since=${consoleState.last}`);
+    if ((data.lines || []).length) appendConsoleLines(data.lines);
+    consoleState.last = data.last || consoleState.last;
+  } catch (error) {
+    // the next poll retries
+  }
+}
+
+function startConsolePolling() {
+  if (consoleState.pollTimer) return;
+  reloadConsole();
+  consoleState.pollTimer = setInterval(refreshConsole, CONSOLE_POLL_MS);
+}
+
+function stopConsolePolling() {
+  clearInterval(consoleState.pollTimer);
+  consoleState.pollTimer = null;
+}
+
+function connectConsoleSocket() {
+  let socket;
+  try {
+    socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/console`);
+  } catch (error) {
+    startConsolePolling();
+    return;
+  }
+  consoleState.socket = socket;
+  socket.addEventListener('open', () => {
+    stopConsolePolling();
+    appendConsoleLines([], true); // the server replays recent lines first
+  });
+  socket.addEventListener('message', (event) => appendConsoleLines([event.data]));
+  socket.addEventListener('close', () => {
+    if (consoleState.socket !== socket) return;
+    consoleState.socket = null;
+    startConsolePolling();
+    setTimeout(connectConsoleSocket, CONSOLE_WS_RETRY_MS);
+  });
+}
+
+async function startConsole() {
+  if (!document.getElementById('console-output')) return;
+  await reloadConsole();
+  connectConsoleSocket();
+}
+
+// ---------- Command box: history (↑/↓) and player-name completion (Tab) ----------
+function loadCommandHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(COMMAND_HISTORY_KEY) || '[]');
+  } catch (error) {
+    return [];
+  }
+}
+
+function rememberCommand(command) {
+  const history = loadCommandHistory().filter((entry) => entry !== command);
+  history.unshift(command);
+  try {
+    localStorage.setItem(COMMAND_HISTORY_KEY, JSON.stringify(history.slice(0, COMMAND_HISTORY_LIMIT)));
+  } catch (error) {
+    // storage unavailable: history only lasts for this page
+  }
+  consoleState.historyIndex = -1;
+}
+
+function handleCommandKey(event, input) {
+  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+    const history = loadCommandHistory();
+    if (!history.length) return;
+    event.preventDefault();
+    const step = event.key === 'ArrowUp' ? 1 : -1;
+    consoleState.historyIndex = Math.max(-1, Math.min(history.length - 1, consoleState.historyIndex + step));
+    input.value = consoleState.historyIndex === -1 ? '' : history[consoleState.historyIndex];
+  } else if (event.key === 'Tab') {
+    const words = input.value.split(' ');
+    const partial = words[words.length - 1].toLowerCase();
+    const names = (appState.status.player_names || []).filter((name) => name.toLowerCase().startsWith(partial));
+    if (!partial || !names.length) return;
+    event.preventDefault();
+    words[words.length - 1] = names[0];
+    input.value = `${words.join(' ')} `;
+  }
+}
+
+// ---------- Chat with players (overview) ----------
+async function sendChat(event) {
+  event.preventDefault();
+  const input = document.getElementById('chat-input');
+  const message = input.value.trim();
+  if (!message) return;
+  await runAction(event.submitter, null, async () => {
+    await fetchJson('/api/server/chat', 'POST', { message });
+    input.value = '';
+    await refreshConsole();
+    return null;
+  });
 }
 
 // ---------- Metrics ----------

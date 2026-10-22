@@ -28,8 +28,8 @@
     `.gitignore` also ignores `build/`, `dist/`, `*.spec`.
 17. Portable JRE per Java major downloaded on demand (no system Java required).
 18. English-only UI and code text; no localization layer (conventions.md).
-19. GUI console uses REST polling, not the WS (historically: browsers can't send Basic auth on a
-    WebSocket). The WS accepts the session cookie since FIX-01; FEAT-11 moves the GUI to it.
+19. GUI console streams over `/ws/console` with the session cookie (FEAT-11); REST polling with
+    `?since=` is only the fallback for networks that block WebSockets.
 20. Android support via Termux (2026-10-22): installed Java instead of downloads, `termux-chroot`
     for the PlayIt agent, psutil skipped (metrics fall back to `/proc/meminfo`).
 21. Remote dashboard access through a **Cloudflare quick tunnel** (2026-10-22). First built on a

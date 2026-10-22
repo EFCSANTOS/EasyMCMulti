@@ -10,6 +10,9 @@ class WebSocketManager:
         self.max_history = max_history
         self.max_queue = max_queue
         self.history: Deque[str] = deque(maxlen=max_history)
+        # Sequence number of the newest line (1-based, never reset): the polling fallback asks for
+        # lines after the last number it saw (FEAT-11).
+        self.last_seq = 0
         self._clients: dict[object, asyncio.Queue[str]] = {}
         self._tasks: dict[object, asyncio.Task[None]] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -30,6 +33,14 @@ class WebSocketManager:
                 await websocket.send_text(message)
 
         self._tasks[websocket] = asyncio.create_task(sender())
+
+    def lines_since(self, seq: int) -> list[str]:
+        """Lines published after sequence number `seq` (all kept lines if it's older than the history)."""
+        newer = self.last_seq - max(0, seq)
+        if newer <= 0:
+            return []
+        lines = list(self.history)
+        return lines[-newer:] if newer < len(lines) else lines
 
     async def disconnect(self, websocket: object) -> None:
         queue = self._clients.pop(websocket, None)
@@ -54,6 +65,7 @@ class WebSocketManager:
         if not line:
             return
         self.history.append(line)
+        self.last_seq += 1
 
         try:
             loop = asyncio.get_running_loop()

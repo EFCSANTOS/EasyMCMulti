@@ -32,6 +32,10 @@ function bindEvents() {
   on('restart-button', 'click', (event, button) => serverAction('/api/server/restart', 'Restarting server — waiting for the world to save…')(button));
   on('backup-button', 'click', (event, button) => backupServer(button));
 
+  on('command-input', 'keydown', (event, input) => handleCommandKey(event, input));
+  on('chat-form', 'submit', (event) => sendChat(event));
+  on('console-filter', 'change', () => applyConsoleFilter());
+  on('console-search', 'input', () => applyConsoleFilter());
   on('command-form', 'submit', (event) => {
     event.preventDefault();
     sendCommand(document.getElementById('command-input'));
@@ -102,10 +106,9 @@ async function boot() {
   await loadStatus();
   await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(), loadInvite(), loadModpack(),
     loadDiagnosis(), loadLogs(), loadModUpdates(),
-    refreshConsole(true)]);
+    startConsole()]);
   initModBrowser(); // after loadInstalledMods so cards can show "Installed"
 
-  if (document.getElementById('console-output')) setInterval(refreshConsole, CONSOLE_POLL_MS);
   scheduleStatusPoll();
 }
 

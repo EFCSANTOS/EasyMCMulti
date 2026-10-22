@@ -119,10 +119,19 @@ the Cloudflare link drops requests after ~100 s).
   `"> cmd"`.
 
 ## 7. Console
-`GET /api/console` → `{lines: list(history)}`. WS replays last 500, then streams via queue.
-`publish` trims, appends history, drops oldest when queue full, thread-safe.
-Browser: `refreshConsole` polls `GET /api/console` every 2 s (keeps scroll pinned to bottom); the
-GUI does not use the WS yet (it accepts the session cookie since FIX-01; FEAT-11 switches over).
+`GET /api/console[?since=<n>]` → `{lines, last}`: every publish increments
+`WebSocketManager.last_seq`; with `since` only the lines after that sequence number
+(`lines_since`). WS replays last 500, then streams via queue. `publish` trims, appends history,
+drops oldest when queue full, thread-safe.
+Browser (FEAT-11, `console.js`): `startConsole` loads the history, then opens `/ws/console` (session
+cookie; `wss://` through the Cloudflare link) and appends each message (DOM capped at 2000 lines,
+`textContent` only). If the socket closes or can't open: full reload, then poll `?since=<last>`
+every `CONSOLE_POLL_MS` (2 s) and retry the socket every 30 s. Console page: filter Everything / Chat
+only (`]: <Name> …` or `[chat] …`) / Warnings & errors, plus a search box. Command box: ↑/↓ recall
+the last 50 commands (`localStorage` `ez_command_history`), Tab completes an online player's name.
+Chat (overview): `POST /api/server/chat {message}` (one line, ≤ 200 chars, 409 when stopped) sends
+`tellraw @a ["", {"text": "[Dashboard] "…}, {"text": "<user>: "…}, {"text": message}]` built with
+`json.dumps`, and logs `[chat] <user>: <message>`.
 
 ## 8. Versions
 `GET /api/versions/{loader}`: unknown loader → 400; `downloaders.list_versions(loader, include_snapshots=False)`;

@@ -93,6 +93,11 @@ _SECTION_CONSOLE_PREVIEW = f"""
           </div>
           <pre id="console-output" class="console console-short">Waiting for logs...</pre>
           {_COMMAND_FORM}
+          <form id="chat-form" class="command-form">
+            <span class="prompt" aria-hidden="true">say</span>
+            <input id="chat-input" maxlength="200" placeholder="Say something to the players" autocomplete="off" aria-label="Chat message" />
+            <button type="submit" class="btn btn-ghost btn-sm">Send</button>
+          </form>
         </section>
 """
 
