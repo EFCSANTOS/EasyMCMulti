@@ -516,6 +516,20 @@ Core details (`core/playit.py`):
 - UI: Mods page → Updates card (Check, per-mod Update with old → new and changelog, Update all,
   Undo last update).
 
+## 27. Player activity and playtime (FEAT-12)
+- `core/activity.py`: `record(event, name, server_dir)` appends `{t, event, name, server_dir}` to
+  `EZ_Server_Data/activity.jsonl` — `join` / `leave` from the server output (`on_output`), and
+  `server_stop` from `on_exit` (stop or crash) and at every dashboard start (autostart: the
+  dashboard owns the server, so nobody can still be online), which closes open sessions.
+- `summary(now, days=30)`: replays the file (sorted by `t`; a half-written last line is skipped):
+  per player `playtime_seconds`, `sessions` (a second join without a leave continues the session),
+  `first_seen`, `last_seen`, `online`; plus `hours[24]` = average players online per hour of day over
+  the last 30 days. `compact()` (dashboard start) folds everything before the last `server_stop`
+  older than a year into per-player `totals` lines.
+- `GET /api/players/activity` → summary. Players page → Activity card: SVG bar chart (24 bars,
+  `--series-1`, 4px rounded tops, 2px gaps, hover tooltip kept inside the card) and per-player rows
+  (Online badge, playtime, sessions, last/first seen).
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from core import playit
+from core import activity, playit
 from webapp import common
 from webapp.services import Services
 from webapp.auth import password_is_weak
@@ -32,6 +32,10 @@ def register(app: FastAPI, s: Services) -> None:
 
     def autostart() -> None:
         """Bring up what the Always-on settings ask for. EZ_NO_AUTOSTART=1 skips it (debugging)."""
+        # The dashboard owns the server process: anyone "online" in the log from before this start
+        # left when it went down (FEAT-12). Also fold activity older than a year into totals.
+        activity.record("server_stop")
+        activity.compact()
         if common._effective_config().get("remote_dashboard") and password_is_weak():
             warning = ("[auth] WARNING: the remote dashboard link is on and EZ_WEBAPP_PASSWORD is shorter than "
                        "12 characters. Anyone with the link can try to guess it; set a longer password.")

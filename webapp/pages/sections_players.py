@@ -36,6 +36,18 @@ _SECTION_PLAYERS = f"""
           <div class="card">
             <div class="card-header">
               <div>
+                <h2>Activity</h2>
+                <p class="card-sub">Playtime per player, and when people play: average players online by hour of
+                  the day over the last 30 days.</p>
+              </div>
+            </div>
+            <div id="activity-chart" class="chart-wrap activity-chart" role="img"
+                 aria-label="Average players online by hour of day, last 30 days"></div>
+            <div id="activity-list" class="item-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div>
                 <h2>Recently seen</h2>
                 <p class="card-sub">Players who joined, or tried to and were refused by the whitelist, since the dashboard started.</p>
               </div>
