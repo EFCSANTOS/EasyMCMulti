@@ -51,7 +51,19 @@ class RuntimeState:
     stop_requested: bool = False
     shutting_down: bool = False
     crash_times: list[float] = field(default_factory=list)
+    # Outcome of the last background lifecycle job (create/start/restart/world switch), for the UI.
+    operation_error: str = ""
+    operation_message: str = ""
     lock: threading.RLock = field(default_factory=threading.RLock)
+    # Held for the whole of any operation that changes the server process (FIX-04): one at a time.
+    lifecycle: threading.Lock = field(default_factory=threading.Lock)
+
+    def set_state(self, state: str, operation: str | None = None) -> None:
+        """Change state (and operation) together so snapshot() never sees half an update."""
+        with self.lock:
+            self.state = state
+            if operation is not None:
+                self.operation = operation
 
     def track_player_event(self, line: str) -> None:
         """Update online_players from a server console line (join/leave messages)."""
@@ -80,6 +92,8 @@ class RuntimeState:
                 "lan_address": self.lan_address,
                 "public_address": self.public_address,
                 "operation": self.operation,
+                "operation_error": self.operation_error,
+                "operation_message": self.operation_message,
                 "install_status": self.install_status,
                 "install_progress": self.install_progress,
                 "install_message": self.install_message,

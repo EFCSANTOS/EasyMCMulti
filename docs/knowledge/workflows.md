@@ -52,16 +52,20 @@ from Adoptium, extracts to `java/jre-<N>/`, deletes the zip.
 paper: latest build; fabric: latest stable loader+installer server jar). forge/neoforge download
 `installer.jar` and run `java -jar installer.jar --installServer` (non-zero exit → `RuntimeError`).
 Forge build = `<mc>-recommended` else `<mc>-latest` promo; NeoForge = highest matching build.
-Install runs synchronously inside the HTTP request (can take minutes).
+Install runs on a background lifecycle job (§5b), never inside the HTTP request (can take minutes;
+the Cloudflare link drops requests after ~100 s).
 
 ## 4. Create server
-`POST /api/server/create`: merge payload → save → `ensure_server_installed` →
-`update_properties(**_server_properties_from_config)`. Returns state/operation/loader/version/server_dir.
+`POST /api/server/create`: 409 if the server runs; merge payload → save → **202**
+`{state, operation:"creating", loader, version, message}`; the job (`install_server`) runs
+`ensure_server_installed` → `update_properties(**_server_properties_from_config)` and ends with
+`operation_message="Server <loader> <version> is ready."`.
 
 ## 5. Start
 `POST /api/server/start`:
-- If running → `{message:"Server already running."}`.
-- Merge payload → save → `state/operation="starting"`.
+- If running → 200 `{message:"Server already running."}`.
+- Merge payload → save → clear `crash_times` → **202** `state/operation="starting"`; the job runs
+  `launch_server()` (below) and ends with `operation_message="Server started."`.
 - Define `on_exit` (console line; state→stopped, process=None **only if `runtime.process` is still
   this process**, so a late exit from a restarted process cannot clobber its replacement).
 - `ensure_server_installed` → `update_properties` → `ensure_java` → `launch_args(loader, java, dir, ram)`.
@@ -69,14 +73,15 @@ Install runs synchronously inside the HTTP request (can take minutes).
 - `state="running"`, `operation="idle"`, console `"[server] started with {loader} {version}"`.
 
 ## 5a. Always-on (config keys `autostart_server`, `autostart_playit`, `auto_restart`)
-- `launch_server(payload=None)` holds the start logic; `POST /api/server/start` clears
-  `runtime.crash_times` (re-arms crash restarts) and calls it.
+- `launch_server(payload=None)` holds the start logic (caller holds the lifecycle lock);
+  `POST /api/server/start` clears `runtime.crash_times` (re-arms crash restarts) and runs it as a job.
 - Crash = exit code ≠ 0 while `runtime.stop_requested` is False (set by Stop, Restart, a console
   `stop`/`/stop`, and shutdown; cleared by `launch_server`). With `auto_restart` (default True),
   `handle_crash` schedules `restart_after_crash` after `CRASH_RESTART_DELAY_SEC` (10 s) on a daemon
   `threading.Timer`; more than `CRASH_RESTART_LIMIT` (3) crashes within `CRASH_WINDOW_SEC` (600 s)
-  → `state="crashed"` and a console message instead. The timer re-checks `stop_requested` and
-  whether a server is already running before launching.
+  → `state="crashed"` and a console message instead. The timer calls `launch_when_free`, which
+  waits up to `LIFECYCLE_WAIT_SEC` (600 s) for the lifecycle lock, then re-checks `stop_requested`
+  and whether a server is already running before launching. Autostart/resume use the same helper.
 - FastAPI `lifespan` (`_lifespan`): startup calls `app.state.autostart()` — background threads for
   `start_agent_and_tunnels` (if `autostart_playit` and a secret exists) and `launch_server` (if
   `autostart_server`); failures go to the console as `[autostart] …`. `EZ_NO_AUTOSTART=1` skips it.
@@ -84,12 +89,30 @@ Install runs synchronously inside the HTTP request (can take minutes).
   `SHUTDOWN_STOP_TIMEOUT_SEC` (45 s) then kill, and stops the PlayIt agent, so no orphan Java keeps
   the port or world lock across dashboard restarts. (TestClient without `with` runs neither.)
 
+## 5b. Lifecycle jobs and the lifecycle lock (FIX-02 / FIX-04)
+- `runtime.lifecycle` (non-reentrant `threading.Lock`) is held for the whole of any operation that
+  changes the server process: create/install, start, stop, restart, world switch, backup restore.
+- Routes never wait: `lifecycle.acquire(blocking=False)` or **409** `"Busy: <operation> in progress…"`.
+  Background callers (crash timer, autostart, resume after update) use `launch_when_free`.
+- `start_lifecycle_job(operation, job, failure, state=None)`: takes the lock, sets
+  state/operation, clears `operation_error`/`operation_message`, runs `job` on a daemon thread and
+  releases the lock when it ends. Success → `operation_message` = the job's return value. Failure →
+  state `running`/`stopped` by whether a process is alive, `operation="idle"`,
+  `operation_error="<failure>: <exc>"` and a `[server]` console line (an install failure also sets
+  `install_status="failed"`).
+- State changes go through `RuntimeState.set_state(state, operation)` (under `runtime.lock`).
+- Browser: lifecycle buttons get 202 + a message toast; `trackOperation` marks the operation as
+  running; the status poll runs every 1 s (`STATUS_BUSY_POLL_MS`) while `operation != "idle"` or an
+  install runs, else every 5 s, and on busy → idle toasts `operation_error` (error) or
+  `operation_message`. Start/Stop/Restart stay disabled while an operation runs. The install banner
+  (`_INSTALL_BANNER`) is on every page.
+
 ## 6. Stop / restart / command
-- Stop: sets `stop_requested`; if not running → message; else `state/operation="stopping"`,
-  `process.stop()` (sends `"stop"`).
-- Restart: `stop_server(_)` → `_wait_for_exit(process, RESTART_STOP_TIMEOUT_SEC=60)` → on timeout
-  console line + `process.kill()` + wait 10 s → `start_server(None, _)`. Blocks the request while the
-  world saves.
+- Stop: 409 if a lifecycle job runs; sets `stop_requested`; if not running → message; else
+  `state/operation="stopping"`, `process.stop()` (sends `"stop"`); returns at once.
+- Restart: **202**, job `restart_job` = `stop_and_wait()` (`request_stop` →
+  `_wait_for_exit(process, RESTART_STOP_TIMEOUT_SEC=60)` → on timeout console line +
+  `process.kill()` + wait 10 s) → `launch_server()`.
 - Command: empty → 400; not running → 409; else `process.send(cmd)` + console `"> cmd"`.
 
 ## 7. Console
@@ -120,7 +143,8 @@ Aliases `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/me
 - Create: zip the **active** world (+ dimension folders) → `world-backup-<folder>-<ts>.zip`
   (see §19); not generated yet → `{ok:false}`.
 - List: `GET /api/server/backups` → `{backups:[...]}`; legacy `GET /api/backups`.
-- Restore: 409 if server running; `backup_path`/`name` reduced to basename, must be a
+- Restore: 409 if a lifecycle job runs (Busy) or the server runs; holds the lifecycle lock while
+  extracting; `backup_path`/`name` reduced to basename, must be a
   `world-backup-*.zip` in the current server dir; every zip member must be under `world/` (else 400);
   move current `world/` to `world-backup-pre-restore-<ts>`; extract; legacy `POST /api/backups/restore`.
 
@@ -284,8 +308,9 @@ Core details (`core/playit.py`):
   but not generated yet, `exists: false`) ∪ the active folder; includes size and last played.
 - Endpoints: `GET/POST /api/worlds` (create: name + optional seed), `POST /api/worlds/upload`
   (multipart `file` + `name`; streamed to `DATA_DIR/upload-*.zip` then `import_zip`), `POST
-  /api/worlds/{folder}/activate` (if the server runs: stop → wait → switch → `launch_server`; for an
-  ungenerated world also sets `level_seed` to its seed), `POST …/rename`, `DELETE …` (refused for
+  /api/worlds/{folder}/activate` (if the server runs: **202** + lifecycle job "switching world":
+  `stop_and_wait` → switch → `launch_server`; otherwise switches under the lock; for an ungenerated
+  world also sets `level_seed` to its seed), `POST …/rename`, `DELETE …` (refused for
   the active world), `GET …/download` (zip, temp file removed after sending).
 - `import_zip`: picks the shallowest `level.dat` that isn't a dimension folder (handles
   `saves/<name>/`, plain `<name>/` and root-level zips; ignores `__MACOSX`), imports matching

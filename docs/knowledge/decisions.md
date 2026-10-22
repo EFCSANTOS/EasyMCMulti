@@ -36,6 +36,10 @@
     account, automatic. Trade-offs: random link that changes on restart; quick tunnels have no
     uptime guarantee. Shipped with the existing Basic auth by owner decision; sessions +
     lockout followed in FIX-01.
+27. Server lifecycle runs in the background (FIX-02 / FIX-04, 2026-10-22): requests return 202 and
+    the dashboard follows `/api/status`, because the Cloudflare link drops requests after ~100 s and
+    a "failed" install the owner retries would race the first. One non-reentrant lifecycle lock,
+    409 "Busy" for clicks, waiting only for background callers — no job queue or history.
 26. Worlds via `level-name` (2026-10-22): switching is a config change, not a copy, so worlds
     never move and switching is instant; display names are metadata so renames are safe while the
     server runs. Mod installs resolve required dependencies and hide client-only projects because

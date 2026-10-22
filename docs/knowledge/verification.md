@@ -39,7 +39,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Login / sign out | Works — HttpOnly session cookie, lockout after 5 wrong passwords (FIX-01) |
 | Loader + version pickers | Works — versions fetched from `/api/versions/{loader}`, refreshed on loader change |
 | Save config (Setup and Advanced pages) | Works — saves only the fields present on the page |
-| Create / start / stop / restart server | Works (restart waits for exit; see below) |
+| Create / start / stop / restart server | Works — background jobs (202), one at a time (409 "Busy"), progress banner on every page; live-checked in headless Edge with a slow fake install |
 | Console | Works — polled every 2 s via `GET /api/console` |
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
