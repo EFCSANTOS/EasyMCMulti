@@ -17,11 +17,15 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - installed in project venv for runtime metrics
     psutil = None
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+import requests
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from starlette.background import BackgroundTask
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from core import cloudflared, config_store, downloaders, java_manager, modrinth, netinfo, notifier, paths, playit, updater
+from core import (
+    cloudflared, config_store, downloaders, java_manager, modrinth, netinfo, notifier, paths, playit, updater, worlds,
+)
 from core.server_process import ServerProcess, accept_eula, update_properties
 from webapp.auth import validate_auth_settings, verify_basic_auth_header, verify_credentials
 from webapp.state import RuntimeState
@@ -40,6 +44,7 @@ WEB_TUNNEL_RETRY_SEC = 15
 # Alerts: the same alert is emailed at most once per ALERT_REPEAT_SEC; heartbeat every HEARTBEAT_INTERVAL_SEC.
 ALERT_REPEAT_SEC = 600
 PLAYIT_RETRY_SEC = 30
+MODRINTH_PAGE_SIZE = 20
 # Self-update: first check shortly after start, then every UPDATE_CHECK_INTERVAL_SEC.
 UPDATE_FIRST_CHECK_SEC = 120
 UPDATE_CHECK_INTERVAL_SEC = 6 * 3600
@@ -71,6 +76,7 @@ def _server_properties_from_config(config: dict[str, Any]) -> dict[str, Any]:
         "max-players": int(config.get("max_players", 10)),
         "motd": str(config.get("motd", "EZ Minecraft Server")),
         "level-seed": str(config.get("level_seed", "")),
+        "level-name": _active_world(config),
         "gamemode": str(config.get("gamemode", "survival")),
         "difficulty": str(config.get("difficulty", "normal")),
         "level-type": str(config.get("level_type", "normal")),
@@ -99,6 +105,8 @@ def _default_config() -> dict[str, Any]:
         "view_distance": 10,
         "simulation_distance": 10,
         "level_seed": "",
+        # Folder of the world Minecraft loads (Worlds page); worlds are folders in the server dir.
+        "level_name": "world",
         "online_mode": True,
         "pvp": True,
         "spawn_monsters": True,
@@ -213,15 +221,20 @@ def _is_backup_name(name: str) -> bool:
 
 
 def _is_safe_world_member(member: str) -> bool:
-    """True if a zip entry stays inside world/ (no absolute paths, drive letters or '..')."""
+    """True if a backup zip entry stays inside a world folder (no absolute paths, drive letters or '..')."""
     normalized = member.replace("\\", "/")
     parts = normalized.split("/")
     return (
-        parts[0] == "world"
+        len(parts) > 1
+        and worlds.valid_folder(parts[0])
         and not normalized.startswith("/")
-        and ":" not in parts[0]
         and ".." not in parts
     )
+
+
+def _active_world(config: dict[str, Any]) -> str:
+    folder = str(config.get("level_name") or "world")
+    return folder if worlds.valid_folder(folder) else "world"
 
 
 def _wait_for_exit(process: Any, timeout_sec: float) -> bool:
@@ -282,6 +295,9 @@ _ICON_PATHS = {
     "users": '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>'
              '<path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
     "arrow": '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>',
+    "worlds": '<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/>'
+              '<line x1="15" y1="6" x2="15" y2="21"/>',
+    "close": '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
 }
 
 
@@ -299,6 +315,7 @@ _DASHBOARD_NAVIGATION = (
     ("overview", "Overview", "Overview", "Your server at a glance."),
     ("setup", "Server", "Server setup", "Choose the loader, version and resources, then create the server."),
     ("advanced", "Settings", "World settings", "Gameplay and world options written to server.properties."),
+    ("worlds", "Worlds", "Worlds", "Upload, switch between and manage your worlds."),
     ("mods", "Mods", "Mods & plugins", "Find mods on Modrinth or upload your own .jar files."),
     ("remote", "Remote access", "Remote access", "Let friends outside your network join."),
     ("backups", "Backups", "Backups", "Snapshot the world and roll back when needed."),
@@ -649,21 +666,33 @@ _SECTION_UPDATES = """
 """
 
 _SECTION_MODS = f"""
-        <section id="mods" class="two-col">
+        <section id="mods" class="stack">
           <div class="card">
             <div class="card-header">
               <div>
-                <h2>Find on Modrinth</h2>
-                <p class="card-sub">Results match your loader and Minecraft version.</p>
+                <h2>Browse Modrinth</h2>
+                <p id="mod-context" class="card-sub">Mods and plugins that work on your server.</p>
               </div>
             </div>
-            <form id="mod-search-form" class="search-form">
-              {_icon("search")}
-              <input id="mod-search-query" placeholder="Search mods or plugins" aria-label="Search Modrinth" />
-              <button id="mod-search-button" class="btn btn-primary btn-sm" type="submit">Search</button>
+            <form id="mod-search-form" class="mod-toolbar">
+              <div class="search-form">
+                {_icon("search")}
+                <input id="mod-search-query" type="search" placeholder="Search, or just browse below" aria-label="Search Modrinth" />
+                <button id="mod-search-button" class="btn btn-primary btn-sm" type="submit">Search</button>
+              </div>
+              <select id="mod-category" aria-label="Category"><option value="">All categories</option></select>
+              <select id="mod-sort" aria-label="Sort by">
+                <option value="downloads">Most downloaded</option>
+                <option value="relevance">Best match</option>
+                <option value="follows">Most followed</option>
+                <option value="updated">Recently updated</option>
+                <option value="newest">Newest</option>
+              </select>
             </form>
-            <div id="mod-search-results" class="item-list" aria-live="polite">
-              <p class="empty">Search Modrinth to see results here.</p>
+            <p id="mod-result-count" class="hint"></p>
+            <div id="mod-search-results" class="mod-grid" aria-live="polite"></div>
+            <div class="load-more-row">
+              <button id="mod-load-more" class="btn btn-ghost" type="button" hidden>Load more</button>
             </div>
           </div>
           <div class="card">
@@ -679,6 +708,54 @@ _SECTION_MODS = f"""
               </div>
             </div>
             <div id="mod-installed-list" class="item-list"></div>
+            <p class="hint">Restart the server after installing or removing mods. Removing needs the server stopped.</p>
+          </div>
+        </section>
+
+        <dialog id="mod-details" class="dialog" aria-labelledby="mod-details-title">
+          <button id="mod-details-close" class="icon-btn dialog-close" type="button" aria-label="Close">{_icon("close")}</button>
+          <div id="mod-details-body"></div>
+        </dialog>
+"""
+
+_SECTION_WORLDS = f"""
+        <section id="worlds" class="stack">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>Your worlds</h2>
+                <p class="card-sub">Every world stays on this device. Switching only changes which one the server loads.</p>
+              </div>
+              <div class="card-tools">
+                <button id="world-refresh-button" class="icon-btn" type="button" title="Refresh" aria-label="Refresh worlds">{_icon("restart")}</button>
+                <label class="btn btn-primary btn-sm" for="world-upload-input">{_icon("upload")} Upload world (.zip)</label>
+                <input id="world-upload-input" class="visually-hidden" type="file" accept=".zip,application/zip" />
+              </div>
+            </div>
+            <div id="world-list" class="item-list"></div>
+            <p class="hint">Upload a zipped world folder: from singleplayer it's in <code>.minecraft/saves/&lt;world&gt;</code>.
+              Through the internet link, uploads are limited to about 100 MB; use the LAN address for bigger worlds.</p>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>New world</h2>
+                <p class="card-sub">Generated the first time the server starts on it.</p>
+              </div>
+            </div>
+            <form id="world-create-form" class="form-grid">
+              <div class="field">
+                <label for="world-name">Name</label>
+                <input id="world-name" maxlength="80" placeholder="e.g. Survival 2" required />
+              </div>
+              <div class="field">
+                <label for="world-seed">Seed (optional)</label>
+                <input id="world-seed" placeholder="Random" />
+              </div>
+              <div class="field field-action">
+                <button class="btn btn-primary" type="submit">Create world</button>
+              </div>
+            </form>
           </div>
         </section>
 """
@@ -811,6 +888,7 @@ _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
     "overview": (_SECTION_OVERVIEW_TILES, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
     "setup": (_SECTION_SETUP, _SECTION_ALWAYS_ON, _SECTION_ALERTS, _SECTION_UPDATES),
     "advanced": (_SECTION_ADVANCED,),
+    "worlds": (_SECTION_WORLDS,),
     "mods": (_SECTION_MODS,),
     "remote": (_SECTION_REMOTE,),
     "backups": (_SECTION_BACKUPS,),
@@ -1241,18 +1319,17 @@ def create_app() -> FastAPI:
 
     @app.post("/api/server/backup")
     def backup_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+        """Zip the active world (and its Paper dimension folders)."""
         config = _effective_config()
         target_dir = _server_dir_for_config(config)
-        world_dir = os.path.join(target_dir, "world")
-        if not os.path.isdir(world_dir):
-            return {"ok": False, "message": "No world directory found for backup."}
-        archive = os.path.join(target_dir, f"world-backup-{time.strftime('%Y%m%d-%H%M%S')}.zip")
-        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for root, _, files in os.walk(world_dir):
-                for name in files:
-                    abs_path = os.path.join(root, name)
-                    rel_path = os.path.relpath(abs_path, target_dir)
-                    zf.write(abs_path, rel_path)
+        folder = _active_world(config)
+        if not os.path.isdir(os.path.join(target_dir, folder)):
+            return {"ok": False, "message": f"The active world '{folder}' has not been generated yet; start the server once."}
+        if runtime.process is not None and runtime.process.is_running():
+            runtime.process.send("save-all flush")  # write pending chunks before copying
+            time.sleep(2)
+        archive = os.path.join(target_dir, f"world-backup-{folder}-{time.strftime('%Y%m%d-%H%M%S')}.zip")
+        worlds.export_zip(target_dir, folder, archive)
         return {"ok": True, "archive": archive, "message": f"Backup created: {os.path.basename(archive)}"}
 
     @app.get("/api/server/backups")
@@ -1281,11 +1358,13 @@ def create_app() -> FastAPI:
             members = zf.namelist()
             unsafe = [m for m in members if not _is_safe_world_member(m)]
             if unsafe:
-                raise HTTPException(status_code=400, detail=f"Backup contains files outside world/: {unsafe[0]}")
-            world_dir = os.path.join(target_dir, "world")
-            if os.path.isdir(world_dir):
-                backup_name = f"world-backup-pre-restore-{time.strftime('%Y%m%d-%H%M%S')}"
-                os.rename(world_dir, os.path.join(target_dir, backup_name))
+                raise HTTPException(status_code=400, detail=f"Backup contains files outside a world folder: {unsafe[0]}")
+            # Move the current copy of each world folder in the backup aside instead of overwriting it.
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            for root in sorted({m.replace("\\", "/").split("/")[0] for m in members}):
+                current = os.path.join(target_dir, root)
+                if os.path.isdir(current):
+                    os.rename(current, os.path.join(target_dir, f"{root}-pre-restore-{stamp}"))
             zf.extractall(target_dir, members=members)
         return {"ok": True, "message": f"Backup restored from {name}"}
 
@@ -1304,13 +1383,34 @@ def create_app() -> FastAPI:
         mods_dir = os.path.join(target_dir, "mods")
         plugins_dir = os.path.join(target_dir, "plugins")
         items = []
+        project_ids = []
         for base_dir in (mods_dir, plugins_dir):
             if not os.path.isdir(base_dir):
                 continue
+            by_file = {info["filename"]: (pid, info) for pid, info in modrinth.installed_projects(base_dir).items()}
             for name in sorted(os.listdir(base_dir)):
                 if name.lower().endswith(".jar"):
-                    items.append({"name": name, "path": os.path.join(base_dir, name)})
-        return {"mods": items}
+                    pid, info = by_file.get(name, (None, {}))
+                    if pid:
+                        project_ids.append(pid)
+                    items.append({"name": name, "path": os.path.join(base_dir, name),
+                                  "folder": os.path.basename(base_dir), "title": info.get("title", ""),
+                                  "project_id": pid, "version": info.get("version", "")})
+        return {"mods": items, "project_ids": project_ids}
+
+    @app.delete("/api/server/mods/{name}")
+    def remove_mod(name: str, _: str = Depends(require_auth)) -> dict[str, Any]:
+        if runtime.process is not None and runtime.process.is_running():
+            raise HTTPException(status_code=409, detail="Stop the server before removing mods (they are in use).")
+        name = os.path.basename(name)
+        target_dir = _server_dir_for_config(_effective_config())
+        for folder in ("mods", "plugins"):
+            path = os.path.join(target_dir, folder, name)
+            if name.lower().endswith(".jar") and os.path.isfile(path):
+                os.remove(path)
+                modrinth.forget_file(os.path.dirname(path), name)
+                return {"ok": True, "message": f"Removed {name}."}
+        raise HTTPException(status_code=404, detail=f"{name} is not installed.")
 
     @app.post("/api/server/mods/upload")
     def upload_mods(files: list[UploadFile] = File(default=[]), _: str = Depends(require_auth)) -> dict[str, Any]:
@@ -1337,6 +1437,117 @@ def create_app() -> FastAPI:
     @app.get("/api/mods")
     def legacy_list_mods(_: str = Depends(require_auth)) -> dict[str, Any]:
         return list_mods(_)
+
+    # ---------- Worlds ----------
+    def server_running() -> bool:
+        return bool(runtime.process is not None and runtime.process.is_running())
+
+    def worlds_payload(message: str = "") -> dict[str, Any]:
+        config = _effective_config()
+        active = _active_world(config)
+        return {
+            "worlds": worlds.list_worlds(_server_dir_for_config(config), active),
+            "active": active,
+            "server_running": server_running(),
+            "message": message,
+        }
+
+    def checked_world(folder: str) -> str:
+        if not worlds.valid_folder(folder):
+            raise HTTPException(status_code=400, detail="Invalid world.")
+        return _server_dir_for_config(_effective_config())
+
+    @app.get("/api/worlds")
+    def list_worlds(_: str = Depends(require_auth)) -> dict[str, Any]:
+        return worlds_payload()
+
+    @app.post("/api/worlds")
+    def create_world(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Give the new world a name.")
+        folder = worlds.create(_server_dir_for_config(_effective_config()), name, str(payload.get("seed", "")).strip())
+        return worlds_payload(f"Created '{name}'. Switch to it to generate it.") | {"folder": folder}
+
+    @app.post("/api/worlds/upload")
+    def upload_world(file: UploadFile = File(...), name: str = Form(default=""), _: str = Depends(require_auth)) -> dict[str, Any]:
+        filename = os.path.basename(file.filename or "world.zip")
+        if not filename.lower().endswith(".zip"):
+            raise HTTPException(status_code=400, detail="Upload the world as a .zip file.")
+        sdir = _server_dir_for_config(_effective_config())
+        paths.ensure_dirs()
+        temp_path = os.path.join(paths.DATA_DIR, f"upload-{int(time.time() * 1000)}.zip")
+        try:
+            with open(temp_path, "wb") as handle:
+                while chunk := file.file.read(1 << 20):
+                    handle.write(chunk)
+            display_name = name.strip() or os.path.splitext(filename)[0]
+            try:
+                folder = worlds.import_zip(sdir, temp_path, display_name)
+            except (zipfile.BadZipFile, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc) or "Not a valid zip file.") from exc
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        return worlds_payload(f"Imported '{display_name}'.") | {"folder": folder}
+
+    @app.post("/api/worlds/{folder}/activate")
+    def activate_world(folder: str, _: str = Depends(require_auth)) -> dict[str, Any]:
+        sdir = checked_world(folder)
+        known = {w["folder"]: w for w in worlds.list_worlds(sdir, _active_world(_effective_config()))}
+        if folder not in known:
+            raise HTTPException(status_code=404, detail="World not found.")
+        if known[folder]["active"]:
+            return worlds_payload("That world is already active.")
+        was_running = server_running()
+        if was_running:
+            process = runtime.process
+            stop_server(_)
+            if not _wait_for_exit(process, RESTART_STOP_TIMEOUT_SEC):
+                process.kill()
+                _wait_for_exit(process, 10)
+        config = _effective_config()
+        config["level_name"] = folder
+        if not known[folder]["exists"]:
+            config["level_seed"] = known[folder].get("seed", "")  # only used when the world is generated
+        config_store.save(config)
+        name = known[folder]["name"]
+        if was_running:
+            launch_server()
+            return worlds_payload(f"Switched to '{name}' and restarted the server.")
+        return worlds_payload(f"Switched to '{name}'. It loads the next time the server starts.")
+
+    @app.post("/api/worlds/{folder}/rename")
+    def rename_world(folder: str, payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        sdir = checked_world(folder)
+        try:
+            worlds.rename(sdir, folder, str(payload.get("name", "")))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return worlds_payload("World renamed.")
+
+    @app.delete("/api/worlds/{folder}")
+    def delete_world(folder: str, _: str = Depends(require_auth)) -> dict[str, Any]:
+        sdir = checked_world(folder)
+        if folder == _active_world(_effective_config()):
+            raise HTTPException(status_code=409, detail="Switch to another world before deleting this one.")
+        worlds.delete(sdir, folder)
+        return worlds_payload("World deleted.")
+
+    @app.get("/api/worlds/{folder}/download")
+    def download_world(folder: str, _: str = Depends(require_auth)) -> FileResponse:
+        sdir = checked_world(folder)
+        if server_running() and folder == _active_world(_effective_config()):
+            runtime.process.send("save-all flush")
+            time.sleep(2)
+        paths.ensure_dirs()
+        archive = os.path.join(paths.DATA_DIR, f"export-{folder}-{int(time.time())}.zip")
+        try:
+            worlds.export_zip(sdir, folder, archive)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return FileResponse(archive, media_type="application/zip", filename=f"{folder}.zip",
+                            background=BackgroundTask(os.remove, archive))
 
     @app.post("/api/admin/{action}")
     def admin_action(action: str, payload: dict[str, Any] | None = None, _: str = Depends(require_auth)) -> dict[str, Any]:
@@ -1367,16 +1578,43 @@ def create_app() -> FastAPI:
         append_console_line(f"> {command}")
         return {"ok": True, "action": action, "command": command, "message": f"{action} command sent."}
 
-    @app.get("/api/modrinth/search")
-    def modrinth_search(query: str, _: str = Depends(require_auth)) -> dict[str, Any]:
-        term = (query or "").strip()
-        if not term:
-            raise HTTPException(status_code=400, detail="A Modrinth search query is required.")
+    def modrinth_context() -> tuple[str, str]:
         config = _effective_config()
         loader = str(config.get("loader", "vanilla"))
-        version = str(config.get("version", "1.21.7"))
-        items = modrinth.search(term, loader, version, limit=10)
-        return {"items": items}
+        if loader == "vanilla":
+            raise HTTPException(status_code=400, detail="Vanilla servers can't use mods or plugins. Choose Paper, "
+                                                        "Fabric, Forge or NeoForge in Server setup.")
+        return loader, str(config.get("version", "1.21.7"))
+
+    def upstream_error(exc: Exception) -> HTTPException:
+        return HTTPException(status_code=502, detail=f"Modrinth is not reachable right now: {exc}")
+
+    @app.get("/api/modrinth/search")
+    def modrinth_search(query: str = "", sort: str = "relevance", category: str = "", offset: int = 0,
+                        _: str = Depends(require_auth)) -> dict[str, Any]:
+        """Search, or browse the most popular projects when the query is empty."""
+        loader, version = modrinth_context()
+        try:
+            result = modrinth.search(query.strip(), loader, version, limit=MODRINTH_PAGE_SIZE,
+                                     offset=max(0, offset), sort=sort, category=category.strip())
+        except requests.RequestException as exc:
+            raise upstream_error(exc) from exc
+        return {**result, "items": result["hits"], "loader": loader, "version": version}
+
+    @app.get("/api/modrinth/categories")
+    def modrinth_categories(_: str = Depends(require_auth)) -> dict[str, Any]:
+        try:
+            return {"categories": modrinth.categories()}
+        except requests.RequestException as exc:
+            raise upstream_error(exc) from exc
+
+    @app.get("/api/modrinth/project/{project_ref}")
+    def modrinth_project(project_ref: str, _: str = Depends(require_auth)) -> dict[str, Any]:
+        loader, version = modrinth_context()
+        try:
+            return modrinth.project(project_ref, loader, version)
+        except requests.RequestException as exc:
+            raise upstream_error(exc) from exc
 
     @app.post("/api/modrinth/install")
     def modrinth_install(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
@@ -1387,8 +1625,19 @@ def create_app() -> FastAPI:
         loader = str(config.get("loader", "vanilla"))
         version = str(config.get("version", "1.21.7"))
         target_folder = _content_dir_for_config(config)
-        installed = modrinth.install(project_ref, loader, version, target_folder, log=append_console_line)
-        return {"ok": True, "filename": installed, "message": f"Installed {installed}."}
+        before = set(modrinth.installed_projects(target_folder))
+        try:
+            installed = modrinth.install(project_ref, loader, version, target_folder, log=append_console_line)
+        except requests.RequestException as exc:
+            raise upstream_error(exc) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        added = [info["title"] for pid, info in modrinth.installed_projects(target_folder).items() if pid not in before]
+        dependencies = added[1:] if len(added) > 1 else []
+        message = f"Installed {installed}."
+        if dependencies:
+            message += f" Also installed required: {', '.join(dependencies)}."
+        return {"ok": True, "filename": installed, "dependencies": dependencies, "message": message}
 
     def playit_log(line: str) -> None:
         append_console_line(f"[playit] {line}")

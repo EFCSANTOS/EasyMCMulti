@@ -20,7 +20,7 @@ unlisted link that changes on every restart, `termux-setup.sh` requires a 12+ ch
 
 ## Fetch status
 Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/dashboard.js`, `templates/*.html`),
-`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 67 passed.
+`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 76 passed.
 UI redesign (2026-10-22) verified with headless Edge screenshots at 1440 px and 390 px.
 Same day: cleanup + English-only pass + GUI feature check (see "Fixed 2026-10-22").
 Not audited line-by-line: `webapp/static/css/dashboard.css` (presentation only).
@@ -55,7 +55,8 @@ WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 | Console | Works — polled every 2 s via `GET /api/console` |
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
-| Mod search / install (Modrinth), upload jars | Works; vanilla → 400 "does not support mods" |
+| Mod browser (browse/category/sort/details, install + dependencies, remove), upload jars | Works; live read-only check against Modrinth; vanilla → 400 with explanation |
+| Worlds (upload, switch, rename, download, delete, new) | Works in tests (incl. real zip handling); not yet tried with a large real world over the Cloudflare link (~100 MB upload limit) |
 | PlayIt configure / start / stop / status | Works; configure runs in the background and the dashboard shows the approval link (open from any device); "Change account" resets |
 | Remote dashboard (Cloudflare) | Works: live-checked on Windows 2026-10-22 (download, registration-gated link, request served through `trycloudflare.com`); login caveat — see Must fix |
 | ~~Dashboard over PlayIt~~ | Removed: PlayIt's `/tunnels/create` rejects untyped tunnels (`TunnelTypeRequiresDescription`); `/v1/tunnels/create` rejected every body that matches the published client ("failed to parse body"); the website did not let the owner add a custom TCP tunnel either |

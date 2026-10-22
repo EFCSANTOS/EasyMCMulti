@@ -32,6 +32,10 @@
     account, automatic. Trade-offs: random link that changes on restart; quick tunnels have no
     uptime guarantee. Shipped with the existing Basic auth by owner decision; lockout/sessions
     tracked as **must fix** (verification.md).
+26. Worlds via `level-name` (2026-10-22): switching is a config change, not a copy, so worlds
+    never move and switching is instant; display names are metadata so renames are safe while the
+    server runs. Mod installs resolve required dependencies and hide client-only projects because
+    those are the most common causes of a server that won't start after "installing a mod".
 25. Self-update via git (2026-10-22): the install is already a clone, so updating = fast-forward the
     tracked branch. Fast-forward only and refuse on local edits/unpushed commits (never overwrite
     the owner's work); roll back if dependency install fails; restart by exec-in-place so service

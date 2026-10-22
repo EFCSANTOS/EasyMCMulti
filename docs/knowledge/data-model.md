@@ -41,6 +41,8 @@ Switching loader/version in config switches to a different server dir (and world
 | white_list | bool | False |
 | enable_command_block | bool | True |
 
+`level_name` (default `world`): folder of the active world (Worlds page) → `level-name`.
+
 Always-on keys (in `_default_config`, edited on Server setup → Always-on): `autostart_server`
 (False), `autostart_playit` (False), `auto_restart` (True), `remote_dashboard` (**True**; Remote
 access page, `POST /api/remote-dashboard`), `auto_update_check` (True), `auto_update_install`
@@ -74,6 +76,11 @@ enable-command-block.
 - `downloaders._already_installed` (used inside `prepare`) uses a narrower rule: `server.jar`, or
   `win_args.txt`, or non-installer `forge-*.jar` (no `neoforge-*.jar` check).
 - Forge/NeoForge leave `installer.jar` in the server dir.
+
+## Worlds
+- Each world is a folder in the server dir (+ Paper `_nether`/`_the_end`); `ez-worlds.json` in the
+  server dir maps folder → {name, created, source: upload|new|server, seed}.
+- Mods/plugins folders hold `.ez-modrinth.json` (project id → {slug, title, filename, version}).
 
 ## Backups
 - `POST /api/server/backup` zips `world/` → `world-backup-YYYYmmdd-HHMMSS.zip` in server dir.

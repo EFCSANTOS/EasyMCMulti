@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-67 passed (~14 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+76 passed (~15 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Data isolation
@@ -64,6 +64,14 @@ this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.j
   `updater.apply`/`restart_process` stubbed: shutdown before restart, resume marker restarts the
   server on the next `autostart()`, failure reported; assets cache-busted.
 - Not covered: the real `restart_process` (exec / Windows relaunch) — would kill the test process.
+- Worlds: zip import (nested singleplayer save, Paper dimension siblings, no-`level.dat` and
+  zip-slip rejection with cleanup), endpoints create → activate (writes `level_name`/`level_seed`,
+  `level-name` property) → rename → delete (active refused), upload/download round trip, switching
+  while running restarts the server, backups of the active world + pre-restore rename.
+- Mod browser (`fake_modrinth` fixture fakes `modrinth._get` and `download`): browse without query
+  (sort + server-side facets), categories filter, install with a required dependency (optional
+  skipped), installed `project_ids`, details plain text, remove, vanilla 400. A live read-only
+  check against api.modrinth.com was run manually (2026-10-22), outside the suite.
 - Platform: system Java selection, Termux missing-Java hint, `unix_args.txt` vs `win_args.txt`,
   metrics with blocked CPU counters, `termux-chroot` agent wrapping.
 - Always-on (`fake_server` fixture + `RecordingProcess`, whose `exit(code)` fires `on_exit`;

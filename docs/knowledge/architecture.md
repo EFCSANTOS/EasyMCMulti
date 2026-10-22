@@ -61,6 +61,10 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
   web dashboard; workflows.md §16).
 - `notifier.py` — alert settings (`load_config`/`save_config`/`public_config`), `send_email`
   (smtplib), `ping_heartbeat` (workflows.md §17).
+- `worlds.py` — multiple worlds per server dir: `list_worlds`, `create`, `import_zip`, `rename`,
+  `delete`, `export_zip` (workflows.md §19).
+- `modrinth.py` — also `categories`, `project` (details), dependency-aware `install`,
+  `installed_projects` / `forget_file` (workflows.md §20).
 - `updater.py` — `status`, `apply`, `install_requirements`, `restart_process`: self-update from the
   git clone (workflows.md §18). Requires `git` on PATH and a clone (not a zip download).
 - `netinfo.py` — `lan_ip()` (UDP "connect" to 8.8.8.8, fallback `127.0.0.1`), `public_ip()`

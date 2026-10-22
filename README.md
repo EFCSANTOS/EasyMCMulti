@@ -198,7 +198,9 @@ The app exposes a browser interface with:
 - console command sending and admin shortcuts (op, kick, ban, time, weather, save)
 - live console output
 - world backups and restore
-- mods/plugins: Modrinth search and install, `.jar` upload (not available for vanilla)
+- worlds: upload a zipped world, keep several worlds side by side, switch, rename, download, delete
+- mods/plugins: browse Modrinth by popularity, category or search (server-compatible only), details
+  view, one-click install including required dependencies, remove, `.jar` upload (not for vanilla)
 - PlayIt tunnel setup, start, and stop (lets friends join without port forwarding)
 - optional https link to manage the dashboard from anywhere (Cloudflare quick tunnel)
 - LAN/public address display, online player list, and live CPU/RAM charts

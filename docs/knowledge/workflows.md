@@ -110,7 +110,8 @@ Aliases `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/me
 `{cpu, ram, ramTotal, uptime}` (psutil or Windows ctypes fallback).
 
 ## 11. Backups
-- Create: zip `world/` → `world-backup-<ts>.zip`; missing world → `{ok:false}`.
+- Create: zip the **active** world (+ dimension folders) → `world-backup-<folder>-<ts>.zip`
+  (see §19); not generated yet → `{ok:false}`.
 - List: `GET /api/server/backups` → `{backups:[...]}`; legacy `GET /api/backups`.
 - Restore: 409 if server running; `backup_path`/`name` reduced to basename, must be a
   `world-backup-*.zip` in the current server dir; every zip member must be under `world/` (else 400);
@@ -244,6 +245,45 @@ Core details (`core/playit.py`):
 - Browser: `waitForRestart` polls `/api/update` every 2 s; when it fails (restarting) and then
   answers again, the page reloads. CSS/JS URLs carry `?v=ASSET_VERSION` (max mtime of the two files)
   so the reloaded page gets the new assets. The Server nav link shows a dot when updates are pending.
+
+## 19. Worlds (Worlds page)
+- `core/worlds.py`. A world = a folder in the server dir with `level.dat`, plus Paper's
+  `<folder>_nether` / `<folder>_the_end` siblings. Active world = config `level_name` (default
+  `world`) → `server.properties` `level-name` via `_server_properties_from_config` / `_active_world`.
+  Display names, source and seed live in `<server dir>/ez-worlds.json`; rename never moves files.
+- `list_worlds` = folders with `level.dat` (dimension siblings hidden) ∪ metadata entries (created
+  but not generated yet, `exists: false`) ∪ the active folder; includes size and last played.
+- Endpoints: `GET/POST /api/worlds` (create: name + optional seed), `POST /api/worlds/upload`
+  (multipart `file` + `name`; streamed to `DATA_DIR/upload-*.zip` then `import_zip`), `POST
+  /api/worlds/{folder}/activate` (if the server runs: stop → wait → switch → `launch_server`; for an
+  ungenerated world also sets `level_seed` to its seed), `POST …/rename`, `DELETE …` (refused for
+  the active world), `GET …/download` (zip, temp file removed after sending).
+- `import_zip`: picks the shallowest `level.dat` that isn't a dimension folder (handles
+  `saves/<name>/`, plain `<name>/` and root-level zips; ignores `__MACOSX`), imports matching
+  `_nether`/`_the_end` siblings, extracts member-by-member with path checks (rejects `..`, absolute,
+  drive letters) and removes partial output on failure.
+- Backups follow the active world: `world-backup-<folder>-<ts>.zip` via `worlds.export_zip`
+  (`save-all flush` first if running); restore accepts any members under valid world folder names
+  and renames each existing folder to `<folder>-pre-restore-<ts>` before extracting.
+- Worlds are per server dir (loader + version), like before.
+
+## 20. Mod browser (Mods page)
+- `GET /api/modrinth/search?query&sort&category&offset` → `{hits, total, offset, limit, loader,
+  version}` (also `items` for compatibility). Empty query = browse; with sort `relevance` and no
+  query it switches to `downloads`. Facets: project_type mod|plugin, **server_side required|optional**
+  (client-only mods hidden), loader categories, game version, optional category. 20 per page.
+  Vanilla → 400 with an explanation. Modrinth outages → 502.
+- `GET /api/modrinth/categories` (from `/tag/category`, mod/plugin "categories" header, cached 1
+  day); `GET /api/modrinth/project/{slug}` → details with `body` as plain text (`_plain_text` strips
+  Markdown/HTML; the UI never renders remote HTML), gallery, links, license, compatible version count.
+- `modrinth.install` installs the newest compatible version **and its required dependencies**
+  (recursively, de-duplicated; optional ones skipped; a missing dependency only logs a warning) and
+  records each in `<mods|plugins>/.ez-modrinth.json` (project id → slug/title/filename/version).
+  `GET /api/server/mods` adds title/project_id/version per jar + `project_ids` (cards show
+  "Installed"); `DELETE /api/server/mods/{name}` removes a jar (409 while the server runs, since the
+  jars are in use) and its record entry.
+- UI: toolbar (search, category, sort), card grid with icon/author/stats/chips/Install, "Load more",
+  `<dialog id="mod-details">` filled with DOM nodes (textContent only).
 
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
