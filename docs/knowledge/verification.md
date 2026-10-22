@@ -1,8 +1,23 @@
 # Verification & Gaps
 
+## Must fix (next commits)
+**Login is LAN-grade but can now be reached from the internet.** The optional PlayIt dashboard
+tunnel (`POST /api/playit/dashboard`, added 2026-10-22) exposes the app over **plain HTTP**:
+- the Basic-auth password is sent readable on every request (no TLS on a PlayIt TCP tunnel);
+- no lockout or rate limit on wrong passwords — anyone with the URL can brute-force;
+- the browser keeps the password in `sessionStorage`.
+
+Owner decision 2026-10-22: ship the tunnel with the current login, fix in an upcoming commit.
+Required fix: server-side login sessions (HttpOnly, SameSite cookie, expiry), failed-login lockout /
+backoff per IP, minimum password length enforced at startup when the dashboard tunnel is enabled,
+and stop storing the password client-side. Mitigations shipped meanwhile: tunnel is off by default,
+a confirm dialog + warning callout on the Remote page, `termux-setup.sh` requires a 12+ character
+password. Marked in code at `webapp/auth.py` ("MUST FIX").
+
 ## Fetch status
 Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/dashboard.js`, `templates/*.html`),
-`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 32 passed.
+`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 41 passed.
+UI redesign (2026-10-22) verified with headless Edge screenshots at 1440 px and 390 px.
 Same day: cleanup + English-only pass + GUI feature check (see "Fixed 2026-10-22").
 Not audited line-by-line: `webapp/static/css/dashboard.css` (presentation only).
 GUI verified by: smoke tests, a live uvicorn boot hitting every page and the GUI's GET APIs, and
@@ -22,7 +37,7 @@ Backups: `GET /api/server/backups`, `POST /api/server/backups/restore`, legacy `
 Mods: `GET /api/server/mods`, `POST /api/server/mods/upload`, legacy `GET /api/mods`.
 Admin: `POST /api/admin/{action}`.
 Modrinth: `GET /api/modrinth/search`, `POST /api/modrinth/install`.
-PlayIt: `GET /api/playit/status`, `POST /api/playit/{configure,start,stop}`, `GET /api/playit/config`.
+PlayIt: `GET /api/playit/status`, `POST /api/playit/{configure,start,stop,dashboard}`, `GET /api/playit/config`.
 WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 
 ## GUI feature status (dashboard ↔ API)
@@ -36,7 +51,8 @@ WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
 | Mod search / install (Modrinth), upload jars | Works; vanilla → 400 "does not support mods" |
-| PlayIt configure / start / stop / status | Works; configure opens the claim page **on the server host** |
+| PlayIt configure / start / stop / status | Works; configure runs in the background and the dashboard shows the approval link (open from any device); "Change account" resets |
+| Dashboard over PlayIt | Implemented, **unverified against the live API** (generic TCP tunnel, `tunnel_type` omitted); plain HTTP — see Must fix |
 | System metrics charts | Works (overview only) |
 | Player count + names | Works — parsed from server join/leave console lines |
 
@@ -82,9 +98,15 @@ Open / by design:
 - UI routes (`/`, `/login`, `/dashboard/*`, `/dashboard.{css,js}`, `/health`) are unauthenticated:
   static shells only; all data goes through authenticated `/api/*` (decisions.md).
 - Credentials live in browser `sessionStorage` and travel as Basic auth over plain HTTP (no TLS) —
-  acceptable for LAN only, per README.
+  acceptable for LAN only; **must fix** before relying on the dashboard tunnel (top of this file).
 - `playit_config.json` stores the secret in plaintext on the host.
 
 ## Unverified / needs inspection
 - License terms beyond "All rights reserved".
+- **Termux / Android (added 2026-10-22, awaiting the owner's device test):** `termux-setup.sh`
+  (pkg packages, pydantic-core build with `ANDROID_API_LEVEL`), `run.sh`, Java selection via
+  `pkg install openjdk-21`, the PlayIt Linux agent under `termux-chroot` (DNS workaround;
+  `EZ_PLAYIT_CHROOT=0` disables it), and Forge/NeoForge `unix_args.txt` launch. Only the Python
+  logic is covered by tests; scripts were syntax-checked with `bash -n`.
+- PlayIt generic TCP tunnel creation (no `tunnel_type`) for the dashboard.
 - `run.bat` prompt flow not executed in this session (batch + PowerShell secure-string read).

@@ -180,7 +180,9 @@ def _run(args, cwd, log):
 
 
 def _find_args_file(sdir):
-    matches = glob.glob(os.path.join(sdir, "libraries", "**", "win_args.txt"), recursive=True)
+    """Modern Forge/NeoForge launch-arguments file (win_args.txt on Windows, unix_args.txt elsewhere)."""
+    name = "win_args.txt" if sys.platform == "win32" else "unix_args.txt"
+    matches = glob.glob(os.path.join(sdir, "libraries", "**", name), recursive=True)
     return matches[0] if matches else None
 
 

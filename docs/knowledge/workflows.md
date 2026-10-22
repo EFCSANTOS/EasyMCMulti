@@ -12,9 +12,16 @@ Basic header. Sign out clears `sessionStorage` only (no server session exists).
 - `/dashboard/{section}` → page; unknown → 404
 - `/dashboard.css`, `/dashboard.js` → `FileResponse` from `webapp/static/...`
 - `/login` → `webapp/templates/login.html`
-- Page contents (`_DASHBOARD_PAGES`): overview = all sections; setup = setup form; advanced =
-  advanced settings + server controls + console command; mods = mods + admin; remote = PlayIt;
-  backups = backups; console = console output + console command. Every page has `#action-status`.
+- Every page: top bar with `#server-state` pill and Start/Restart/Stop (enabled by state), toast
+  `#action-status`.
+- Page contents (`_DASHBOARD_PAGES`): overview = install-progress banner (while installing), tiles
+  (server + Backup world, players online, LAN/internet join addresses with copy) + CPU/RAM charts +
+  console preview with command input; setup = loader/version/RAM/port form with Save and Create;
+  advanced ("Settings") = World fields + Rules switches + sticky Save bar; mods = Modrinth search
+  (rows with Install) + installed list with Refresh and Upload .jar (uploads on file select);
+  remote = PlayIt card (status badge, address + copy, Configure/Start/Stop) + direct-connection
+  addresses; backups = Backup world + rows with Restore (confirm dialog); console = full console with
+  auto-scroll toggle + command input, Players (op/deop/kick/ban with confirm) and World shortcuts.
 - Loader `<select>` change → `onLoaderChange` → `GET /api/versions/{loader}` → repopulate versions.
 - Save (Setup submit or Advanced "Save settings") → `collectConfigFromPage` → `PUT /api/config`
   with only the fields rendered on that page. "Create server" sends the same payload to
@@ -78,7 +85,8 @@ NeoForge→MC mapping `_neoforge_to_mc`: `21.1.x`→`1.21.1`, `21.0.x`→`1.21`,
 `GET /api/status`: refresh loader/version from config; `netinfo.lan_ip()` / `public_ip()` (cached
 5 min); `_playit_state` → `"running"` (agent alive) / `"configured"` / `"not-configured"`; address
 fallback to public IP; returns `runtime.snapshot()` (PlayIt nested under `playit.{state,address}`).
-Browser polls it every 10 s; the summary's port comes from the loaded config, not the snapshot.
+Browser polls it every 5 s; displayed join addresses append the port from the loaded config.
+The Remote page additionally calls `GET /api/playit/status` for the real tunnel address.
 
 ## 10. Metrics
 Aliases `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/metrics` →
@@ -111,18 +119,37 @@ maps to MC commands (`time set day`, `weather clear`, `save-all`, …); sends + 
 ## 14. PlayIt
 - Status: `configured` = secret present; state from `_playit_state` (`running` only when the agent
   process is alive — a saved address alone no longer reports `running`).
-- Configure: if secret exists → "already configured"; else `claim_interactive` → `ensure_agent` →
-  `PlayitAgent(...).start(secret)` → `ensure_tunnel(secret, server_port, ...)` → `save_config`.
-- Start: requires secret; reuse running agent; else agent+tunnel; `save_config`; state `"running"`.
-- Stop: stop agent, clear, state `"stopped"`.
+- All PlayIt endpoints return `playit_info()`: `configured`, `state`, `address`, `setup`
+  (`idle`/`awaiting-approval`/`connecting`/`error`), `claim_url`, `error`, `dashboard_enabled`,
+  `dashboard_address`, `web_port`, `message`.
+- Configure (`POST /api/playit/configure`, optional `{reset: true}`): `reset` stops the agent and
+  `forget_config()`s the saved account first. If a secret exists → "already configured". Else sets
+  `setup="awaiting-approval"`, starts the `claim_and_connect` daemon thread and waits ≤5 s for the
+  claim URL so the response carries `claim_url`. The thread: `claim_interactive` (cancellable via
+  `runtime.playit_cancel`) → `setup="connecting"` → `start_agent_and_tunnels` → `setup="idle"`;
+  any exception → `setup="error"` + `error`. The Remote page polls status every 5 s to show progress.
+- `start_agent_and_tunnels(secret)`: start agent if not running → `ensure_tunnel(server_port)` →
+  if config `dashboard_tunnel` → `ensure_dashboard_tunnel(WEB_PORT)` → `save_config(secret, address,
+  dashboard_address=…)`.
+- Start: requires secret; runs `start_agent_and_tunnels` (skipped when already running and no
+  dashboard tunnel is wanted).
+- Dashboard (`POST /api/playit/dashboard {enabled}`): saves config key `dashboard_tunnel`; enabled +
+  agent running → create tunnel now (else on next start); disabled → `delete_dashboard_tunnel` and
+  clear `dashboard_address`. Plain HTTP — see verification.md "Must fix".
+- Stop: cancels a pending setup, stops agent, state `"stopped"`.
 - Config: `GET /api/playit/config` → `{address, secret_present}` (secret never returned).
 - Agent exit → `_playit_on_exit` sets state stopped + console line.
 
 Core details (`core/playit.py`):
-- `claim_interactive`: random 10-hex claim code → `webbrowser.open(claim URL)` **on the server host,
-  not the LAN client's browser** → polls `/claim/setup` every 1.5 s until `UserAccepted` →
-  `/claim/exchange` for `secret_key`; 300 s timeout. The web app passes `should_cancel=lambda: False`,
-  so `POST /api/playit/configure` blocks the request for up to ~5 min + tunnel wait.
+- `claim_interactive(log, should_cancel, timeout_sec=300, on_url=None)`: random 10-hex claim code →
+  `on_url(claim URL)` (no browser is opened; the user opens the link from any device) → polls
+  `/claim/setup` every 1.5 s until `UserAccepted` → `/claim/exchange` for `secret_key`.
+- `ensure_dashboard_tunnel` / `delete_dashboard_tunnel`: generic TCP tunnel named `EZ Dashboard`
+  (`DASHBOARD_TUNNEL_NAME`, `tunnel_type` omitted) to `WEB_PORT`; returns `http://domain:port`.
+  Both tunnel kinds share `_ensure_tunnel(..., matches, name, tunnel_type, label)`.
+- `agent_command(secret)`: on Termux, prefixes `termux-chroot` (package `proot`) so the agent finds
+  `/etc/resolv.conf`; `EZ_PLAYIT_CHROOT=0` disables. Unverified on a device.
+- `save_config(secret, address, **extra)` merges extra keys (e.g. `dashboard_address`) into the file.
 - `ensure_agent`: reuse existing binary, else download matching asset from GitHub latest release;
   `chmod 755` on non-Windows.
 - `ensure_tunnel(secret, local_port, log, timeout_sec=120)`: reuses the account's `minecraft-java`
@@ -131,4 +158,13 @@ Core details (`core/playit.py`):
   (`domain` if SRV, else `domain:port`).
 - `_api` reads the JSON body before the HTTP status (API returns 400 with useful `data`); auth header
   `Authorization: Agent-Key <secret>`.
-- `PlayitAgent.start(secret)` runs `<agent> --secret <secret>`; `stop()` = `terminate()`.
+- `PlayitAgent.start(secret)` runs `agent_command(secret)`; `stop()` = `terminate()`.
+
+## 15. Termux (Android) install
+`termux-setup.sh` (one-liner in README): `pkg install python git openjdk-21 rust binutils proot
+termux-tools` → clone/pull into `~/EasyMCMulti` (`EZ_REPO_URL`, `EZ_BRANCH` default `main`,
+`EZ_APP_DIR`, `EZ_JAVA_PACKAGE`) → `.venv` → `pip install` requirements minus `psutil` with
+`ANDROID_API_LEVEL` set (pydantic-core compiles via Rust/maturin, 10–20 min) → prompts for login
+(12+ char password) into `.env` (mode 600, `%q`-quoted) → installs `$PREFIX/bin/ezmc` → offers to
+start. `run.sh` loads `.env`, takes `termux-wake-lock`, prints the LAN URL, runs uvicorn on
+`EZ_WEBAPP_PORT`. Re-running the setup updates code/deps and keeps `.env`.

@@ -24,6 +24,13 @@
 17. Portable JRE per Java major downloaded on demand (no system Java required).
 18. English-only UI and code text; no localization layer (conventions.md).
 19. GUI console uses REST polling, not the WS, because browsers cannot send Basic auth on a WebSocket.
+20. Android support via Termux (2026-10-22): installed Java instead of downloads, `termux-chroot`
+    for the PlayIt agent, psutil skipped (metrics fall back to `/proc/meminfo`).
+21. Remote dashboard access through a second PlayIt **TCP** tunnel (owner's choice over Cloudflare
+    Tunnel / Tailscale, 2026-10-22). Plain HTTP; shipped with the existing Basic auth by owner
+    decision, with hardening tracked as **must fix** (verification.md).
+22. PlayIt setup is asynchronous and shows the approval link in the dashboard instead of opening a
+    browser on the host, so it works headless (phone) and from any device.
 
 ## Resolved (2026-10-22)
 - Hidden `value="admin"` form: dead markup → removed. `run.bat` now prompts for credentials.
@@ -36,7 +43,6 @@
 - French text in `core/` → translated to English.
 
 ## Open questions
-- `psutil` absent on Linux → cpu=0, uptime=0; intended? (`psutil` is in `requirements.txt`.)
 - `FALLBACK_VERSIONS` only on exception, not on empty; empty → 502.
 - Is Linux hosting a goal? PlayIt supports it; Java download does not (architecture.md).
 - No ADR history in repo; rationale inferred from code.

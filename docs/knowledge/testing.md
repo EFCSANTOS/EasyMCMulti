@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-32 passed (~1.5 s, `.venv` Python 3.14.7). No `conftest.py`, `pytest.ini` or CI workflow exists.
+41 passed (~1.5 s, `.venv` Python 3.14.7). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Data isolation
 Autouse fixture `isolated_data_dir` redirects `paths.DATA_DIR/JAVA_DIR/SERVERS_DIR`,
@@ -25,8 +25,8 @@ this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.j
 
 ## Covered
 - `/health` → `{status:"ok"}`.
-- `/` dashboard content; `/dashboard/{7 sections}`; `#action-status` on every page; Advanced page
-  save button; no credentials in HTML.
+- `/` dashboard content; `/dashboard/{7 sections}`; `#action-status` and server controls on every
+  page; each feature's controls present on its page; Advanced page save button; no credentials in HTML.
 - **JS ↔ API contract**: `test_dashboard_js_only_calls_existing_api_routes` regex-extracts every
   `/api/...` literal in `dashboard.js` and asserts a matching route exists (templated URLs match by
   prefix).
@@ -45,6 +45,11 @@ this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.j
 - Player tracking from join/leave lines (incl. chat-spoof rejection).
 - Backup list + restore round trip; restore rejects zip-slip archives and paths outside the server dir.
 - `/api/playit/config` never returns the secret; wrong password → 401.
+- PlayIt (stubbed via `fake_playit` fixture + `DummyAgent`): start, async configure returning the
+  claim URL and finishing in the background, `reset` forgetting the account, dashboard tunnel on/off.
+- Platform: system Java selection, Termux missing-Java hint, `unix_args.txt` vs `win_args.txt`,
+  metrics with blocked CPU counters, `termux-chroot` agent wrapping.
+- Not covered: `termux-setup.sh` / `run.sh` (only `bash -n`), real PlayIt API, real Android device.
 
 ## Gaps
 - No direct tests for `auth.py` helpers, `websocket_manager.py` edge cases, `state.snapshot` locking.

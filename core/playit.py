@@ -5,12 +5,13 @@ SECRET KEY (--secret); started without one, it waits for IPC provisioning and ex
 
 Instead of asking the user to fiddle with the playit website by hand, everything is
 AUTOMATED through the official API (api.playit.gg):
-  1. generate a "claim code" (5 hex bytes) and open https://playit.gg/claim/<code>
-  2. the user clicks "Allow" in their browser (the only manual step, equivalent to a login)
+  1. generate a "claim code" (5 hex bytes); the dashboard shows https://playit.gg/claim/<code>
+  2. the user opens it and clicks "Allow" in any browser (the only manual step, equivalent to a login)
   3. exchange the code for a permanent SECRET KEY (/claim/exchange)
   4. create a "Minecraft Java" tunnel -> localhost:25565 automatically (/tunnels/create)
   5. fetch the allocated public address (/tunnels/list)
   6. run the daemon: playit --secret <KEY>
+Optionally a second, generic TCP tunnel exposes the web dashboard (ensure_dashboard_tunnel).
 
 Secret + address are stored LOCALLY (EZ_Server_Data/playit_config.json), never committed.
 
@@ -21,20 +22,22 @@ import json
 import os
 import platform
 import secrets
+import shutil
 import subprocess
 import threading
 import time
-import webbrowser
 
 import requests
 
-from . import paths
+from . import hostenv, paths
 
 RELEASES_API = "https://api.github.com/repos/playit-cloud/playit-agent/releases/latest"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 API_BASE = "https://api.playit.gg"
 CLAIM_PAGE = "https://playit.gg/claim/{}"
+MINECRAFT_TUNNEL_NAME = "EZ Minecraft"
+DASHBOARD_TUNNEL_NAME = "EZ Dashboard"
 
 _CONFIG_FILE = os.path.join(paths.DATA_DIR, "playit_config.json")
 
@@ -83,10 +86,22 @@ def load_config():
         return {}
 
 
-def save_config(secret, address=""):
+def save_config(secret, address="", **extra):
+    """Write the config; extra keys (e.g. dashboard_address) are merged with the saved ones."""
     paths.ensure_dirs()
+    data = load_config()
+    data.update(extra)
+    data.update({"secret": secret, "address": address})
     with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump({"secret": secret, "address": address}, f, indent=2)
+        json.dump(data, f, indent=2)
+
+
+def forget_config():
+    """Delete the saved secret and addresses (used to link a different playit.gg account)."""
+    try:
+        os.remove(_CONFIG_FILE)
+    except FileNotFoundError:
+        pass
 
 
 def saved_address():
@@ -149,12 +164,20 @@ def _agent_id(secret):
     return res.get("data", {}).get("agent_id")
 
 
-def _find_mc_tunnel(secret):
+def _find_tunnel(secret, matches):
     res = _api("/tunnels/list", {}, secret=secret)
     for t in res.get("data", {}).get("tunnels", []):
-        if t.get("tunnel_type") == "minecraft-java":
+        if matches(t):
             return t
     return None
+
+
+def _is_mc_tunnel(t):
+    return t.get("tunnel_type") == "minecraft-java"
+
+
+def _is_dashboard_tunnel(t):
+    return t.get("name") == DASHBOARD_TUNNEL_NAME
 
 
 def _tunnel_address(t):
@@ -173,16 +196,17 @@ def _tunnel_address(t):
     return f"{domain}:{int(port)}" if port else domain
 
 
-def claim_interactive(log, should_cancel, timeout_sec=300):
-    """Generate a claim, open the authorization page, wait for 'Allow', return the secret.
+def claim_interactive(log, should_cancel, timeout_sec=300, on_url=None):
+    """Generate a claim, publish its approval URL, wait for 'Allow', return the secret.
 
-    Saves the secret as soon as it is obtained (the tunnel address comes later).
+    on_url(url) receives the approval page so the UI can show it; the user may open it from
+    any device. Saves the secret as soon as it is obtained (the tunnel address comes later).
     """
     code = claim_generate()
     url = claim_url(code)
-    log(f"Opening the playit authorization page: {url}")
-    webbrowser.open(url)
-    log("Click 'Allow' in your browser to authorize the launcher...")
+    if on_url:
+        on_url(url)
+    log(f"Open this page and click 'Allow' to authorize the launcher: {url}")
 
     deadline = time.time() + timeout_sec
     while True:
@@ -211,8 +235,8 @@ def claim_interactive(log, should_cancel, timeout_sec=300):
     return secret
 
 
-def ensure_tunnel(secret, local_port, log, timeout_sec=120):
-    """Ensure a Minecraft Java tunnel -> localhost:local_port exists and return its public address.
+def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_type, label):
+    """Ensure a tunnel matching `matches` -> localhost:local_port exists; return its public address.
 
     IMPORTANT: the API refuses to create a tunnel until the agent has run at least
     once (error 'AgentVersionTooOld'). The daemon must therefore be started BEFORE
@@ -221,29 +245,31 @@ def ensure_tunnel(secret, local_port, log, timeout_sec=120):
     deadline = time.time() + timeout_sec
     agent_id = _agent_id(secret)
 
-    # Reuse an existing Minecraft tunnel if it already points to the right local port.
-    t = _find_mc_tunnel(secret)
+    # Reuse an existing tunnel if it already points to the right local port.
+    t = _find_tunnel(secret, matches)
     if t is not None:
         existing = t.get("origin", {}).get("data", {}).get("local_port")
         if existing != local_port:
-            log(f"Existing tunnel points to :{existing}, recreating it for :{local_port}...")
+            log(f"Existing {label} tunnel points to :{existing}, recreating it for :{local_port}...")
             _api("/tunnels/delete", {"tunnel_id": t["id"]}, secret=secret)
             t = None
 
     if t is None:
-        log(f"Creating Minecraft Java tunnel -> localhost:{local_port}...")
+        log(f"Creating {label} tunnel -> localhost:{local_port}...")
+        body = {
+            "name": name,
+            "port_type": "tcp",
+            "port_count": 1,
+            "origin": {"type": "agent", "data": {
+                "agent_id": agent_id, "local_ip": "127.0.0.1",
+                "local_port": local_port}},
+            "enabled": True,
+        }
+        if tunnel_type:
+            body["tunnel_type"] = tunnel_type  # omitted = generic TCP tunnel
         while True:
             try:
-                _api("/tunnels/create", {
-                    "name": "EZ Minecraft",
-                    "tunnel_type": "minecraft-java",
-                    "port_type": "tcp",
-                    "port_count": 1,
-                    "origin": {"type": "agent", "data": {
-                        "agent_id": agent_id, "local_ip": "127.0.0.1",
-                        "local_port": local_port}},
-                    "enabled": True,
-                }, secret=secret)
+                _api("/tunnels/create", body, secret=secret)
                 break
             except RuntimeError as e:
                 if "AgentVersionTooOld" in str(e) and time.time() < deadline:
@@ -252,16 +278,43 @@ def ensure_tunnel(secret, local_port, log, timeout_sec=120):
                     continue
                 raise
 
-    log("Waiting for playit to allocate an address...")
+    log(f"Waiting for playit to allocate the {label} address...")
     while True:
         if time.time() > deadline:
-            raise RuntimeError("The tunnel did not receive an address in time.")
-        t = _find_mc_tunnel(secret)
+            raise RuntimeError(f"The {label} tunnel did not receive an address in time.")
+        t = _find_tunnel(secret, matches)
         if t:
             addr = _tunnel_address(t)
             if addr:
                 return addr
         time.sleep(2)
+
+
+def ensure_tunnel(secret, local_port, log, timeout_sec=120):
+    """Ensure the Minecraft Java tunnel -> localhost:local_port; return the address for players."""
+    return _ensure_tunnel(secret, local_port, log, timeout_sec, _is_mc_tunnel,
+                          MINECRAFT_TUNNEL_NAME, "minecraft-java", "Minecraft Java")
+
+
+def ensure_dashboard_tunnel(secret, local_port, log, timeout_sec=120):
+    """Ensure a generic TCP tunnel to the web dashboard; return its http:// URL.
+
+    WARNING: the dashboard is served over plain HTTP, so credentials cross the internet
+    unencrypted through this tunnel (see docs/knowledge/verification.md, must-fix item).
+    """
+    address = _ensure_tunnel(secret, local_port, log, timeout_sec, _is_dashboard_tunnel,
+                             DASHBOARD_TUNNEL_NAME, None, "dashboard")
+    return f"http://{address}"
+
+
+def delete_dashboard_tunnel(secret, log):
+    """Remove the dashboard tunnel if it exists. Returns True when one was deleted."""
+    t = _find_tunnel(secret, _is_dashboard_tunnel)
+    if t is None:
+        return False
+    _api("/tunnels/delete", {"tunnel_id": t["id"]}, secret=secret)
+    log("Dashboard tunnel removed.")
+    return True
 
 
 # ---------- Agent (daemon) download ----------
@@ -302,6 +355,20 @@ def ensure_agent(log=print):
 
 
 # ---------- Daemon launch ----------
+def agent_command(secret):
+    """Command line for the agent.
+
+    On Termux the Linux binary cannot find /etc/resolv.conf (Android has none), so DNS fails.
+    `termux-chroot` (package `proot`) mounts Termux's etc/ over /etc and fixes that.
+    Set EZ_PLAYIT_CHROOT=0 to run the binary directly.
+    """
+    command = [_agent_path(), "--secret", secret]
+    wrapper = shutil.which("termux-chroot")
+    if hostenv.is_termux() and wrapper and os.environ.get("EZ_PLAYIT_CHROOT", "1") != "0":
+        return [wrapper] + command
+    return command
+
+
 class PlayitAgent:
     """Runs the playit daemon with the secret key and streams its output."""
 
@@ -316,9 +383,8 @@ class PlayitAgent:
     def start(self, secret):
         if not secret:
             raise RuntimeError("No playit secret key configured.")
-        agent_path = _agent_path()
         self.proc = subprocess.Popen(
-            [agent_path, "--secret", secret],
+            agent_command(secret),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
             creationflags=CREATE_NO_WINDOW)

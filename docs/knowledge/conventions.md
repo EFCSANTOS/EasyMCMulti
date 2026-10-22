@@ -52,7 +52,17 @@
 - `dashboard.js` functions must tolerate missing elements (each page renders only some sections):
   guard with `if (!element) return;`. Settings are read via the `CONFIG_FIELDS` table
   (element id → config key), whose keys must match `_default_config`.
-- User feedback goes through `setStatus` → `#action-status` (present on every page); the overview's
-  server summary uses `setServerSummary` → `#status-panel`.
+- User feedback goes through `setStatus(message, 'ok'|'error'|'pending')` → toast `#action-status`
+  (present on every page). Wrap button-triggered requests in `runAction(button, pendingMessage, fn)`
+  so the button disables and shows a spinner; `fn` returns the success message.
+- Status values render via `setField(name, value)` into every `[data-field="name"]` element, so the
+  same value can appear on several pages/cards without unique ids. `[data-copy-field]` buttons copy
+  the sibling field's text (with a non-secure-context fallback for plain-HTTP LAN use).
+- Lists (mods, search results, backups) are rows built with DOM APIs and `textContent` (`itemRow`,
+  `rowButton`, `renderItems`) — never `innerHTML` with API data.
+- Server-dependent controls: `renderServerControls` enables Start/Stop/Restart by state and disables
+  `RUNNING_ONLY_SELECTOR` (console command + admin buttons) unless the server is running.
+- Visual changes: verify with headless Edge screenshots (desktop and an iframe at phone width —
+  headless Edge on Windows enforces a minimum window width).
 - Call canonical `/api/server/...` routes, not the legacy aliases;
   `test_dashboard_js_only_calls_existing_api_routes` fails on unknown URLs.

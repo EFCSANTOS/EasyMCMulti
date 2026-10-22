@@ -1,6 +1,8 @@
 import importlib
 import os
 import re
+import threading
+import time
 import zipfile
 
 os.environ["EZ_WEBAPP_USERNAME"] = "admin"
@@ -42,19 +44,31 @@ def test_dashboard_serves_html():
     assert "Dashboard" in response.text
 
 
-def test_dashboard_mentions_playit_support():
-    response = client.get("/", auth=("admin", "s3cret-pass"))
+def test_remote_page_mentions_playit_support():
+    response = client.get("/dashboard/remote")
     assert response.status_code == 200
     assert "PlayIt" in response.text
 
 
-def test_dashboard_mentions_legacy_management_controls():
-    response = client.get("/", auth=("admin", "s3cret-pass"))
-    assert response.status_code == 200
-    assert "Restart server" in response.text
-    assert "Backup world" in response.text
-    assert "Mods / Plugins" in response.text
-    assert "Admin commands" in response.text
+def test_server_controls_are_on_every_page():
+    for section in ("overview", "setup", "advanced", "mods", "remote", "backups", "console"):
+        text = client.get(f"/dashboard/{section}").text
+        for control in ('id="start-button"', 'id="stop-button"', 'id="restart-button"', 'id="server-state"'):
+            assert control in text, (section, control)
+
+
+def test_management_features_live_on_their_pages():
+    expectations = {
+        "overview": ('id="backup-button"', 'id="metrics"', 'id="console-output"'),
+        "mods": ('id="mod-search-form"', 'id="mod-upload-input"', 'id="mod-installed-list"'),
+        "backups": ('id="backup-button"', 'id="backup-list"'),
+        "console": ('id="console-output"', 'id="command-form"', 'id="admin-op"', 'id="admin-save"'),
+        "remote": ('id="playit-config-button"', 'id="playit-start-button"', 'id="playit-stop-button"'),
+    }
+    for section, ids in expectations.items():
+        text = client.get(f"/dashboard/{section}").text
+        for element_id in ids:
+            assert element_id in text, (section, element_id)
 
 
 def test_dashboard_sections_have_their_own_pages():
@@ -184,32 +198,172 @@ def test_system_metrics_endpoint_returns_cpu_and_ram():
     assert payload["ramTotal"] > 0
 
 
-def test_playit_start_route_starts_the_tunnel(monkeypatch):
-    monkeypatch.setattr(webapp_module.playit, "load_config", lambda: {"secret": "demo-secret", "address": "demo.example"})
-    monkeypatch.setattr(webapp_module.playit, "ensure_agent", lambda log=print: "agent.exe")
-    monkeypatch.setattr(webapp_module.playit, "ensure_tunnel", lambda secret, local_port, log, timeout_sec=120: "demo.example:25565")
+class DummyAgent:
+    def __init__(self, on_output=None, on_exit=None):
+        self.running = False
 
-    class DummyAgent:
-        def __init__(self, on_output=None, on_exit=None):
-            self.on_output = on_output
-            self.on_exit = on_exit
+    def is_running(self):
+        return self.running
 
-        def is_running(self):
-            return False
+    def start(self, secret):
+        self.secret = secret
+        self.running = True
 
-        def start(self, secret):
-            self.secret = secret
+    def stop(self):
+        self.running = False
 
-        def stop(self):
-            return None
 
+@pytest.fixture
+def fake_playit(monkeypatch):
+    """Stub the PlayIt network/agent calls and record dashboard tunnel operations."""
+    calls = {"dashboard": [], "deleted": 0}
+    monkeypatch.setattr(webapp_module.playit, "ensure_agent", lambda log=print: "agent")
     monkeypatch.setattr(webapp_module.playit, "PlayitAgent", DummyAgent)
+    monkeypatch.setattr(webapp_module.playit, "ensure_tunnel", lambda secret, port, log, timeout_sec=120: "demo.example:25565")
 
+    def fake_dashboard(secret, port, log, timeout_sec=120):
+        calls["dashboard"].append(port)
+        return "http://dash.example:41234"
+
+    def fake_delete(secret, log):
+        calls["deleted"] += 1
+        return True
+
+    monkeypatch.setattr(webapp_module.playit, "ensure_dashboard_tunnel", fake_dashboard)
+    monkeypatch.setattr(webapp_module.playit, "delete_dashboard_tunnel", fake_delete)
+    app.state.runtime.playit_agent = None
+    app.state.runtime.playit_setup = "idle"
+    yield calls
+    app.state.runtime.playit_agent = None
+    app.state.runtime.playit_setup = "idle"
+
+
+def test_playit_start_route_starts_the_tunnel(fake_playit):
+    playit.save_config("demo-secret", "")
     response = client.post("/api/playit/start", auth=("admin", "s3cret-pass"))
     assert response.status_code == 200
     payload = response.json()
     assert payload["state"] == "running"
     assert payload["address"] == "demo.example:25565"
+    assert fake_playit["dashboard"] == []
+
+
+def test_playit_configure_returns_approval_link_and_finishes_in_background(fake_playit, monkeypatch):
+    approved = threading.Event()
+
+    def fake_claim(log, should_cancel, timeout_sec=300, on_url=None):
+        on_url("https://playit.gg/claim/abc123")
+        approved.wait(5)
+        playit.save_config("new-secret", "")
+        return "new-secret"
+
+    monkeypatch.setattr(webapp_module.playit, "claim_interactive", fake_claim)
+    response = client.post("/api/playit/configure", auth=("admin", "s3cret-pass"))
+    payload = response.json()
+    assert payload["setup"] == "awaiting-approval"
+    assert payload["claim_url"] == "https://playit.gg/claim/abc123"
+
+    approved.set()
+    deadline = time.monotonic() + 5
+    while app.state.runtime.playit_setup != "idle" and time.monotonic() < deadline:
+        time.sleep(0.05)
+    status = client.get("/api/playit/status", auth=("admin", "s3cret-pass")).json()
+    assert status["setup"] == "idle"
+    assert status["state"] == "running"
+    assert status["address"] == "demo.example:25565"
+    assert status["claim_url"] == ""
+
+
+def test_playit_configure_reset_forgets_saved_account(fake_playit, monkeypatch):
+    playit.save_config("old-secret", "old.example:1")
+    monkeypatch.setattr(webapp_module.playit, "claim_interactive",
+                        lambda log, should_cancel, timeout_sec=300, on_url=None: on_url("https://playit.gg/claim/new") or threading.Event().wait())
+    response = client.post("/api/playit/configure", auth=("admin", "s3cret-pass"), json={"reset": True})
+    payload = response.json()
+    assert payload["configured"] is False
+    assert payload["claim_url"] == "https://playit.gg/claim/new"
+    assert "secret" not in playit.load_config()
+    app.state.runtime.playit_cancel = True
+
+
+def test_dashboard_tunnel_toggle(fake_playit):
+    playit.save_config("demo-secret", "demo.example:25565")
+    client.post("/api/playit/start", auth=("admin", "s3cret-pass"))
+
+    response = client.post("/api/playit/dashboard", auth=("admin", "s3cret-pass"), json={"enabled": True})
+    payload = response.json()
+    assert payload["dashboard_enabled"] is True
+    assert payload["dashboard_address"] == "http://dash.example:41234"
+    assert fake_playit["dashboard"] == [webapp_module.WEB_PORT]
+
+    response = client.post("/api/playit/dashboard", auth=("admin", "s3cret-pass"), json={"enabled": False})
+    payload = response.json()
+    assert payload["dashboard_enabled"] is False
+    assert payload["dashboard_address"] == ""
+    assert fake_playit["deleted"] == 1
+    assert playit.load_config()["secret"] == "demo-secret"
+
+
+def test_system_java_prefers_exact_then_oldest_newer(monkeypatch):
+    from core import java_manager
+
+    versions = {"/jvm/17/bin/java": 17, "/jvm/21/bin/java": 21, "/jvm/25/bin/java": 25}
+    monkeypatch.setattr(java_manager, "_system_java_candidates", lambda: list(versions))
+    monkeypatch.setattr(java_manager, "java_major", lambda exe: versions[exe])
+    assert java_manager.find_system_java(21) == ("/jvm/21/bin/java", 21)
+    assert java_manager.find_system_java(8) == ("/jvm/17/bin/java", 17)
+    assert java_manager.find_system_java(26) == (None, None)
+
+
+def test_missing_java_on_termux_explains_how_to_install(monkeypatch):
+    from core import hostenv, java_manager
+
+    monkeypatch.setattr(hostenv, "is_windows", lambda: False)
+    monkeypatch.setattr(hostenv, "is_termux", lambda: True)
+    monkeypatch.setattr(java_manager, "_system_java_candidates", lambda: [])
+    with pytest.raises(RuntimeError, match="pkg install openjdk-21"):
+        java_manager.ensure_java(21, log=lambda message: None)
+
+
+def test_forge_args_file_matches_platform(tmp_path, monkeypatch):
+    from core import downloaders
+
+    args_dir = tmp_path / "libraries" / "net" / "forge"
+    args_dir.mkdir(parents=True)
+    (args_dir / "unix_args.txt").write_text("")
+    monkeypatch.setattr(downloaders.sys, "platform", "linux")
+    assert downloaders._find_args_file(str(tmp_path)).endswith("unix_args.txt")
+    monkeypatch.setattr(downloaders.sys, "platform", "win32")
+    assert downloaders._find_args_file(str(tmp_path)) is None
+
+
+def test_metrics_survive_blocked_cpu_counters(monkeypatch):
+    class BlockedPsutil:
+        @staticmethod
+        def cpu_percent(interval=None):
+            raise PermissionError("/proc/stat")
+
+        @staticmethod
+        def virtual_memory():
+            class Mem:
+                used = 1024
+                total = 4096
+            return Mem()
+
+    monkeypatch.setattr(webapp_module, "psutil", BlockedPsutil)
+    snapshot = webapp_module._system_metrics_snapshot()
+    assert snapshot["cpu"] == 0.0
+    assert snapshot["ram"] == 1024
+    assert snapshot["ramTotal"] == 4096
+
+
+def test_playit_agent_uses_termux_chroot_on_termux(monkeypatch):
+    monkeypatch.setattr(playit.hostenv, "is_termux", lambda: True)
+    monkeypatch.setattr(playit.shutil, "which", lambda name: "/usr/bin/termux-chroot")
+    monkeypatch.setattr(playit, "_agent_path", lambda: "/data/playit-linux-aarch64")
+    assert playit.agent_command("s")[:2] == ["/usr/bin/termux-chroot", "/data/playit-linux-aarch64"]
+    monkeypatch.setenv("EZ_PLAYIT_CHROOT", "0")
+    assert playit.agent_command("s")[0] == "/data/playit-linux-aarch64"
 
 
 def test_playit_agent_name_is_platform_aware(monkeypatch):

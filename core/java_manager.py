@@ -1,13 +1,20 @@
-"""Automatic download of the right Java version (Eclipse Temurin / Adoptium).
+"""Find or download the right Java version for a Minecraft version.
 
-The user does not have to install ANYTHING: a portable JRE is downloaded into
-EZ_Server_Data/java and used directly. Each Minecraft version needs a specific Java.
+Windows: the user does not have to install ANYTHING: a portable Eclipse Temurin JRE is
+downloaded into EZ_Server_Data/java and used directly.
+Linux / Termux (Android): an installed Java is used (Termux: `pkg install openjdk-21`).
+Temurin's Linux builds need glibc and cannot run on Android, so nothing is downloaded there.
+Each Minecraft version needs a specific Java.
 """
+import glob
 import os
+import re
+import shutil
+import subprocess
 
 import requests
 
-from . import paths
+from . import hostenv, paths
 
 # Adoptium endpoint: redirects to the right Windows x64 JRE zip for the requested "feature version".
 ADOPTIUM = (
@@ -61,8 +68,76 @@ def find_java_exe(feature):
     return None
 
 
+def java_major(java_exe):
+    """Major version reported by `java -version` (8 for 1.8.x), or None if it cannot run."""
+    try:
+        out = subprocess.run([java_exe, "-version"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r'version "(\d+)(?:\.(\d+))?', out.stderr + out.stdout)
+    if not match:
+        return None
+    major = int(match.group(1))
+    return int(match.group(2) or 0) if major == 1 else major
+
+
+def _system_java_candidates():
+    candidates = []
+    java_home = os.environ.get("JAVA_HOME")
+    if java_home:
+        candidates.append(os.path.join(java_home, "bin", "java"))
+    if hostenv.is_termux():
+        candidates += sorted(glob.glob(os.path.join(hostenv.termux_prefix(), "lib", "jvm", "*", "bin", "java")))
+    candidates += sorted(glob.glob("/usr/lib/jvm/*/bin/java"))
+    on_path = shutil.which("java")
+    if on_path:
+        candidates.append(on_path)
+    unique = []
+    for path in candidates:
+        real = os.path.realpath(path)
+        if os.path.isfile(real) and real not in unique:
+            unique.append(real)
+    return unique
+
+
+def find_system_java(feature):
+    """Pick an installed Java: exactly `feature` if present, else the oldest newer one."""
+    found = {}
+    for exe in _system_java_candidates():
+        major = java_major(exe)
+        if major is not None:
+            found.setdefault(major, exe)
+    if feature in found:
+        return found[feature], feature
+    newer = sorted(major for major in found if major > feature)
+    if newer:
+        return found[newer[0]], newer[0]
+    return None, None
+
+
+def _ensure_system_java(feature, log):
+    exe, major = find_system_java(feature)
+    if exe:
+        if major != feature:
+            log(f"Java {feature} not installed; using Java {major} instead.")
+        else:
+            log(f"Using installed Java {feature}.")
+        return exe
+    if hostenv.is_termux():
+        hint = f"Install it in Termux with: pkg install openjdk-{feature}"
+    else:
+        hint = f"Install Java {feature} (e.g. openjdk-{feature}-jre-headless) or set JAVA_HOME."
+    raise RuntimeError(f"Java {feature} or newer is required for this Minecraft version. {hint}")
+
+
 def ensure_java(feature, log=print, progress=None):
-    """Ensure the requested JRE is present, download it if needed, return the java.exe path."""
+    """Return a java executable for the requested feature version.
+
+    Windows downloads a portable JRE if needed; other platforms use an installed Java.
+    """
+    if not hostenv.is_windows():
+        return _ensure_system_java(feature, log)
+
     exe = find_java_exe(feature)
     if exe:
         log(f"Java {feature} already present.")

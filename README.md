@@ -39,7 +39,7 @@ The browser dashboard is the active and supported workflow.
 
 Requirements:
 
-- Windows 10/11 recommended
+- Windows 10/11 (primary), Linux, or Android with Termux (see below)
 - Python 3.13+
 - Access to the local LAN or localhost
 - Environment variables for the web app auth
@@ -49,6 +49,36 @@ Install dependencies:
 ```bat
 python -m pip install -r requirements.txt
 ```
+
+For development (tests): `python -m pip install -r requirements-dev.txt`.
+
+---
+
+## Android (Termux) quick install
+
+1. Install **Termux** from F-Droid or GitHub (the Play Store version is outdated).
+2. In Termux, run:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/EFCSANTOS/EasyMCMulti/main/termux-setup.sh | bash
+   ```
+
+   To install another branch: `curl -fsSL https://raw.githubusercontent.com/EFCSANTOS/EasyMCMulti/development/termux-setup.sh | EZ_BRANCH=development bash`.
+
+The script installs Python, Java 21 and build tools, downloads the app, compiles the Python
+packages (10–20 minutes the first time), asks for a dashboard username and password, and adds an
+`ezmc` command. Afterwards start the dashboard any time with:
+
+```bash
+ezmc
+```
+
+Notes for phones:
+
+- Minecraft 1.17 – 1.21.x is supported (Java 17/21 from Termux). 1.16 and older need Java 8, which Termux does not provide.
+- Give the server 1536–2048 MB in **Server setup**; a phone needs about 3 GB free RAM.
+- Keep Termux running and exclude it from Android battery optimization. `ezmc` holds a wake lock while running.
+- CPU usage shows 0% on Android (the system blocks that counter); memory usage works.
 
 ---
 
@@ -174,6 +204,11 @@ This app is intended for local or LAN use.
 - Basic auth is enabled for the web app
 - credentials must be set through environment variables (`run.bat` prompts for them when unset)
 - the PlayIt secret key never leaves the host (`/api/playit/config` returns only the address)
+- **Dashboard over the internet (Remote access page) is unencrypted.** It uses a PlayIt TCP tunnel
+  with plain HTTP: your password crosses the internet readable, and there is no lockout for wrong
+  passwords. Hardening the login is a **must fix** scheduled for an upcoming release
+  (`docs/knowledge/verification.md`). Until then, use a long unique password and keep the toggle
+  off when you don't need it.
 - backup restore only accepts the current server's own backups and only extracts `world/`
 - the dashboard pages themselves are public shells; all data and actions require auth
 - avoid exposing the port to the public internet without a proper firewall and reverse-proxy setup

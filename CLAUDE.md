@@ -17,6 +17,12 @@ python -m uvicorn webapp.app:app --host 0.0.0.0 --port 8000
 ```
 Tests use a temporary data dir (autouse fixture) — see `docs/knowledge/testing.md`.
 
+Linux / Termux: `bash run.sh` (reads `.env`). Android install: `termux-setup.sh`.
+
+## Must fix
+Login hardening (sessions + lockout) before relying on the PlayIt dashboard tunnel — see
+`docs/knowledge/verification.md` "Must fix".
+
 ## Language
 All code comments, log/error messages and UI text are English. No localization layer.
 

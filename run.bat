@@ -9,11 +9,12 @@ if not defined EZ_WEBAPP_PASSWORD (
 )
 if not defined EZ_WEBAPP_USERNAME goto :missing
 if not defined EZ_WEBAPP_PASSWORD goto :missing
+if not defined EZ_WEBAPP_PORT set "EZ_WEBAPP_PORT=8000"
 
 python -m pip install -r requirements.txt
 
-start "" http://127.0.0.1:8000
-start "" .venv\Scripts\python.exe -m uvicorn webapp.app:app --host 0.0.0.0 --port 8000
+start "" http://127.0.0.1:%EZ_WEBAPP_PORT%
+start "" .venv\Scripts\python.exe -m uvicorn webapp.app:app --host 0.0.0.0 --port %EZ_WEBAPP_PORT%
 
 exit /b 0
 

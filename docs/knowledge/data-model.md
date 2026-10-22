@@ -7,7 +7,7 @@ No DB, no migrations. Files + in-memory `RuntimeState`.
 ```
 EZ_Server_Data/
   launcher_config.json     config profile (config_store._FILE)
-  playit_config.json       {"secret", "address"} (playit._CONFIG_FILE) — plaintext secret
+  playit_config.json       {"secret", "address", "dashboard_address"} (playit._CONFIG_FILE) — plaintext secret
   playit-<os>-<arch>[.exe] PlayIt agent binary (playit._agent_path)
   java/jre-<feature>/      Temurin JRE per Java major (java_manager._install_dir)
   servers/<loader>-<version>/  one dir per loader+version; spaces → "_" (paths.server_dir)
@@ -37,6 +37,11 @@ Switching loader/version in config switches to a different server dir (and world
 | white_list | bool | False |
 | enable_command_block | bool | True |
 
+Extra key outside the defaults: `dashboard_tunnel` (bool, set by `POST /api/playit/dashboard`).
+
+`.env` (repo root, git-ignored, mode 600, written by `termux-setup.sh`): `EZ_WEBAPP_USERNAME`,
+`EZ_WEBAPP_PASSWORD`, `EZ_WEBAPP_PORT`, shell-quoted; loaded by `run.sh`.
+
 `_effective_config()` = defaults ∪ stored dict. `PUT /api/config` merges payload and saves.
 The dashboard's `CONFIG_FIELDS` table (`dashboard.js`) maps inputs to exactly these keys.
 No schema validation: any payload key is persisted; unknown keys are ignored by
@@ -56,7 +61,8 @@ enable-command-block.
 ## Server directory (`core/paths.py::server_dir(loader, version)`)
 - Installed check (`_server_is_installed`):
   - vanilla/paper/fabric → `server.jar`
-  - forge/neoforge → `{loader}-*.jar` / `{loader}*.jar` / `libraries/**/win_args.txt`
+  - forge/neoforge → `{loader}-*.jar` / `{loader}*.jar` / platform args file
+    (`downloaders._find_args_file`: `win_args.txt` on Windows, `unix_args.txt` elsewhere)
 - `downloaders._already_installed` (used inside `prepare`) uses a narrower rule: `server.jar`, or
   `win_args.txt`, or non-installer `forge-*.jar` (no `neoforge-*.jar` check).
 - Forge/NeoForge leave `installer.jar` in the server dir.

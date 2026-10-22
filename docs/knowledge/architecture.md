@@ -43,7 +43,12 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
 - `server_process.py` — `accept_eula`, `read_properties`, `update_properties` (read-merge-rewrite via
   `read_properties`), `ServerProcess(args, cwd, on_output, on_exit)` with `start`/`send`/`stop` (sends
   `"stop"`)/`kill` (used by restart on timeout)/`is_running`.
-- `java_manager.py` — `required_java(mc_version)`, `ensure_java(feature, log, progress)` → `java.exe` path.
+- `hostenv.py` — `is_windows()`, `is_termux()` (`TERMUX_VERSION` env or `com.termux` in `PREFIX`),
+  `termux_prefix()`.
+- `java_manager.py` — `required_java(mc_version)`, `ensure_java(feature, log, progress)` → java path.
+  Windows: downloads a portable Temurin JRE. Elsewhere: `find_system_java(feature)` scans
+  `JAVA_HOME`, `$PREFIX/lib/jvm/*` (Termux), `/usr/lib/jvm/*`, `PATH`; picks the exact major, else
+  the oldest newer one; none → `RuntimeError` with an install hint (`pkg install openjdk-N` on Termux).
 - `downloaders.py` — `list_versions(loader, include_snapshots)`, `prepare(loader, version, sdir, java_exe,
   log, progress)`, `launch_args(loader, java_exe, sdir, ram_mb)`, `download(url, dest, …)` (writes
   `.part` then `os.replace`). `JAR_LOADERS`=vanilla/paper/fabric, `INSTALLER_LOADERS`=forge/neoforge.
@@ -58,16 +63,23 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
   `webapp/templates/dashboard.html`) and dead helpers (`netinfo.port_in_use/pids_on_port/free_port`,
   `paths.list_servers`, `playit.is_configured`, `playit.TUNNELS_URL`) were deleted 2026-10-22.
   Everything in `core/` is now used by the web app.
-- `requirements.txt`: `jinja2` and `itsdangerous` are not imported anywhere; `python-multipart` is
-  needed implicitly by FastAPI `File` uploads.
+- `requirements.txt` (runtime): requests, fastapi, plain `uvicorn` + `websockets` (no
+  `uvicorn[standard]`: its uvloop/httptools need compiling on Android), python-multipart (FastAPI
+  `File` uploads), psutil (skipped on Termux). `requirements-dev.txt` adds pytest + httpx.
 
 ### Frontend (`webapp/static/js/dashboard.js`, `webapp/templates/login.html`)
 - Plain JS, no framework/build. `login.html` checks creds against `GET /api/status`, stores them in
   `sessionStorage`; `dashboard.js::boot` redirects to `/login` if absent, then binds events, loads
   config (+ `/api/versions/{loader}`), status, backups, mods and console. Each loader skips its fetch
   when its elements are not on the current page.
-- Polling: metrics 2 s (overview only, probes alias list), console 2 s (`CONSOLE_POLL_MS`, pages with
-  `#console-output`), status 10 s (`STATUS_POLL_MS`).
+- Polling: metrics 2 s (overview only, `/api/system/metrics`), console 2 s (`CONSOLE_POLL_MS`, pages
+  with `#console-output`; re-rendered only when the last line changes), status 5 s (`STATUS_POLL_MS`,
+  every page — drives the top-bar state pill and button enablement).
+- Layout (2026-10-22 redesign): sidebar nav with inline SVG icons (`_ICON_PATHS` / `_icon`), sticky
+  top bar per page (title, subtitle, `#server-state` pill, Start/Restart/Stop), content cards,
+  toast `#action-status`. Theme tokens are CSS custom properties at the top of `dashboard.css`
+  (dark only; accent `--accent` green; chart series `--series-1` `#3987e5`; status colors reserved
+  for state). `login.html` duplicates the tokens inline.
 - All calls use `fetchJson` with `Authorization: Basic` from `buildBasicAuth` (upload uses raw `fetch`
   with `FormData`).
 - GUI feature status: verification.md.
@@ -84,7 +96,8 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
 6. PlayIt: `load_config` → `ensure_agent` → `PlayitAgent.start(secret)` → `ensure_tunnel` → `save_config`.
 
 ## External interfaces
-- LAN HTTP (web port 8000 per README; MC port from config).
+- LAN HTTP on `WEB_PORT` (`EZ_WEBAPP_PORT`, default 8000; `run.bat`/`run.sh` pass the same value to
+  uvicorn); optionally exposed over the internet by the PlayIt dashboard tunnel. MC port from config.
 - Java subprocess (stdin/stdout piped, `CREATE_NO_WINDOW` on Windows).
 - PlayIt agent subprocess.
 - Modrinth HTTP API.
@@ -94,7 +107,13 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
   `playit.API_BASE`, `playit.RELEASES_API` (GitHub latest release); `api.ipify.org`.
 
 ## Platform constraints
-- Java auto-download is **Windows x64 only**: `java_manager.ADOPTIUM` hard-codes `windows/x64`, and
-  `find_java_exe` looks for `java.exe`. PlayIt agent naming supports Linux, but on non-Windows hosts
-  a Windows JRE is downloaded and the install/launch subprocess cannot execute it.
-- Modern Forge/NeoForge launch relies on `libraries/**/win_args.txt` (`downloaders._find_args_file`).
+Supported hosts: Windows (primary), Linux and Termux on Android (added 2026-10-22, device test pending).
+- Java auto-download is Windows x64 only (`java_manager.ADOPTIUM`); Linux/Termux use an installed
+  Java. Temurin's Linux builds need glibc and cannot run on Android's bionic libc.
+- Termux offers `openjdk-17` and `openjdk-21`: Minecraft 1.17–1.21.x work; ≤1.16 (Java 8) does not;
+  26.x needs Java 25 if/when Termux packages it.
+- Forge/NeoForge modern launch uses `libraries/**/win_args.txt` on Windows, `unix_args.txt` elsewhere
+  (`downloaders._find_args_file`).
+- Android blocks `/proc/stat`: CPU shows 0; memory comes from `/proc/meminfo`
+  (`app._memory_usage`). Android may also suspend Termux; `run.sh` takes a wake lock.
+- PlayIt on Termux uses the Linux binary wrapped in `termux-chroot` (`playit.agent_command`).

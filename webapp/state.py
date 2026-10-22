@@ -25,6 +25,11 @@ class RuntimeState:
     playit_state: str = "unknown"
     playit_address: str | None = None
     playit_agent: Any = None
+    # Background PlayIt setup: "idle" | "awaiting-approval" | "connecting" | "error".
+    playit_setup: str = "idle"
+    playit_claim_url: str | None = None
+    playit_error: str = ""
+    playit_cancel: bool = False
     process: Any = None
     lock: threading.RLock = field(default_factory=threading.RLock)
 
