@@ -30,6 +30,9 @@ SHUTDOWN_STOP_TIMEOUT_SEC = 45
 CRASH_RESTART_DELAY_SEC = 10
 CRASH_RESTART_LIMIT = 3
 CRASH_WINDOW_SEC = 600
+LOADER_LABELS = {"vanilla": "Vanilla", "paper": "Paper", "fabric": "Fabric", "forge": "Forge", "neoforge": "NeoForge"}
+# Friends Discord channel: joins/leaves within this window are sent as one message.
+FRIENDS_BATCH_SEC = 30
 # Background lifecycle callers (crash restart, autostart) wait at most this long for a running
 # install/start/restart to finish; routes never wait (409 "Busy").
 LIFECYCLE_WAIT_SEC = 600

@@ -48,12 +48,15 @@ def create_services(app: FastAPI) -> Services:
     last_alert_at: dict[str, float] = {}
 
     def notify(category: str, subject: str, body: str, throttle: bool = True) -> None:
-        """Email an alert in the background if enabled for `category` (server / link / tunnels).
+        """Send an owner alert by email and/or the owner Discord webhook, in the background, if
+        enabled for `category` (server / link / tunnels / updates / security).
 
         The same subject is sent at most once per ALERT_REPEAT_SEC so a flapping service can't spam.
         """
         config = notifier.load_config()
-        if not notifier.email_ready(config) or not config.get(f"notify_{category}", True):
+        email = notifier.email_ready(config)
+        discord_url = config.get("discord_owner_url")
+        if not (email or discord_url) or not config.get(f"notify_{category}", True):
             return
         now = time.monotonic()
         if throttle and now - last_alert_at.get(subject, -common.ALERT_REPEAT_SEC) < common.ALERT_REPEAT_SEC:
@@ -67,13 +70,65 @@ def create_services(app: FastAPI) -> Services:
         )
 
         def send() -> None:
-            try:
-                notifier.send_email(config, f"[EZ Minecraft] {subject}", full_body)
-                append_console_line(f"[notify] email sent: {subject}")
-            except Exception as exc:
-                append_console_line(f"[notify] email failed: {exc}")
+            if email:
+                try:
+                    notifier.send_email(config, f"[EZ Minecraft] {subject}", full_body)
+                    append_console_line(f"[notify] email sent: {subject}")
+                except Exception as exc:
+                    append_console_line(f"[notify] email failed: {exc}")
+            if discord_url:
+                try:
+                    notifier.send_discord(discord_url, f"**{subject}**\n{full_body}")
+                    append_console_line(f"[notify] Discord (owner) sent: {subject}")
+                except Exception as exc:
+                    append_console_line(f"[notify] Discord (owner) failed: {exc}")
 
         threading.Thread(target=send, name="notify", daemon=True).start()
+
+    # ---------- Friends channel (Discord) ----------
+    # Joins/leaves within FRIENDS_BATCH_SEC go out as one message ("Alex, Sam joined · Bob left").
+    pending_players: dict[str, list[str]] = {"joined": [], "left": []}
+    players_lock = threading.Lock()
+
+    def notify_friends(kind: str, text: str) -> None:
+        """Post to the friends webhook if set and `kind` (status / players / link) is switched on."""
+        config = notifier.load_config()
+        url = config.get("discord_friends_url")
+        if not url or not config.get(f"friends_notify_{kind}", True):
+            return
+
+        def send() -> None:
+            try:
+                notifier.send_discord(url, text)
+            except Exception as exc:
+                append_console_line(f"[notify] Discord (friends) failed: {exc}")
+
+        threading.Thread(target=send, name="notify-friends", daemon=True).start()
+
+    def flush_player_events() -> None:
+        with players_lock:
+            joined, left = pending_players["joined"], pending_players["left"]
+            pending_players["joined"], pending_players["left"] = [], []
+        parts = []
+        if joined:
+            parts.append(f"{', '.join(joined)} joined")
+        if left:
+            parts.append(f"{', '.join(left)} left")
+        if parts:
+            notify_friends("players", " · ".join(parts))
+
+    def player_event(name: str, event: str) -> None:
+        with players_lock:
+            first = not (pending_players["joined"] or pending_players["left"])
+            other = "left" if event == "joined" else "joined"
+            if name in pending_players[other]:
+                pending_players[other].remove(name)  # joined and left again within the batch: say nothing
+            else:
+                pending_players[event].append(name)
+        if first:
+            timer = threading.Timer(common.FRIENDS_BATCH_SEC, flush_player_events)
+            timer.daemon = True
+            timer.start()
 
     # ---------- Login sessions and failed-login lockout ----------
     app.state.sessions = SessionStore()
@@ -95,4 +150,5 @@ def create_services(app: FastAPI) -> Services:
             time.sleep(common.HEARTBEAT_INTERVAL_SEC)
 
     return Services(app=app, runtime=runtime, append_console_line=append_console_line, notify=notify,
-                    heartbeat_loop=heartbeat_loop)
+                    notify_friends=notify_friends, player_event=player_event,
+                    flush_player_events=flush_player_events, heartbeat_loop=heartbeat_loop)

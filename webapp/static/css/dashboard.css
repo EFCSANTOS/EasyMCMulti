@@ -1061,6 +1061,13 @@ select[aria-invalid="true"] {
   gap: 0.5rem;
 }
 
+/* Small heading inside a card (e.g. "Discord" in the Alerts card). */
+.subhead {
+  margin: 1.5rem 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
 /* ---------- Invite card ---------- */
 .invite-text {
   margin: 0 0 1rem;

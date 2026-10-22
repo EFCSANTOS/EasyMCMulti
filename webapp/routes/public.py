@@ -17,7 +17,7 @@ from core import config_store, netinfo, playit
 from webapp import common
 from webapp.services import Services, require_auth
 
-LOADER_LABELS = {"vanilla": "Vanilla", "paper": "Paper", "fabric": "Fabric", "forge": "Forge", "neoforge": "NeoForge"}
+LOADER_LABELS = common.LOADER_LABELS
 # Loaders whose mods players must install too (Paper plugins are server-side only).
 CLIENT_MOD_LOADERS = ("fabric", "forge", "neoforge")
 DEFAULT_MC_PORT = 25565
@@ -31,13 +31,15 @@ def _with_port(host: str, port: int) -> str:
 def register(app: FastAPI, s: Services) -> None:
     runtime = s.runtime
 
-    def join_address(config: dict[str, Any]) -> str:
+    def join_address(config: dict[str, Any]) -> str:  # also used for the friends' "online" message
         """PlayIt address if set up, else the public IP (works only with the port forwarded)."""
         address = str(playit.load_config().get("address") or "").strip()
         if address:
             return address
         public = netinfo.public_ip()
         return _with_port(public, int(config.get("server_port", DEFAULT_MC_PORT))) if public != "unavailable" else ""
+
+    s.join_address = join_address
 
     def public_status(config: dict[str, Any]) -> dict[str, Any]:
         """Everything the public page shows, and nothing else."""
