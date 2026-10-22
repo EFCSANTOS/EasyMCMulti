@@ -1,4 +1,4 @@
-// EZ Minecraft dashboard, part 7 of 7: Event wiring and boot (loaded last).
+// EZ Minecraft dashboard, part 8 of 8: Event wiring and boot (loaded last).
 // Plain scripts that share one global scope, loaded in order by webapp/pages/layout.py::SCRIPTS.
 
 // ---------- Wiring ----------
@@ -74,6 +74,7 @@ function bindEvents() {
   on('world-upload-input', 'change', (event, input) => uploadWorld(input));
   on('world-create-form', 'submit', (event) => createWorld(event));
   bindPlayers();
+  bindIdentity();
   on('mod-updates-check', 'click', (event, button) => checkModUpdates(button));
   on('mod-updates-all', 'click', (event, button) => applyModUpdates(null, button));
   on('mod-updates-rollback', 'click', (event, button) => rollbackModUpdates(button));
@@ -110,9 +111,11 @@ async function boot() {
   bindMetrics();
   await loadConfig();
   await loadHostInfo();
+  renderMotdPreview();
+  loadServerIcon();
   await loadStatus();
   await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(), loadInvite(), loadModpack(),
-    loadDiagnosis(), loadLogs(), loadModUpdates(),
+    loadDiagnosis(), loadLogs(), loadModUpdates(), loadProperties(),
     startConsole()]);
   initModBrowser(); // after loadInstalledMods so cards can show "Installed"
 

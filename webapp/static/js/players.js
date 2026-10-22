@@ -1,4 +1,4 @@
-// EZ Minecraft dashboard, part 4 of 7: Players page (whitelist, operators, bans, recently seen).
+// EZ Minecraft dashboard, part 4 of 8: Players page (whitelist, operators, bans, recently seen).
 // Plain scripts that share one global scope, loaded in order by webapp/pages/layout.py::SCRIPTS.
 
 // ---------- Players ----------

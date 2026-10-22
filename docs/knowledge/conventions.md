@@ -75,6 +75,8 @@
   file may only call functions from other files at runtime, not at load time).
 - The scripts share one global scope: check a name isn't already used before adding a top-level
   function or const (`test_dashboard_scripts_do_not_redefine_each_others_globals` fails otherwise).
+- `[hidden]` always wins (`display: none !important` in dashboard.css), so toggling `hidden` works
+  on elements whose class sets `display`.
 - Dashboard functions must tolerate missing elements (each page renders only some sections):
   guard with `if (!element) return;`. Settings are read via the `CONFIG_FIELDS` table
   (element id → config key), whose keys must match `_default_config`.
