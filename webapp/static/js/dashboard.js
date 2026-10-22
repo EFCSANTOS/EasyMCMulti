@@ -602,6 +602,7 @@ const ALERT_FIELDS = [
   ['alerts-notify-server', 'notify_server', 'checkbox'],
   ['alerts-notify-link', 'notify_link', 'checkbox'],
   ['alerts-notify-tunnels', 'notify_tunnels', 'checkbox'],
+  ['alerts-notify-updates', 'notify_updates', 'checkbox'],
   ['alerts-heartbeat-url', 'heartbeat_url', 'text'],
 ];
 
@@ -651,6 +652,132 @@ async function testAlerts(button) {
     const response = await fetchJson('/api/notifications/test', 'POST');
     return response.message;
   });
+}
+
+// ---------- Updates ----------
+const UPDATE_BUSY = new Set(['updating', 'restarting']);
+
+function markNavUpdate(info) {
+  const link = document.querySelector('.nav-link[href="/dashboard/setup"]');
+  if (link) link.classList.toggle('has-update', Boolean(info.available && info.behind));
+}
+
+function renderUpdate(info) {
+  markNavUpdate(info);
+  const badge = document.getElementById('update-badge');
+  if (!badge) return;
+  const busy = UPDATE_BUSY.has(info.state);
+  const blocked = Boolean((info.local_changes && info.local_changes.length) || info.ahead);
+  let label = 'Up to date';
+  if (!info.available) label = 'Unavailable';
+  else if (busy) label = info.state === 'restarting' ? 'Restarting…' : 'Updating…';
+  else if (blocked) label = "Can't update";
+  else if (info.behind) label = `${info.behind} update${info.behind === 1 ? '' : 's'} available`;
+  badge.textContent = label;
+  badge.className = info.available && info.behind && !blocked ? 'badge badge-live' : 'badge';
+
+  const current = info.current;
+  setField('update_current', current ? `${current.hash} · ${current.subject} (${current.when}) on ${info.branch}` : '—');
+
+  let summary = info.available ? `Following ${info.upstream}.` : (info.reason || '');
+  if (info.local_changes && info.local_changes.length) {
+    summary += ` Local changes block updating: ${info.local_changes.slice(0, 5).join(', ')}.`;
+  }
+  if (info.ahead) summary += ` This copy has ${info.ahead} commit(s) not on ${info.upstream}; update it with git.`;
+  document.getElementById('update-summary').textContent = summary;
+
+  const list = document.getElementById('update-commits');
+  list.replaceChildren();
+  (info.commits || []).forEach((commit) => {
+    const item = el('li');
+    item.append(el('code', '', commit.hash), el('span', '', commit.subject), el('span', 'commit-when', commit.when));
+    list.appendChild(item);
+  });
+  list.hidden = !(info.commits && info.commits.length);
+
+  const errorBox = document.getElementById('update-error');
+  errorBox.hidden = !(info.state === 'error' && info.error);
+  errorBox.textContent = info.error ? `Update failed: ${info.error}` : '';
+
+  const apply = document.getElementById('update-apply-button');
+  if (apply.getAttribute('aria-busy') !== 'true') {
+    apply.disabled = busy || !info.available || !info.behind || Boolean(info.local_changes && info.local_changes.length) || Boolean(info.ahead);
+  }
+  const autoCheck = document.getElementById('update-auto-check');
+  const autoInstall = document.getElementById('update-auto-install');
+  if (document.activeElement !== autoCheck) autoCheck.checked = Boolean(info.auto_check);
+  if (document.activeElement !== autoInstall) autoInstall.checked = Boolean(info.auto_install);
+}
+
+async function loadUpdate() {
+  try {
+    renderUpdate(await fetchJson('/api/update'));
+  } catch (error) {
+    // optional information; ignore
+  }
+}
+
+async function checkUpdate(button) {
+  await runAction(button, 'Checking for updates…', async () => {
+    const info = await fetchJson('/api/update/check', 'POST');
+    renderUpdate(info);
+    return info.message;
+  });
+}
+
+async function waitForRestart() {
+  // The dashboard goes away while it restarts; reload the page once it answers again.
+  const deadline = Date.now() + 15 * 60 * 1000;
+  let wentDown = false;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    let info;
+    try {
+      info = await fetchJson('/api/update');
+    } catch (error) {
+      wentDown = true;
+      setStatus('Restarting the dashboard…', 'pending');
+      continue;
+    }
+    if (wentDown) {
+      window.location.reload();
+      return;
+    }
+    renderUpdate(info);
+    if (info.state === 'error') {
+      setStatus(`Update failed: ${info.error}`, 'error');
+      return;
+    }
+    if (info.state === 'idle') {
+      setStatus(info.message || 'Already up to date.');
+      return;
+    }
+    setStatus(info.message || 'Updating…', 'pending');
+  }
+  setStatus('The dashboard did not come back after 15 minutes. Check the console or run ezmc logs.', 'error');
+}
+
+async function applyUpdate(button) {
+  if (!window.confirm(
+    'Install the update now?\n\nThe dashboard restarts (about a minute; longer if packages must be reinstalled). '
+    + 'Minecraft and PlayIt stop and start again if they were running, so players are disconnected briefly.',
+  )) return;
+  await runAction(button, 'Updating…', async () => {
+    renderUpdate(await fetchJson('/api/update/apply', 'POST'));
+    return null;
+  });
+  setStatus('Updating…', 'pending');
+  await waitForRestart();
+}
+
+async function saveUpdateSetting(key, toggle) {
+  try {
+    appState.config = await fetchJson('/api/config', 'PUT', { [key]: toggle.checked });
+    setStatus('Update setting saved.');
+  } catch (error) {
+    toggle.checked = !toggle.checked;
+    setStatus(`Could not save: ${error.message}`, 'error');
+  }
 }
 
 // ---------- Remote dashboard (Cloudflare) ----------
@@ -963,6 +1090,10 @@ function bindEvents() {
     saveAlerts(document.getElementById('alerts-save-button'));
   });
   on('alerts-test-button', 'click', (event, button) => testAlerts(button));
+  on('update-check-button', 'click', (event, button) => checkUpdate(button));
+  on('update-apply-button', 'click', (event, button) => applyUpdate(button));
+  on('update-auto-check', 'change', (event, toggle) => saveUpdateSetting('auto_update_check', toggle));
+  on('update-auto-install', 'change', (event, toggle) => saveUpdateSetting('auto_update_install', toggle));
   on('loader-select', 'change', () => onLoaderChange());
   on('create-button', 'click', (event, button) => createServer(button));
 
@@ -1010,7 +1141,7 @@ async function boot() {
   bindMetrics();
   await loadConfig();
   await loadStatus();
-  await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), refreshConsole(true)]);
+  await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), refreshConsole(true)]);
 
   if (document.getElementById('console-output')) setInterval(refreshConsole, CONSOLE_POLL_MS);
   setInterval(loadStatus, STATUS_POLL_MS);

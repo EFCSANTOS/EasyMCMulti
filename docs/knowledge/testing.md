@@ -3,7 +3,8 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-60 passed (~3 s, `.venv` Python 3.14.7). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
+67 passed (~14 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Data isolation
 Autouse fixture `isolated_data_dir` redirects `paths.DATA_DIR/JAVA_DIR/SERVERS_DIR`,
@@ -57,6 +58,12 @@ this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.j
   restart + mail while a deliberate stop doesn't restart, `remote_dashboard` default on.
   `isolated_data_dir` also redirects `notifier._CONFIG_FILE`. Tests using autostart must include
   `fake_cloudflared` (the link is on by default and would otherwise download cloudflared).
+- Self-update (`git_repos` fixture: bare origin + publisher clone + app clone in `tmp_path`, with
+  `updater.REPO_DIR` patched): fast-forward to new commits, refusal on local changes (full file
+  names), package reinstall and rollback on pip failure, "not a git clone"; app flow with
+  `updater.apply`/`restart_process` stubbed: shutdown before restart, resume marker restarts the
+  server on the next `autostart()`, failure reported; assets cache-busted.
+- Not covered: the real `restart_process` (exec / Windows relaunch) — would kill the test process.
 - Platform: system Java selection, Termux missing-Java hint, `unix_args.txt` vs `win_args.txt`,
   metrics with blocked CPU counters, `termux-chroot` agent wrapping.
 - Always-on (`fake_server` fixture + `RecordingProcess`, whose `exit(code)` fires `on_exit`;

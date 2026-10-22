@@ -220,6 +220,31 @@ Core details (`core/playit.py`):
   `HEARTBEAT_INTERVAL_SEC` (60 s). Meant for healthchecks.io-style dead-man's switches: covers
   outages the app can't report itself (device off, no internet, process killed).
 
+## 18. Self-update (Server setup → Updates)
+- `core/updater.py` works on `REPO_DIR` (= `paths.base_dir()`, the git clone the app runs from).
+  `status(fetch)` → `available`/`reason` (no git or not a clone), `branch`, `upstream` (`@{u}` or
+  `origin/<branch>`), `current` {hash, subject, when}, `latest_hash`, `behind`, `ahead`, `commits`
+  (≤20 incoming), `local_changes` (tracked files only; porcelain parsed without stripping).
+- `apply(log)`: refuses on local changes or unpushed commits; else `git merge --ff-only <upstream>`
+  (after the fetch in `status`); if `requirements.txt` changed → `install_requirements` (running
+  interpreter's pip; Termux drops psutil and sets `ANDROID_API_LEVEL`) and on failure
+  `git reset --hard <old>` (safe: no local edits by then).
+- App: `POST /api/update/check` (fetch), `GET /api/update` (cached; first call reads without
+  fetching), `POST /api/update/apply` → `run_update` thread: apply → write
+  `EZ_Server_Data/resume_after_update.json` {server, playit} → `update_state="restarting"` → 1 s →
+  `shutdown()` → `updater.restart_process()`. Failures → `update_state="error"` + `updates` alert.
+- `restart_process()`: POSIX `os.execv(sys.executable, sys.orig_argv)` (same PID, so runit keeps
+  supervising; listening sockets are non-inheritable and close on exec). Windows: spawns a helper that
+  sleeps 3 s (old process releases the port) then runs the same command; old process `os._exit(0)`.
+- `autostart()` consumes the resume marker and starts the server / PlayIt if they were running,
+  even when their Always-on switches are off. It also starts `update_check_loop`: first check after
+  `UPDATE_FIRST_CHECK_SEC` (120 s), then every 6 h when `auto_update_check` (default True); emails
+  "Update available" once per upstream hash; if `auto_update_install` (default False) and no players
+  online and no local changes → `run_update()`.
+- Browser: `waitForRestart` polls `/api/update` every 2 s; when it fails (restarting) and then
+  answers again, the page reloads. CSS/JS URLs carry `?v=ASSET_VERSION` (max mtime of the two files)
+  so the reloaded page gets the new assets. The Server nav link shows a dot when updates are pending.
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

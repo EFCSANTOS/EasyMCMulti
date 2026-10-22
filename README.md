@@ -115,6 +115,15 @@ Open **Server setup → Alerts**:
   ping URL; the dashboard checks in every minute and healthchecks.io emails you when it stops.
 - **Send test** checks both.
 
+### Updates from the app
+
+**Server setup → Updates** shows the installed version and any new commits on the branch you
+installed from (`main` by default; Termux: `EZ_BRANCH`). **Update & restart** pulls them
+(fast-forward only), reinstalls Python packages if `requirements.txt` changed, and restarts the
+dashboard. Minecraft and PlayIt stop briefly and come back if they were running. Optional switches:
+check every 6 hours (with an email if alerts are on) and install automatically when no one is online.
+The app refuses to update a copy with local edits or unpushed commits instead of overwriting them.
+
 On Windows, the same Always-on switches work; to start the dashboard at logon, add `run.bat` to
 Task Scheduler with `EZ_WEBAPP_USERNAME`/`EZ_WEBAPP_PASSWORD` set as user environment variables.
 

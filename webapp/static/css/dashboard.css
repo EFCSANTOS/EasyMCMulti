@@ -1028,6 +1028,54 @@ input::placeholder {
   border-top: 1px solid var(--border);
 }
 
+#update-summary {
+  margin: 0 0 0.75rem;
+}
+
+.commit-list {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 0.75rem;
+}
+
+.commit-list li {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.commit-list li:last-child {
+  border-bottom: none;
+}
+
+.commit-list code {
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
+.commit-list .commit-when {
+  margin-left: auto;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.nav-link.has-update::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .advanced-smtp {
   margin-top: 0.75rem;
 }

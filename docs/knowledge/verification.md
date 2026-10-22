@@ -20,7 +20,7 @@ unlisted link that changes on every restart, `termux-setup.sh` requires a 12+ ch
 
 ## Fetch status
 Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/dashboard.js`, `templates/*.html`),
-`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 60 passed.
+`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 67 passed.
 UI redesign (2026-10-22) verified with headless Edge screenshots at 1440 px and 390 px.
 Same day: cleanup + English-only pass + GUI feature check (see "Fixed 2026-10-22").
 Not audited line-by-line: `webapp/static/css/dashboard.css` (presentation only).
@@ -62,6 +62,7 @@ WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 | System metrics charts | Works (overview only) |
 | Player count + names | Works — parsed from server join/leave console lines |
 | Always-on (autostart server/PlayIt, crash restart) | Works in tests and a live uvicorn boot; not yet run on a device |
+| Self-update (Updates card) | Git logic tested against real temp repos and checked read-only on the real clone; **the process restart itself (exec on Linux/Termux, relaunch helper on Windows) is not yet run for real** |
 | Alerts (email, heartbeat) + PlayIt agent auto-restart | Works in tests with stubbed SMTP/HTTP; **real Gmail send and healthchecks.io ping not yet tried** (needs the owner's credentials) |
 
 ## Fixed 2026-10-22

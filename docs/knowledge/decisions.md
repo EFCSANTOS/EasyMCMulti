@@ -32,6 +32,10 @@
     account, automatic. Trade-offs: random link that changes on restart; quick tunnels have no
     uptime guarantee. Shipped with the existing Basic auth by owner decision; lockout/sessions
     tracked as **must fix** (verification.md).
+25. Self-update via git (2026-10-22): the install is already a clone, so updating = fast-forward the
+    tracked branch. Fast-forward only and refuse on local edits/unpushed commits (never overwrite
+    the owner's work); roll back if dependency install fails; restart by exec-in-place so service
+    supervision survives. Auto-install is opt-in and waits for an empty server.
 24. Alerts (2026-10-22): plain SMTP (Gmail app password) rather than a third-party notification
     service, since the owner asked for email; a healthchecks.io-style heartbeat covers outages the
     app cannot report itself. Alerts are throttled per subject (10 min) except new-link mails.

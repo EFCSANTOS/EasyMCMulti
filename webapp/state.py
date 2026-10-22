@@ -35,6 +35,12 @@ class RuntimeState:
     web_tunnel_state: str = "off"
     web_tunnel_error: str = ""
     web_tunnel_wanted: bool = False
+    # Self-update: state "idle" | "checking" | "updating" | "restarting" | "error".
+    update_state: str = "idle"
+    update_error: str = ""
+    update_message: str = ""
+    update_info: dict[str, Any] | None = None
+    update_notified_hash: str = ""
     playit_cancel: bool = False
     process: Any = None
     # True once a stop was asked for (button, restart, console "stop", shutdown); a non-zero exit

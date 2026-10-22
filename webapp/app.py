@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import glob
+import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 import os
@@ -20,7 +21,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from core import cloudflared, config_store, downloaders, java_manager, modrinth, netinfo, notifier, paths, playit
+from core import cloudflared, config_store, downloaders, java_manager, modrinth, netinfo, notifier, paths, playit, updater
 from core.server_process import ServerProcess, accept_eula, update_properties
 from webapp.auth import validate_auth_settings, verify_basic_auth_header, verify_credentials
 from webapp.state import RuntimeState
@@ -39,6 +40,15 @@ WEB_TUNNEL_RETRY_SEC = 15
 # Alerts: the same alert is emailed at most once per ALERT_REPEAT_SEC; heartbeat every HEARTBEAT_INTERVAL_SEC.
 ALERT_REPEAT_SEC = 600
 PLAYIT_RETRY_SEC = 30
+# Self-update: first check shortly after start, then every UPDATE_CHECK_INTERVAL_SEC.
+UPDATE_FIRST_CHECK_SEC = 120
+UPDATE_CHECK_INTERVAL_SEC = 6 * 3600
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+# Changes whenever the CSS/JS change (e.g. after an update) so browsers don't keep stale copies.
+ASSET_VERSION = str(int(max(
+    os.path.getmtime(os.path.join(_STATIC_DIR, "css", "dashboard.css")),
+    os.path.getmtime(os.path.join(_STATIC_DIR, "js", "dashboard.js")),
+)))
 HEARTBEAT_INTERVAL_SEC = 60
 FALLBACK_VERSIONS = {
     "vanilla": ["1.21.7", "1.21.6", "1.21.5", "1.21.4", "1.21.3", "1.21.2", "1.21.1", "1.20.4"],
@@ -100,6 +110,9 @@ def _default_config() -> dict[str, Any]:
         "autostart_server": False,
         "autostart_playit": False,
         "auto_restart": True,
+        # Self-update from the git repository (Server setup > Updates).
+        "auto_update_check": True,
+        "auto_update_install": False,
         # Cloudflare link to the dashboard (Remote access page); on by default (owner decision
         # 2026-10-22) so the link comes up by itself after every boot. See the must-fix note in auth.py.
         "remote_dashboard": True,
@@ -582,6 +595,7 @@ _SECTION_ALERTS = f"""
               {_switch("alerts-notify-server", "Server crashes and outages", "Crash, auto-restart paused, back online.", True)}
               {_switch("alerts-notify-link", "New dashboard link", "Emails the new https link after every restart or reboot.", True)}
               {_switch("alerts-notify-tunnels", "Tunnel problems", "PlayIt or the dashboard link stopped unexpectedly.", True)}
+              {_switch("alerts-notify-updates", "Updates", "A new version is available, or an update failed.", True)}
             </div>
             <div class="field heartbeat-field">
               <label for="alerts-heartbeat-url">Heartbeat URL (optional, for when the whole phone goes down)</label>
@@ -595,6 +609,42 @@ _SECTION_ALERTS = f"""
               <button id="alerts-save-button" class="btn btn-primary" type="submit">Save</button>
             </div>
           </form>
+        </section>
+"""
+
+_SECTION_UPDATES = """
+        <section id="updates" class="card">
+          <div class="card-header">
+            <div>
+              <h2>Updates</h2>
+              <p class="card-sub">Get the latest version from the git repository this app was installed from.</p>
+            </div>
+            <span id="update-badge" class="badge">Checking…</span>
+          </div>
+          <div class="address-row address-row-lg">
+            <span class="address-kind">Installed</span>
+            <code data-field="update_current">—</code>
+          </div>
+          <p id="update-summary" class="hint"></p>
+          <ul id="update-commits" class="commit-list" hidden></ul>
+          <p id="update-error" class="callout callout-error" hidden></p>
+          <div class="switch-list">
+            <label class="switch-row" for="update-auto-check">
+              <span><span class="switch-label">Check for updates automatically</span>
+                <span class="hint">Every 6 hours; emails you when an update is available (see Alerts).</span></span>
+              <input id="update-auto-check" type="checkbox" class="switch" checked />
+            </label>
+            <label class="switch-row" for="update-auto-install">
+              <span><span class="switch-label">Install updates automatically</span>
+                <span class="hint">Only when no one is online. Minecraft restarts for about a minute.</span></span>
+              <input id="update-auto-install" type="checkbox" class="switch" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <p class="hint">Updating restarts the dashboard; Minecraft and PlayIt come back if they were running.</p>
+            <button id="update-check-button" class="btn btn-ghost" type="button">Check now</button>
+            <button id="update-apply-button" class="btn btn-primary" type="button" disabled>Update &amp; restart</button>
+          </div>
         </section>
 """
 
@@ -759,7 +809,7 @@ _SECTION_CONSOLE_FULL = f"""
 
 _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
     "overview": (_SECTION_OVERVIEW_TILES, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
-    "setup": (_SECTION_SETUP, _SECTION_ALWAYS_ON, _SECTION_ALERTS),
+    "setup": (_SECTION_SETUP, _SECTION_ALWAYS_ON, _SECTION_ALERTS, _SECTION_UPDATES),
     "advanced": (_SECTION_ADVANCED,),
     "mods": (_SECTION_MODS,),
     "remote": (_SECTION_REMOTE,),
@@ -802,7 +852,7 @@ def _render_dashboard_page(section: str) -> HTMLResponse:
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title} · EZ Minecraft Server</title>
-    <link rel="stylesheet" href="/dashboard.css" />
+    <link rel="stylesheet" href="/dashboard.css?v={ASSET_VERSION}" />
   </head>
   <body data-page="{normalized}">
     <div class="app-shell">
@@ -837,7 +887,7 @@ def _render_dashboard_page(section: str) -> HTMLResponse:
       </div>
     </div>
     <div id="action-status" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/dashboard.js"></script>
+    <script src="/dashboard.js?v={ASSET_VERSION}"></script>
   </body>
 </html>
         """
@@ -1582,12 +1632,14 @@ def create_app() -> FastAPI:
         if os.getenv("EZ_NO_AUTOSTART") == "1":
             return
         threading.Thread(target=heartbeat_loop, name="heartbeat", daemon=True).start()
+        threading.Thread(target=update_check_loop, name="update-check", daemon=True).start()
         config = _effective_config()
+        resume = take_resume_marker()  # what was running before an in-app update restarted us
         secret = playit.load_config().get("secret")
-        if config.get("autostart_playit") and secret:
+        if (config.get("autostart_playit") or resume.get("playit")) and secret:
             append_console_line("[autostart] starting the PlayIt tunnel")
             run_in_background("PlayIt tunnel", lambda: start_agent_and_tunnels(secret))
-        if config.get("autostart_server"):
+        if config.get("autostart_server") or resume.get("server"):
             append_console_line("[autostart] starting the Minecraft server")
             run_in_background("Minecraft server", launch_server)
         if config.get("remote_dashboard"):
@@ -1606,6 +1658,123 @@ def create_app() -> FastAPI:
                 process.kill()
         stop_playit_agent()
         stop_web_tunnel()
+
+    # ---------- Self-update ----------
+    def update_log(line: str) -> None:
+        append_console_line(f"[update] {line}")
+
+    def resume_marker_path() -> str:
+        return os.path.join(paths.DATA_DIR, "resume_after_update.json")
+
+    def take_resume_marker() -> dict[str, Any]:
+        """Read and delete the marker written before an update restart."""
+        path = resume_marker_path()
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return {}
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return data if isinstance(data, dict) else {}
+
+    def update_payload(message: str = "") -> dict[str, Any]:
+        config = _effective_config()
+        return {
+            **(runtime.update_info or {}),
+            "state": runtime.update_state,
+            "error": runtime.update_error,
+            "message": message or runtime.update_message,
+            "auto_check": bool(config.get("auto_update_check")),
+            "auto_install": bool(config.get("auto_update_install")),
+        }
+
+    def check_for_updates(fetch: bool = True) -> dict[str, Any]:
+        runtime.update_info = updater.status(fetch=fetch)
+        return runtime.update_info
+
+    def run_update() -> None:
+        """Pull, then restart onto the new code (resuming Minecraft/PlayIt if they were running)."""
+        runtime.update_state = "updating"
+        runtime.update_error = ""
+        runtime.update_message = "Downloading the update..."
+        try:
+            result = updater.apply(update_log)
+        except Exception as exc:
+            runtime.update_state = "error"
+            runtime.update_error = str(exc)
+            update_log(f"Update failed: {exc}")
+            notify("updates", "Update failed", str(exc))
+            return
+        if not result.get("updated"):
+            runtime.update_state = "idle"
+            runtime.update_message = "Already up to date."
+            return
+        resume = {
+            "server": bool(runtime.process is not None and runtime.process.is_running()),
+            "playit": bool(runtime.playit_agent is not None and runtime.playit_agent.is_running()),
+        }
+        paths.ensure_dirs()
+        with open(resume_marker_path(), "w", encoding="utf-8") as handle:
+            json.dump(resume, handle)
+        runtime.update_state = "restarting"
+        runtime.update_message = f"Updated {result['from']} -> {result['to']}; restarting the dashboard..."
+        update_log(runtime.update_message)
+        time.sleep(1)  # let the browser receive the "restarting" state
+        shutdown()
+        updater.restart_process()
+
+    def update_check_loop() -> None:
+        time.sleep(UPDATE_FIRST_CHECK_SEC)
+        while not runtime.shutting_down:
+            config = _effective_config()
+            if config.get("auto_update_check") and runtime.update_state in {"idle", "error"}:
+                try:
+                    info = check_for_updates()
+                except Exception as exc:
+                    update_log(f"Update check failed: {exc}")
+                    info = {}
+                if info.get("behind") and info.get("latest_hash") != runtime.update_notified_hash:
+                    runtime.update_notified_hash = info["latest_hash"]
+                    changes = "\n".join(f"- {c['subject']} ({c['when']})" for c in info.get("commits", []))
+                    notify("updates", "Update available", f"{info['behind']} new change(s) on {info['upstream']}:\n\n"
+                           f"{changes}\n\nOpen Server setup > Updates to install.", throttle=False)
+                busy = runtime.state in {"starting", "stopping", "installing"} or bool(runtime.online_players)
+                if info.get("behind") and config.get("auto_update_install") and not busy and not info.get("local_changes"):
+                    update_log("Installing the update automatically (no one is online).")
+                    run_update()
+            time.sleep(UPDATE_CHECK_INTERVAL_SEC)
+
+    @app.get("/api/update")
+    def update_status(_: str = Depends(require_auth)) -> dict[str, Any]:
+        if runtime.update_info is None:
+            try:
+                check_for_updates(fetch=False)
+            except Exception as exc:
+                runtime.update_info = {"available": False, "reason": str(exc)}
+        return update_payload()
+
+    @app.post("/api/update/check")
+    def update_check(_: str = Depends(require_auth)) -> dict[str, Any]:
+        try:
+            info = check_for_updates(fetch=True)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Update check failed: {exc}") from exc
+        if not info.get("available"):
+            return update_payload(info.get("reason", ""))
+        if info["behind"]:
+            return update_payload(f"{info['behind']} update(s) available.")
+        return update_payload("You are on the latest version.")
+
+    @app.post("/api/update/apply")
+    def update_apply(_: str = Depends(require_auth)) -> dict[str, Any]:
+        if runtime.update_state in {"updating", "restarting"}:
+            return update_payload("An update is already running.")
+        runtime.update_state = "updating"
+        threading.Thread(target=run_update, name="update", daemon=True).start()
+        return update_payload("Updating; the dashboard will restart by itself.")
 
     @app.get("/api/notifications")
     def get_notifications(_: str = Depends(require_auth)) -> dict[str, Any]:
