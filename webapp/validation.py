@@ -15,6 +15,8 @@ BEDROCK_PREFIX = "."
 MAX_COMMAND_LENGTH = 256
 MIN_RAM_MB = 512
 _ONE_LINE = r"^[^\r\n]*$"
+# "HH:MM" (24 h) or "" for off.
+_TIME_OR_EMPTY = r"^(?:(?:[01]\d|2[0-3]):[0-5]\d)?$"
 
 
 def require_player(value: Any) -> str:
@@ -82,6 +84,10 @@ class ConfigUpdate(BaseModel):
     backup_keep_recent: int | None = Field(None, ge=1, le=100)
     backup_keep_daily: int | None = Field(None, ge=0, le=60)
     backup_prune_manual: bool | None = None
+    restart_daily_time: str | None = Field(None, pattern=_TIME_OR_EMPTY)
+    idle_stop_minutes: int | None = Field(None, ge=0, le=1440)
+    quiet_hours_start: str | None = Field(None, pattern=_TIME_OR_EMPTY)
+    quiet_hours_end: str | None = Field(None, pattern=_TIME_OR_EMPTY)
 
     @field_validator("ram_mb")
     @classmethod
