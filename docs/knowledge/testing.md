@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py` (+ `tests/fixtures/logs/` for FEAT-08); sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-183 passed (~33 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+187 passed (~34 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Patching
@@ -56,6 +56,9 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Identity (FEAT-14): icon checks from raw PNG headers (size, type, 64 KB); extra properties round
+  trip, managed/locked/bad keys and multi-line values → 422, null removes; MOTD `§` written as
+  `\u00a7` with the owner's `\n` intact; `MANAGED` equals the Settings form's keys.
 - Performance (FEAT-13): flag variants (phone, > 12 GB), launch args with the switch on/off and extra
   args appended; extra-args validation (`-jar`, `@file`, newline, bare words, bad quoting → 422);
   host info endpoint and the Performance card render.

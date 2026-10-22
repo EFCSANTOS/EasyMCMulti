@@ -7,6 +7,8 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from fastapi import HTTPException
+
+from webapp import properties_meta
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator
 
 # Java Edition names. Floodgate (Bedrock crossplay, FEAT-18) prefixes Bedrock names with ".".
@@ -69,7 +71,8 @@ class ConfigUpdate(BaseModel):
     version: str | None = Field(None, pattern=r"^[0-9A-Za-z][0-9A-Za-z._+-]{0,31}$")
     ram_mb: int | None = Field(None, ge=MIN_RAM_MB)
     server_port: int | None = Field(None, ge=1024, le=65535)
-    motd: str | None = Field(None, max_length=59, pattern=_ONE_LINE)
+    # § colour codes and "\n" (second line) count towards the length but aren't shown.
+    motd: str | None = Field(None, max_length=150, pattern=_ONE_LINE)
     max_players: int | None = Field(None, ge=1, le=100)
     gamemode: Literal["survival", "creative", "adventure", "spectator"] | None = None
     difficulty: Literal["peaceful", "easy", "normal", "hard"] | None = None
@@ -100,12 +103,27 @@ class ConfigUpdate(BaseModel):
     backup_keep_recent: int | None = Field(None, ge=1, le=100)
     backup_keep_daily: int | None = Field(None, ge=0, le=60)
     backup_prune_manual: bool | None = None
+    extra_properties: dict[str, str] | None = None
     jvm_preset_flags: bool | None = None
     jvm_extra_args: str | None = Field(None, max_length=500, pattern=_ONE_LINE)
     restart_daily_time: str | None = Field(None, pattern=_TIME_OR_EMPTY)
     idle_stop_minutes: int | None = Field(None, ge=0, le=1440)
     quiet_hours_start: str | None = Field(None, pattern=_TIME_OR_EMPTY)
     quiet_hours_end: str | None = Field(None, pattern=_TIME_OR_EMPTY)
+
+    @field_validator("extra_properties")
+    @classmethod
+    def _extra_properties(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        if value is None:
+            return value
+        for key, item in value.items():
+            if not properties_meta.KEY_PATTERN.match(key):
+                raise ValueError(f"'{key}' is not a server.properties key")
+            if key in properties_meta.MANAGED or key in properties_meta.LOCKED:
+                raise ValueError(f"{key} is set on the Settings and Server pages, not here")
+            if len(item) > 500 or any(ord(char) < 32 for char in item):
+                raise ValueError(f"{key}: the value must be one line of at most 500 characters")
+        return value
 
     @field_validator("jvm_extra_args")
     @classmethod

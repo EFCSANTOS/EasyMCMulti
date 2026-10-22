@@ -1,4 +1,4 @@
-// EZ Minecraft dashboard, part 2 of 7: Config form, status polling and server lifecycle buttons.
+// EZ Minecraft dashboard, part 2 of 8: Config form, status polling and server lifecycle buttons.
 // Plain scripts that share one global scope, loaded in order by webapp/pages/layout.py::SCRIPTS.
 
 // ---------- Config ----------

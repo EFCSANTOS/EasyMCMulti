@@ -1,4 +1,4 @@
-// EZ Minecraft dashboard, part 5 of 7: PlayIt, alerts, self-update and the remote dashboard link.
+// EZ Minecraft dashboard, part 5 of 8: PlayIt, alerts, self-update and the remote dashboard link.
 // Plain scripts that share one global scope, loaded in order by webapp/pages/layout.py::SCRIPTS.
 
 // ---------- PlayIt ----------

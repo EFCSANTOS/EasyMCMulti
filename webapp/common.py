@@ -22,6 +22,7 @@ from core import backups, config_store, downloaders, paths, worlds
 # Re-exported for the routers (common.ServerProcess, …) so tests can patch them here.
 from core.server_process import ServerProcess, accept_eula, update_properties  # noqa: F401
 from webapp.state import RuntimeState
+from webapp import properties_meta
 from webapp.validation import clean_stored_config
 
 KNOWN_LOADERS = ("vanilla", "paper", "fabric", "forge", "neoforge")
@@ -69,11 +70,14 @@ FALLBACK_VERSIONS = {
 }
 
 def _server_properties_from_config(config: dict[str, Any]) -> dict[str, Any]:
-    return {
+    """Values written to server.properties on every start: the owner's extra properties (FEAT-14)
+    first, then the keys the Settings form manages, which always win."""
+    extra = config.get("extra_properties") or {}
+    managed = {
         "server-port": int(config.get("server_port", 25565)),
         "online-mode": bool(config.get("online_mode", True)),
         "max-players": int(config.get("max_players", 10)),
-        "motd": str(config.get("motd", "EZ Minecraft Server")),
+        "motd": properties_meta.escape_value(str(config.get("motd", "EZ Minecraft Server"))),
         "level-seed": str(config.get("level_seed", "")),
         "level-name": _active_world(config),
         "gamemode": str(config.get("gamemode", "survival")),
@@ -88,6 +92,11 @@ def _server_properties_from_config(config: dict[str, Any]) -> dict[str, Any]:
         "white-list": bool(config.get("white_list", False)),
         "enable-command-block": bool(config.get("enable_command_block", True)),
     }
+    if isinstance(extra, dict):
+        extra = {key: properties_meta.escape_value(str(value)) for key, value in extra.items()
+                 if key not in managed and key not in properties_meta.LOCKED}
+        return {**extra, **managed}
+    return managed
 
 
 def _default_config() -> dict[str, Any]:
@@ -140,6 +149,8 @@ def _default_config() -> dict[str, Any]:
         # Performance (FEAT-13): tuned GC flags on by default; extra JVM arguments for advanced users.
         "jvm_preset_flags": True,
         "jvm_extra_args": "",
+        # Raw server.properties keys the Settings form doesn't cover (FEAT-14): {"spawn-protection": "0"}.
+        "extra_properties": {},
         "restart_daily_time": "",
         "idle_stop_minutes": 0,
         "quiet_hours_start": "",

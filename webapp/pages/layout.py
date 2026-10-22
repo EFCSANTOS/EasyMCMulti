@@ -22,13 +22,15 @@ from webapp.pages.sections_more import _SECTION_MODS  # noqa: F401
 from webapp.pages.sections_more import _SECTION_REMOTE  # noqa: F401
 from webapp.pages.sections_more import _SECTION_WORLDS  # noqa: F401
 from webapp.pages.sections_diagnosis import _SECTION_DIAGNOSIS, _SECTION_LOGS
+from webapp.pages.sections_identity import _SECTION_ALL_PROPERTIES, _SECTION_IDENTITY
 from webapp.pages.sections_invite import _SECTION_INVITE
 from webapp.pages.sections_players import _SECTION_PLAYERS
 from webapp.pages.widgets import _icon
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 # Dashboard scripts in load order: plain scripts sharing one global scope (no build step).
-SCRIPTS = ("api.js", "server.js", "content.js", "players.js", "settings.js", "console.js", "main.js")
+SCRIPTS = ("api.js", "server.js", "content.js", "players.js", "settings.js", "console.js", "identity.js",
+           "main.js")
 # Changes whenever the CSS/JS change (e.g. after an update) so browsers don't keep stale copies.
 ASSET_VERSION = str(int(max(
     [os.path.getmtime(os.path.join(STATIC_DIR, "css", "dashboard.css"))]
@@ -77,7 +79,7 @@ _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
     "overview": (_SECTION_OVERVIEW_TILES, _SECTION_DIAGNOSIS, _SECTION_INVITE, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
     "setup": (_SECTION_SETUP, _SECTION_PERFORMANCE, _SECTION_ALWAYS_ON, _SECTION_SCHEDULE, _SECTION_ALERTS,
               _SECTION_UPDATES),
-    "advanced": (_SECTION_ADVANCED,),
+    "advanced": (_SECTION_ADVANCED, _SECTION_IDENTITY, _SECTION_ALL_PROPERTIES),
     "worlds": (_SECTION_WORLDS,),
     "players": (_SECTION_PLAYERS,),
     "mods": (_SECTION_MODS,),
