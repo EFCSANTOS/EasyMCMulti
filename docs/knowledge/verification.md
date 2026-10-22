@@ -41,7 +41,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Loader + version pickers | Works — versions fetched from `/api/versions/{loader}`, refreshed on loader change |
 | Save config (Setup and Advanced pages) | Works — saves only the fields present on the page |
 | Create / start / stop / restart server | Works — background jobs (202), one at a time (409 "Busy"), progress banner on every page; live-checked in headless Edge with a slow fake install |
-| Console | Works — polled every 2 s via `GET /api/console` |
+| Console | Works — live over `/ws/console` (headless Edge: a command echoed in 0.03 s, no polling while the socket is open); `?since=` polling fallback; filters, search, ↑ history, Tab completion; chat box on the overview |
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
 | Mod updates (check, update, undo) | Works in tests (fake Modrinth: one request, hash check, dependency, rollback, cleanup) and against the live Modrinth API (old Lithium 0.13.0 → 0.15.4 offered, downloaded, hash-verified, `.old` kept, re-check empty); UI not yet clicked through with real mods |
@@ -89,8 +89,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 
 ## Documentation vs implementation conflicts (open)
 1. ~~`/api/status` mutates runtime~~ → fixed by FIX-06: a pure read that merges derived values.
-2. **Browser never uses `/ws/console`** — browsers cannot set `Authorization` on a WebSocket; the
-   route is only usable by non-browser clients (and the test). The GUI polls REST instead.
+2. ~~Browser never uses `/ws/console`~~ → fixed: cookie sessions (FIX-01) + live console (FEAT-11).
 ## Security
 Fixed 2026-10-22:
 - `GET /api/playit/config` returned the PlayIt secret key → now `{address, secret_present}` only.

@@ -43,6 +43,21 @@ def require_command(value: Any) -> str:
     return command
 
 
+MAX_CHAT_LENGTH = 200
+
+
+def require_chat(value: Any) -> str:
+    """One line of chat text (no control characters), at most MAX_CHAT_LENGTH, or 400."""
+    message = str(value or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Type a message first.")
+    if any(ord(char) < 32 or ord(char) == 127 for char in message):
+        raise HTTPException(status_code=400, detail="Messages must be a single line of text.")
+    if len(message) > MAX_CHAT_LENGTH:
+        raise HTTPException(status_code=400, detail=f"Messages are limited to {MAX_CHAT_LENGTH} characters.")
+    return message
+
+
 class ConfigUpdate(BaseModel):
     """Every key of webapp.app._default_config, all optional. Unknown keys are refused."""
 
