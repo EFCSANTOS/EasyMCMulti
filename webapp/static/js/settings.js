@@ -290,6 +290,55 @@ async function saveUpdateSetting(key, toggle) {
   }
 }
 
+// ---------- Invite friends + public status page ----------
+function renderInvite(info) {
+  const text = document.getElementById('invite-text');
+  if (!text) return;
+  text.textContent = info.invite || '';
+  const toggle = document.getElementById('status-page-enabled');
+  if (document.activeElement !== toggle && !toggle.disabled) toggle.checked = Boolean(info.enabled);
+  document.getElementById('status-page-options').hidden = !info.enabled;
+  setField('status_page_url', info.url || '—');
+  document.getElementById('status-page-link').href = info.url || '#';
+  document.getElementById('status-page-lan-note').hidden = !info.url_is_lan_only;
+  document.getElementById('status-page-show-names').checked = Boolean(info.show_names);
+  document.getElementById('status-page-show-lan').checked = Boolean(info.show_lan);
+}
+
+async function loadInvite() {
+  if (!document.getElementById('invite-text')) return;
+  try {
+    renderInvite(await fetchJson('/api/status-page'));
+  } catch (error) {
+    // the next status poll retries
+  }
+}
+
+async function changeStatusPage(body, button) {
+  await runAction(button, null, async () => {
+    const info = await fetchJson('/api/status-page', 'POST', body);
+    renderInvite(info);
+    return info.message;
+  });
+}
+
+function bindInvite() {
+  on('invite-copy-button', 'click', async (event, button) => {
+    await runAction(button, null, async () => {
+      await copyText(document.getElementById('invite-text').textContent);
+      return 'Invite copied. Paste it in your group chat.';
+    });
+  });
+  on('status-page-enabled', 'change', (event, toggle) => changeStatusPage({ action: toggle.checked ? 'enable' : 'disable' }, null));
+  on('status-page-show-names', 'change', (event, toggle) => changeStatusPage({ action: 'settings', show_names: toggle.checked }, null));
+  on('status-page-show-lan', 'change', (event, toggle) => changeStatusPage({ action: 'settings', show_lan: toggle.checked }, null));
+  on('status-page-regenerate', 'click', (event, button) => {
+    if (window.confirm('Make a new link? The old link stops working, so you will need to share the new one.')) {
+      changeStatusPage({ action: 'regenerate' }, button);
+    }
+  });
+}
+
 // ---------- Remote dashboard (Cloudflare) ----------
 const REMOTE_LABELS = { off: 'Off', starting: 'Starting…', running: 'Online', error: 'Problem' };
 

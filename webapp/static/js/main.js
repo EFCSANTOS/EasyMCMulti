@@ -63,6 +63,7 @@ function bindEvents() {
   on('world-upload-input', 'change', (event, input) => uploadWorld(input));
   on('world-create-form', 'submit', (event) => createWorld(event));
   bindPlayers();
+  bindInvite();
 
   ['op', 'deop', 'kick', 'ban', 'day', 'night', 'clear', 'rain', 'save'].forEach((action) => {
     on(`admin-${action}`, 'click', (event, button) => applyAdminAction(action, button));
@@ -86,7 +87,7 @@ async function boot() {
   bindMetrics();
   await loadConfig();
   await loadStatus();
-  await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(),
+  await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(), loadInvite(),
     refreshConsole(true)]);
   initModBrowser(); // after loadInstalledMods so cards can show "Installed"
 

@@ -166,8 +166,12 @@ function setField(name, value) {
 
 async function copyText(text) {
   if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      // permission denied (some phones, embedded browsers): use the fallback below
+    }
   }
   // Plain-HTTP LAN pages have no Clipboard API; fall back to a temporary textarea.
   const area = document.createElement('textarea');

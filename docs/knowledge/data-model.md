@@ -58,7 +58,9 @@ stopped): `whitelist.json` `[{uuid, name}]`, `ops.json` `[{uuid, name, level, by
 Always-on keys (in `_default_config`, edited on Server setup → Always-on): `autostart_server`
 (False), `autostart_playit` (False), `auto_restart` (True), `remote_dashboard` (**True**; Remote
 access page, `POST /api/remote-dashboard`), `auto_update_check` (True), `auto_update_install`
-(False; both on Server setup → Updates, saved on toggle). A stale `dashboard_tunnel` key from the removed PlayIt
+(False; both on Server setup → Updates, saved on toggle). Status page keys (FEAT-03, edited through
+`POST /api/status-page`): `status_page_enabled` (False), `status_page_token` ("" until enabled;
+server-generated only), `status_page_show_names` (True), `status_page_show_lan` (False). A stale `dashboard_tunnel` key from the removed PlayIt
 dashboard tunnel may remain in old configs; it is ignored.
 
 `.env` (repo root, git-ignored, mode 600, written by `termux-setup.sh`): `EZ_WEBAPP_USERNAME`,
