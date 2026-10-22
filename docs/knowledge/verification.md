@@ -122,6 +122,10 @@ Open / by design:
   logic is covered by tests; scripts were syntax-checked with `bash -n`.
 - `cloudflared` on Termux (`pkg install cloudflared`) and its auto-restart after an unexpected exit
   on a real device.
+- Automatic Termux installs (2026-10-22): `hostenv.termux_install` for `openjdk-25` / `cloudflared`
+  / `proot` is tested with a stubbed apt only; not yet run on a device. Same for
+  `playit.kill_stale_agents` (`/proc` cmdline matching under termux-chroot/proot) and the
+  process-group `killpg` stop.
 - Termux 24/7 mode: runit service + `svlogger` log, `ezmc` commands, Termux:Boot script sourcing
   `start-services.sh` after a reboot.
 - `run.bat` prompt flow not executed in this session (batch + PowerShell secure-string read).

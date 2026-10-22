@@ -221,11 +221,18 @@ def fake_playit(monkeypatch):
     monkeypatch.setattr(webapp_module.playit, "ensure_agent", lambda log=print: "agent")
     monkeypatch.setattr(webapp_module.playit, "PlayitAgent", DummyAgent)
     monkeypatch.setattr(webapp_module.playit, "ensure_tunnel", lambda secret, port, log, timeout_sec=120, should_abort=None: "demo.example:25565")
+    monkeypatch.setattr(webapp_module.playit, "kill_stale_agents", lambda log=print: 0)
     app.state.runtime.playit_agent = None
     app.state.runtime.playit_setup = "idle"
+    app.state.runtime.playit_crash_times = []
     yield
+    if app.state.runtime.playit_restart_timer is not None:
+        app.state.runtime.playit_restart_timer.cancel()
+    app.state.runtime.playit_restart_timer = None
     app.state.runtime.playit_agent = None
     app.state.runtime.playit_setup = "idle"
+    app.state.runtime.playit_error = ""
+    app.state.runtime.playit_crash_times = []
 
 
 def test_playit_start_route_starts_the_tunnel(fake_playit):
@@ -406,14 +413,61 @@ def test_system_java_prefers_exact_then_oldest_newer(monkeypatch):
     assert java_manager.find_system_java(26) == (None, None)
 
 
-def test_missing_java_on_termux_explains_how_to_install(monkeypatch):
+def test_missing_java_on_termux_is_installed_automatically(monkeypatch):
+    from core import hostenv, java_manager
+
+    installed = {}
+    monkeypatch.setattr(hostenv, "is_windows", lambda: False)
+    monkeypatch.setattr(hostenv, "is_termux", lambda: True)
+    monkeypatch.setattr(java_manager, "_system_java_candidates", lambda: list(installed))
+    monkeypatch.setattr(java_manager, "java_major", lambda exe: installed[exe])
+
+    def fake_install(package, log=print, timeout_sec=1800):
+        installed[f"/jvm/{package}/bin/java"] = int(package.split("-")[1])
+
+    monkeypatch.setattr(hostenv, "termux_install", fake_install)
+    assert java_manager.ensure_java(25, log=lambda message: None) == "/jvm/openjdk-25/bin/java"
+    assert java_manager.termux_java_package(18) == "openjdk-21"
+    installed.clear()  # nothing installed: Java 8 has no Termux package
+    with pytest.raises(RuntimeError, match="Choose Minecraft 1.17 or newer"):
+        java_manager.ensure_java(8, log=lambda message: None)
+
+
+def test_failed_java_install_on_termux_explains_how_to_install(monkeypatch):
     from core import hostenv, java_manager
 
     monkeypatch.setattr(hostenv, "is_windows", lambda: False)
     monkeypatch.setattr(hostenv, "is_termux", lambda: True)
     monkeypatch.setattr(java_manager, "_system_java_candidates", lambda: [])
+    monkeypatch.setattr(hostenv, "_apt", lambda args, log, timeout_sec: (100, ["E: Unable to locate package openjdk-21"]))
     with pytest.raises(RuntimeError, match="pkg install openjdk-21"):
         java_manager.ensure_java(21, log=lambda message: None)
+
+
+def test_termux_install_refreshes_package_lists_and_retries(monkeypatch):
+    from core import hostenv
+
+    calls = []
+
+    def fake_apt(args, log, timeout_sec):
+        calls.append(args)
+        return (0 if calls.count(["install", "cloudflared"]) == 2 else 100), []
+
+    monkeypatch.setattr(hostenv, "is_termux", lambda: True)
+    monkeypatch.setattr(hostenv, "_apt", fake_apt)
+    hostenv.termux_install("cloudflared", log=lambda message: None)
+    assert calls == [["install", "cloudflared"], ["update"], ["install", "cloudflared"]]
+
+
+def test_cloudflared_is_installed_automatically_on_termux(monkeypatch):
+    from core import cloudflared, hostenv
+
+    installed = []
+    monkeypatch.setattr(hostenv, "is_termux", lambda: True)
+    monkeypatch.setattr(hostenv, "termux_install", lambda package, log=print: installed.append(package))
+    monkeypatch.setattr(cloudflared.shutil, "which", lambda name: "/usr/bin/cloudflared" if installed else None)
+    assert cloudflared.ensure_binary(log=lambda message: None) == "/usr/bin/cloudflared"
+    assert installed == ["cloudflared"]
 
 
 def test_forge_args_file_matches_platform(tmp_path, monkeypatch):
@@ -545,7 +599,7 @@ def test_server_start_installs_before_launch(monkeypatch):
 
     monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: False)
     monkeypatch.setattr(webapp_module.downloaders, "prepare", fake_prepare)
-    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required: "java")
+    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required, log=print: "java")
     monkeypatch.setattr(webapp_module.downloaders, "launch_args", lambda *args, **kwargs: ["java", "-jar", "server.jar"])
     monkeypatch.setattr(webapp_module, "ServerProcess", DummyProcess)
     monkeypatch.setattr(webapp_module, "update_properties", fake_update_properties)
@@ -607,7 +661,7 @@ def test_restart_waits_for_previous_process_to_exit(monkeypatch):
             self.running = False
 
     monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: True)
-    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required: "java")
+    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required, log=print: "java")
     monkeypatch.setattr(webapp_module.downloaders, "launch_args", lambda *args, **kwargs: ["java"])
     monkeypatch.setattr(webapp_module, "update_properties", lambda server_dir, **kwargs: None)
     monkeypatch.setattr(webapp_module, "ServerProcess", StoppableProcess)
@@ -659,7 +713,7 @@ class RecordingProcess:
 def fake_server(monkeypatch):
     RecordingProcess.instances = []
     monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: True)
-    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required: "java")
+    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required, log=print: "java")
     monkeypatch.setattr(webapp_module.downloaders, "launch_args", lambda *args, **kwargs: ["java"])
     monkeypatch.setattr(webapp_module, "update_properties", lambda server_dir, **kwargs: None)
     monkeypatch.setattr(webapp_module, "ServerProcess", RecordingProcess)
@@ -1000,6 +1054,43 @@ def test_playit_rejected_key_stops_agent_without_restart(fake_playit, sent_email
     agents[0].on_exit(1)  # the stopped agent exits: deliberate, so no restart
     threading.Event().wait(0.2)  # time.sleep is stubbed above
     assert len(agents) == 1
+
+
+def test_playit_agent_restarts_pause_after_repeated_exits(fake_playit, sent_emails, monkeypatch):
+    monkeypatch.setattr(webapp_module, "PLAYIT_RETRY_SEC", 0)
+    events = []
+    agents = []
+
+    class FailingAgent(DummyAgent):
+        def __init__(self, on_output=None, on_exit=None):
+            super().__init__(on_output, on_exit)
+            self.on_output, self.on_exit = on_output, on_exit
+            agents.append(self)
+
+    monkeypatch.setattr(webapp_module.playit, "kill_stale_agents", lambda log=print: events.append("kill") or 0)
+    monkeypatch.setattr(webapp_module.playit, "PlayitAgent", FailingAgent)
+    playit.save_config("ab12cd34ef", "")
+    auth = ("admin", "s3cret-pass")
+    client.post("/api/playit/start", auth=auth)
+    assert events == ["kill"]  # leftovers are cleared before the first agent starts
+
+    for attempt in range(webapp_module.PLAYIT_CRASH_LIMIT + 1):
+        agent = agents[-1]
+        agent.on_output("playitd error: IPC error: Another instance is already running")
+        agent.running = False
+        agent.on_exit(1)
+        if attempt < webapp_module.PLAYIT_CRASH_LIMIT:
+            assert _wait_until(lambda: len(agents) == attempt + 2 and agents[-1].is_running())
+
+    threading.Event().wait(0.2)
+    assert len(agents) == webapp_module.PLAYIT_CRASH_LIMIT + 1  # no restart after the limit
+    status = client.get("/api/playit/status", auth=auth).json()
+    assert status["setup"] == "error"
+    assert "Another instance is already running" in status["error"]
+    assert any("auto-restart paused" in subject for subject, _ in sent_emails)
+
+    assert client.post("/api/playit/start", auth=auth).json()["state"] == "running"  # manual start re-arms
+    assert client.get("/api/playit/status", auth=auth).json()["setup"] == "idle"
 
 
 def test_playit_secret_validation_and_ansi_stripping():

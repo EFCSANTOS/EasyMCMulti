@@ -25,6 +25,7 @@ import platform
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import threading
 import time
@@ -324,6 +325,7 @@ def ensure_agent(log=print):
     binaries; Android will only work when the app is running in a Linux-capable
     environment (for example Termux/proot), not as a normal APK-only app.
     """
+    _ensure_termux_chroot(log)
     agent_path = _agent_path()
     if os.path.exists(agent_path):
         if os.name != "nt":
@@ -351,6 +353,80 @@ def ensure_agent(log=print):
     if os.name != "nt":
         os.chmod(agent_path, 0o755)
     return agent_path
+
+
+def _ensure_termux_chroot(log):
+    """On Termux the agent needs `termux-chroot` (package proot) for DNS; install it if missing."""
+    if not hostenv.is_termux() or os.environ.get("EZ_PLAYIT_CHROOT", "1") == "0" or shutil.which("termux-chroot"):
+        return
+    try:
+        hostenv.termux_install("proot", log)
+    except RuntimeError as exc:
+        log(f"{exc} Starting the agent without it; it may fail to resolve playit.gg.")
+
+
+# ---------- Leftover agents ----------
+def _agent_pids():
+    """PIDs of processes running this launcher's agent binary (matched by its full path)."""
+    path = _agent_path()
+    pids = []
+    if os.name == "nt":
+        try:
+            import psutil
+        except ImportError:
+            return pids
+        for proc in psutil.process_iter(["pid", "exe"]):
+            exe = proc.info.get("exe")
+            if exe and os.path.normcase(exe) == os.path.normcase(path):
+                pids.append(proc.info["pid"])
+        return pids
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return pids
+    wanted = path.encode()
+    for entry in entries:
+        if not entry.isdigit() or int(entry) == os.getpid():
+            continue
+        try:
+            with open(f"/proc/{entry}/cmdline", "rb") as f:
+                args = f.read().split(b"\0")
+        except OSError:
+            continue
+        if wanted in args:  # the agent itself, or the termux-chroot/proot wrapper running it
+            pids.append(int(entry))
+    return pids
+
+
+def kill_stale_agents(log=print):
+    """Kill agents left over from an earlier run (e.g. the dashboard was killed without shutting down).
+
+    Only one playit agent can run per device ("Another instance is already running"), so a leftover
+    blocks every new start. Returns how many processes were stopped.
+    """
+    pids = _agent_pids()
+    for pid in pids:
+        try:
+            if os.name == "nt":
+                import psutil
+                psutil.Process(pid).kill()
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except Exception:  # already gone or not ours to kill
+            continue
+    if pids and os.name != "nt":
+        deadline = time.time() + 5
+        while time.time() < deadline and any(os.path.exists(f"/proc/{pid}") for pid in pids):
+            time.sleep(0.2)
+        for pid in pids:
+            if os.path.exists(f"/proc/{pid}"):
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+    if pids:
+        log(f"Stopped {len(pids)} leftover playit agent process(es) from an earlier run.")
+    return len(pids)
 
 
 # ---------- Daemon launch ----------
@@ -382,11 +458,12 @@ class PlayitAgent:
     def start(self, secret):
         if not secret:
             raise RuntimeError("No playit secret key configured.")
+        # Own process group on POSIX, so stop() also reaches the agent behind termux-chroot/proot.
         self.proc = subprocess.Popen(
             agent_command(secret),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace",
-            creationflags=CREATE_NO_WINDOW)
+            creationflags=CREATE_NO_WINDOW, start_new_session=os.name != "nt")
         threading.Thread(target=self._reader, daemon=True).start()
 
     def _reader(self):
@@ -396,5 +473,12 @@ class PlayitAgent:
         self.on_exit(self.proc.wait())
 
     def stop(self):
-        if self.proc is not None:
-            self.proc.terminate()
+        if self.proc is None:
+            return
+        if os.name != "nt":
+            try:
+                os.killpg(self.proc.pid, signal.SIGTERM)  # wrapper + agent together
+                return
+            except OSError:
+                pass
+        self.proc.terminate()

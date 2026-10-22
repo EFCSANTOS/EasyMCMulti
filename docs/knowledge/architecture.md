@@ -48,7 +48,12 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
 - `java_manager.py` — `required_java(mc_version)`, `ensure_java(feature, log, progress)` → java path.
   Windows: downloads a portable Temurin JRE. Elsewhere: `find_system_java(feature)` scans
   `JAVA_HOME`, `$PREFIX/lib/jvm/*` (Termux), `/usr/lib/jvm/*`, `PATH`; picks the exact major, else
-  the oldest newer one; none → `RuntimeError` with an install hint (`pkg install openjdk-N` on Termux).
+  the oldest newer one; none → on Termux installs `openjdk-17|21|25` automatically
+  (`TERMUX_JAVA_VERSIONS`, via `hostenv.termux_install`; Java 8 has no package → error asking for
+  MC 1.17+), elsewhere `RuntimeError` with an install hint.
+- `hostenv.termux_install(package, log)` — non-interactive `apt-get install -y` (same dpkg options as
+  `termux-setup.sh`), refreshes package lists and retries once, one install at a time; failure →
+  `RuntimeError` ending in `pkg install <package>`. Used for Java, `cloudflared`, `proot`.
 - `downloaders.py` — `list_versions(loader, include_snapshots)`, `prepare(loader, version, sdir, java_exe,
   log, progress)`, `launch_args(loader, java_exe, sdir, ram_mb)`, `download(url, dest, …)` (writes
   `.part` then `os.replace`). `JAR_LOADERS`=vanilla/paper/fabric, `INSTALLER_LOADERS`=forge/neoforge.
