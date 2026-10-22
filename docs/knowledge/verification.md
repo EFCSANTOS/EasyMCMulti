@@ -44,6 +44,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Console | Works — polled every 2 s via `GET /api/console` |
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
+| Scheduled backups, retention, safety backups | Works in tests (patched clock, quiet save sequence, low-disk guard, delete safety) and headless Edge (manual backup listed with kind/size/total, schedule saved); **quiet save not yet run against a real Minecraft server** |
 | Mod browser (browse/category/sort/details, install + dependencies, remove), upload jars | Works; live read-only check against Modrinth; vanilla → 400 with explanation |
 | Discord alerts (owner + friends webhooks) | Works in tests (routing, batching, switches, rate limit, URL never returned) and headless Edge (invalid URL rejected, save/remove); **not yet posted to a real Discord webhook** |
 | Mod pack export (.mrpack) | Works in tests (faked Modrinth) and against the live Modrinth API (Fabric API, Lithium, spark: every CDN download matched the index's SHA-512 and size); headless Edge export downloads the file. **Not yet imported into Prism Launcher / Modrinth App** |

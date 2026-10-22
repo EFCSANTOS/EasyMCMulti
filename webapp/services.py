@@ -7,6 +7,7 @@ Cross-router calls go through `s.` at call time, so registration order does not 
 from __future__ import annotations
 
 import platform
+import re
 import threading
 import time
 from types import SimpleNamespace
@@ -38,8 +39,29 @@ def create_services(app: FastAPI) -> Services:
     app.state.runtime = runtime
     app.state.console_manager = WebSocketManager()
 
+    # One-shot watchers for wait_for_console: (compiled pattern, event set when a line matches).
+    console_watchers: list[tuple[re.Pattern[str], threading.Event]] = []
+    watchers_lock = threading.Lock()
+
     def append_console_line(line: str) -> None:
         app.state.console_manager.publish(line)
+        if console_watchers:
+            with watchers_lock:
+                for pattern, matched in console_watchers:
+                    if pattern.search(line):
+                        matched.set()
+
+    def wait_for_console(pattern: str, action: Any, timeout: float) -> bool:
+        """Run action(), then wait until a console line matches `pattern`. True if one did in time."""
+        entry = (re.compile(pattern), threading.Event())
+        with watchers_lock:
+            console_watchers.append(entry)
+        try:
+            action()
+            return entry[1].wait(timeout)
+        finally:
+            with watchers_lock:
+                console_watchers.remove(entry)
 
     fsutil.set_logger(lambda message: append_console_line(f"[config] {message}"))
     common._config_warning_sinks[:] = [append_console_line]
@@ -150,5 +172,5 @@ def create_services(app: FastAPI) -> Services:
             time.sleep(common.HEARTBEAT_INTERVAL_SEC)
 
     return Services(app=app, runtime=runtime, append_console_line=append_console_line, notify=notify,
-                    notify_friends=notify_friends, player_event=player_event,
+                    wait_for_console=wait_for_console, notify_friends=notify_friends, player_event=player_event,
                     flush_player_events=flush_player_events, heartbeat_loop=heartbeat_loop)

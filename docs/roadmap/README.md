@@ -28,7 +28,6 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 ## Features
 | ID | Title | Priority | Effort | Depends on |
 |---|---|---|---|---|
-| [FEAT-01](features/FEAT-01-scheduled-backups-and-retention.md) | Scheduled backups and retention | P1 | M | FIX-03 |
 | [FEAT-06](features/FEAT-06-scheduled-restarts-and-idle-shutdown.md) | Scheduled restarts and idle shutdown | P2 | M | FEAT-01 |
 | [FEAT-07](features/FEAT-07-mod-update-checker.md) | Mod and plugin update checker | P2 | M | — |
 | [FEAT-08](features/FEAT-08-crash-diagnosis-and-logs.md) | Crash diagnosis and log viewer | P2 | M | — |
@@ -53,7 +52,7 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
    FIX-02 (background installs), FIX-03 (atomic writes), FIX-04 (lifecycle lock).
 2. **Friends can join without the owner** — done: FIX-05, FEAT-02, FEAT-03, FEAT-04, FEAT-05
    (FEAT-04's optional "recommended client mods" list was left for later).
-3. **Hands-off running** — FEAT-01, FEAT-06, FEAT-08, FEAT-07.
+3. **Hands-off running** — FEAT-06, FEAT-08, FEAT-07 (FEAT-01 has shipped).
 4. **Polish** — everything else, picking by what the group actually asks for.
 QUAL-01 (split `app.py` into routers and page modules) has shipped, so new routes go in `webapp/routes/`.
 

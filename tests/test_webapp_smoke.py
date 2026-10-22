@@ -2303,3 +2303,117 @@ def test_test_button_posts_to_each_webhook(discord_posts):
     response = client.post("/api/notifications/test", auth=AUTH)
     assert response.status_code == 200 and "Discord owner channel OK" in response.json()["message"]
     assert [url for url, _ in discord_posts] == [OWNER_HOOK, FRIENDS_HOOK]
+
+
+# ---------- Scheduled backups and retention (FEAT-01) ----------
+import datetime  # noqa: E402
+
+from core import backups as backups_core  # noqa: E402
+
+webapp_module_backups = importlib.import_module("webapp.routes.backups")
+
+
+def _world_dir(folder="world"):
+    sdir = common_module._server_dir_for_config(common_module._effective_config())
+    os.makedirs(os.path.join(sdir, folder), exist_ok=True)
+    with open(os.path.join(sdir, folder, "level.dat"), "wb") as handle:
+        handle.write(b"level")
+    return sdir
+
+
+def test_backup_names_old_and_new_parse():
+    assert backups_core.parse("world-backup-20260101-000000.zip")["label"] == "manual"
+    old = backups_core.parse("world-backup-my-world-20261022-101010.zip")
+    assert old["folder"] == "my-world" and old["label"] == "manual"
+    new = backups_core.parse("world-backup-my-world-20261022-101010-auto-pre-update.zip")
+    assert new["folder"] == "my-world" and new["label"] == "auto-pre-update"
+    assert new["created"] == datetime.datetime(2026, 10, 22, 10, 10, 10)
+    assert backups_core.parse("world-backup-evil.zip") is None
+
+
+def test_retention_keeps_recent_and_one_per_day_and_never_manual():
+    now = datetime.datetime(2026, 10, 22, 12, 0, 0)
+
+    def item(name, hours_ago, label="auto"):
+        return {"name": name, "folder": "world", "label": label, "created": now - datetime.timedelta(hours=hours_ago)}
+
+    items = [item(f"a{h}", h) for h in (1, 2, 3, 4, 30, 31, 55, 80, 200)] + [item("m", 500, "manual")]
+    doomed = {entry["name"] for entry in backups_core.to_prune(items, keep_recent=3, keep_daily=3, now=now)}
+    # kept: newest 3 (a1 a2 a3) + newest of each of the last 3 days (a1 today, a30 yesterday, a55 two days ago)
+    assert doomed == {"a4", "a31", "a80", "a200"}
+    assert "m" in {entry["name"] for entry in backups_core.to_prune(items, 3, 3, prune_manual=True, now=now)}
+
+
+def test_schedule_backs_up_only_a_changing_world(fake_server):
+    sdir = _world_dir()
+    services = app.state.services
+    app.state.runtime.backup_dirty = False
+    now = time.time()
+    services.backup_tick(now)
+    assert backups_core.list_backups(sdir) == []  # stopped and unchanged: nothing to do
+    _start()
+    fake_server[0].send = lambda command: (fake_server[0].sent.append(command),
+                                           command == "save-all flush" and services.append_console_line(
+                                               "[12:00:00] [Server thread/INFO]: Saved the game"))
+    services.backup_tick(now)
+    [first] = backups_core.list_backups(sdir)
+    assert first["label"] == "auto"
+    assert fake_server[0].sent == ["save-off", "save-all flush", "save-on"]
+    services.backup_tick(now + 60)
+    assert len(backups_core.list_backups(sdir)) == 1  # not due yet
+    services.backup_tick(now + 6 * 3600 + 5)
+    assert len(backups_core.list_backups(sdir)) == 2
+
+
+def test_manual_backup_is_labelled_and_survives_pruning():
+    sdir = _world_dir()
+    config_store.save({"backup_keep_recent": 1, "backup_keep_daily": 0})
+    manual = client.post("/api/server/backup", auth=AUTH).json()
+    assert manual["ok"] and manual["archive"].endswith("-manual.zip")
+    services = app.state.services
+    services.safety_backup("update")
+    time.sleep(1.1)
+    services.safety_backup("update")
+    names = [item["name"] for item in backups_core.list_backups(sdir)]
+    assert sum(name.endswith("-manual.zip") for name in names) == 1
+    assert sum("auto-pre-update" in name for name in names) == 1  # keep_recent=1 pruned the older one
+    listing = client.get("/api/server/backups", auth=AUTH).json()
+    assert listing["schedule"]["keep_recent"] == 1 and listing["total_size"] > 0
+    assert {item["label"] for item in listing["items"]} == {"manual", "auto-pre-update"}
+
+
+def test_low_disk_skips_the_backup_and_alerts(monkeypatch, sent_emails):
+    _world_dir()
+    client.post("/api/server/backup", auth=AUTH)
+    from collections import namedtuple
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(webapp_module_backups.shutil, "disk_usage", lambda path: usage(10, 10, 0))
+    response = client.post("/api/server/backup", auth=AUTH)
+    assert response.status_code == 500 and "Not enough free space" in response.json()["detail"]
+    assert _wait_until(lambda: any("Backup failed" in subject for subject, _ in sent_emails))
+
+
+def test_deleting_a_world_makes_a_safety_backup_first(monkeypatch):
+    sdir = _world_dir("old-world")
+    _world_dir("world")
+    response = client.delete("/api/worlds/old-world", auth=AUTH)
+    assert response.status_code == 200
+    assert [item["label"] for item in backups_core.list_backups(sdir)] == ["auto-pre-delete"]
+    _world_dir("other")
+    monkeypatch.setattr(backups_core, "create", lambda *args: (_ for _ in ()).throw(OSError(28, "disk full")))
+    response = client.delete("/api/worlds/other", auth=AUTH)
+    assert response.status_code == 500 and os.path.isdir(os.path.join(sdir, "other"))
+
+
+def test_backup_settings_are_validated():
+    assert client.put("/api/config", auth=AUTH, json={"backup_interval_hours": 500}).status_code == 422
+    assert client.put("/api/config", auth=AUTH, json={"backup_keep_recent": 0}).status_code == 422
+    assert client.put("/api/config", auth=AUTH, json={"backup_interval_hours": 12}).status_code == 200
+
+
+def test_dashboard_scripts_do_not_redefine_each_others_globals():
+    # The scripts share one global scope: a second top-level function/const with the same name
+    # silently replaces the first (as nearly happened with formatBytes).
+    names = re.findall(r"(?m)^(?:async function|function|const|let)\s+([A-Za-z_$][\w$]*)", _dashboard_js())
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    assert duplicates == [], duplicates

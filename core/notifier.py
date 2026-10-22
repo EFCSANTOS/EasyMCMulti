@@ -37,6 +37,7 @@ DEFAULTS = {
     "notify_tunnels": True,
     "notify_updates": True,
     "notify_security": True,
+    "notify_backup": True,
     "heartbeat_url": "",
     # Discord webhooks (secret URLs) and what the friends channel gets.
     "discord_owner_url": "",

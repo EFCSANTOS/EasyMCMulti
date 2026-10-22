@@ -63,6 +63,11 @@ function bindEvents() {
   on('world-upload-input', 'change', (event, input) => uploadWorld(input));
   on('world-create-form', 'submit', (event) => createWorld(event));
   bindPlayers();
+  on('backup-schedule-form', 'submit', (event) => {
+    event.preventDefault();
+    saveBackupSchedule(event.submitter);
+  });
+  on('backup-prune-manual', 'change', () => saveBackupSchedule(null));
   on('alerts-discord-owner-remove', 'click', (event, button) => removeWebhook('discord_owner_url', button));
   on('alerts-discord-friends-remove', 'click', (event, button) => removeWebhook('discord_friends_url', button));
   on('modpack-export-button', 'click', (event, button) => exportModpack(button));
