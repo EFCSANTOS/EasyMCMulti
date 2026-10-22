@@ -25,6 +25,9 @@ so a power cut never leaves a truncated file. The previous version stays as `<fi
 (`fsutil.read_json`) fall back to it when the main file is damaged, rewrite the main file from it
 and log `[config] <file> was damaged; restored the previous copy.` to the console.
 
+**Mod pack cache** (FEAT-04, server dir): `ez-modpack.mrpack` (the last built pack) and
+`ez-modpack.json` (summary + `fingerprint`); safe to delete, rebuilt on the next export.
+
 **Server player lists** (written by Minecraft, edited by `core/players.py` while the server is
 stopped): `whitelist.json` `[{uuid, name}]`, `ops.json` `[{uuid, name, level, bypassesPlayerLimit}]`,
 `banned-players.json` `[{uuid, name, created, source, expires, reason}]`, `banned-ips.json`

@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-132 passed (~25 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+139 passed (~24 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Patching
@@ -56,6 +56,10 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Mod pack (FEAT-04, `fabric_server` fixture fakes `modpack._lookup`/`_projects`): index format,
+  hashes and env; server-only mod excluded; unknown jar in `overrides/mods/`; cached until a jar
+  changes; Modrinth down → all bundled; Paper/empty → 400; loader version detection for
+  Fabric/Forge/NeoForge; friends download it signed out from the status page.
 - Status page (FEAT-03, `offline_network` fixture fakes `netinfo.public_ip`/`lan_ip`): off by
   default (404, owner API needs auth); only public fields and no secrets/emails/LAN IP/token in page
   or JSON; show-LAN/show-names switches; PlayIt address preferred, public IP fallback; regenerate and

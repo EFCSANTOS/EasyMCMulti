@@ -11,9 +11,9 @@ import secrets
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
-from core import config_store, netinfo, paths, playit
+from core import config_store, netinfo, playit
 from webapp import common
 from webapp.services import Services, require_auth
 
@@ -39,13 +39,6 @@ def register(app: FastAPI, s: Services) -> None:
         public = netinfo.public_ip()
         return _with_port(public, int(config.get("server_port", DEFAULT_MC_PORT))) if public != "unavailable" else ""
 
-    def client_mods_needed(config: dict[str, Any]) -> bool:
-        loader = str(config.get("loader", "vanilla"))
-        if loader not in CLIENT_MOD_LOADERS:
-            return False
-        folder = paths.content_folder(loader, common._server_dir_for_config(config))
-        return bool(folder and os.path.isdir(folder) and any(name.endswith(".jar") for name in os.listdir(folder)))
-
     def public_status(config: dict[str, Any]) -> dict[str, Any]:
         """Everything the public page shows, and nothing else."""
         loader = str(config.get("loader", "vanilla"))
@@ -60,8 +53,9 @@ def register(app: FastAPI, s: Services) -> None:
             "address": join_address(config),
             "version": str(config.get("version", "")),
             "loader": LOADER_LABELS.get(loader, loader),
-            "mods_required": client_mods_needed(config),
-            "modpack_url": "",
+            "mods_required": s.modpack_available(),
+            # Relative to the status page; FEAT-04 builds the pack on first download.
+            "modpack_url": "modpack.mrpack" if s.modpack_available() else "",
         }
         if config.get("status_page_show_names", True):
             data["player_names"] = snapshot["player_names"] if running else []
@@ -76,8 +70,13 @@ def register(app: FastAPI, s: Services) -> None:
         status = public_status(config)
         lines = ["Join our Minecraft server!"]
         lines.append(f"Address: {status['address'] or '(set up PlayIt on the Remote access page)'}")
-        version = f"{status['loader']} {status['version']}"
-        lines.append(f"Version: {version}" + (" (mods required: ask me for the mod list)" if status["mods_required"] else ""))
+        version = f"Version: {status['loader']} {status['version']}"
+        if status["mods_required"]:
+            version += (" (mods required: get the mod pack from the status page)" if page_url
+                        else " (mods required: ask me for the mod pack)")
+        elif str(config.get("loader", "vanilla")) not in CLIENT_MOD_LOADERS:
+            version += " (no mods needed)"
+        lines.append(version)
         if page_url:
             lines.append(f"Status page: {page_url}")
         return "\n".join(lines)
@@ -141,3 +140,13 @@ def register(app: FastAPI, s: Services) -> None:
     @app.get("/s/{token}/status.json")
     def public_status_json(token: str) -> dict[str, Any]:
         return public_status(checked_token(token))
+
+    @app.get("/s/{token}/modpack.mrpack")
+    def public_modpack(token: str) -> FileResponse:
+        checked_token(token)
+        try:
+            path, summary = s.ensure_modpack()
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Not found.") from None
+        return FileResponse(path, media_type="application/x-modrinth-modpack+zip", filename=summary["filename"],
+                            headers={"Cache-Control": "no-store"})
