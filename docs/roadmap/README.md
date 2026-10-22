@@ -29,7 +29,6 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 | ID | Title | Priority | Effort | Depends on |
 |---|---|---|---|---|
 | [FEAT-07](features/FEAT-07-mod-update-checker.md) | Mod and plugin update checker | P2 | M | — |
-| [FEAT-08](features/FEAT-08-crash-diagnosis-and-logs.md) | Crash diagnosis and log viewer | P2 | M | — |
 | [FEAT-09](features/FEAT-09-version-upgrade-world-migration.md) | Version upgrade with world migration | P2 | M | FEAT-01, FEAT-07 |
 | [FEAT-10](features/FEAT-10-friend-accounts-with-roles.md) | Friend accounts with limited permissions | P2 | M | FIX-01, FIX-05 |
 | [FEAT-11](features/FEAT-11-live-console-and-chat.md) | Live console, command history and chat box | P2 | S | FIX-01 |
@@ -51,7 +50,7 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
    FIX-02 (background installs), FIX-03 (atomic writes), FIX-04 (lifecycle lock).
 2. **Friends can join without the owner** — done: FIX-05, FEAT-02, FEAT-03, FEAT-04, FEAT-05
    (FEAT-04's optional "recommended client mods" list was left for later).
-3. **Hands-off running** — FEAT-08, FEAT-07 (FEAT-01 and FEAT-06 have shipped).
+3. **Hands-off running** — FEAT-07 (FEAT-01, FEAT-06 and FEAT-08 have shipped).
 4. **Polish** — everything else, picking by what the group actually asks for.
 QUAL-01 (split `app.py` into routers and page modules) has shipped, so new routes go in `webapp/routes/`.
 

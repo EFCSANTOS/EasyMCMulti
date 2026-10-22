@@ -1,0 +1,2 @@
+[12:00:02] [main/ERROR]: Failed to start the minecraft server
+net.minecraft.world.level.storage.LevelStorageSource$LevelStorageAccess: /server/world/session.lock: already locked (possibly by other Minecraft instance?)
