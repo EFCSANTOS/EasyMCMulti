@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 
-from core import config_store, downloaders, java_manager
+from core import config_store, downloaders, java_manager, players
 from webapp import common
 from webapp.services import Services, require_auth
 from webapp.validation import require_command, require_player, validate_config_update
@@ -207,6 +207,9 @@ def register(app: FastAPI, s: Services) -> None:
 
         def on_output(line: str) -> None:
             runtime.track_player_event(line)
+            refused = players.rejected_name(line)
+            if refused:
+                runtime.note_player(refused, rejected=True)
             append_console_line(line)
 
         target_dir = ensure_server_installed(config)

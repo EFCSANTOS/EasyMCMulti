@@ -29,7 +29,6 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 | ID | Title | Priority | Effort | Depends on |
 |---|---|---|---|---|
 | [FEAT-01](features/FEAT-01-scheduled-backups-and-retention.md) | Scheduled backups and retention | P1 | M | FIX-03 |
-| [FEAT-02](features/FEAT-02-whitelist-and-ops-manager.md) | Whitelist and operators manager | P1 | M | FIX-05 |
 | [FEAT-03](features/FEAT-03-friend-invite-and-status-page.md) | Friend invite card and public status page | P1 | M | — |
 | [FEAT-04](features/FEAT-04-client-modpack-export.md) | Client modpack export (`.mrpack`) | P1 | M | — |
 | [FEAT-05](features/FEAT-05-discord-webhook-notifications.md) | Discord webhook notifications | P1 | S | — |
@@ -55,7 +54,7 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 ## Suggested order
 1. **Make remote access safe and installs reliable** — done: FIX-01 (login sessions + lockout),
    FIX-02 (background installs), FIX-03 (atomic writes), FIX-04 (lifecycle lock).
-2. **Friends can join without the owner** — FEAT-02, FEAT-03, FEAT-04, FEAT-05 (FIX-05 has shipped).
+2. **Friends can join without the owner** — FEAT-03, FEAT-04, FEAT-05 (FIX-05 and FEAT-02 have shipped).
 3. **Hands-off running** — FEAT-01, FEAT-06, FEAT-08, FEAT-07.
 4. **Polish** — everything else, picking by what the group actually asks for.
 QUAL-01 (split `app.py` into routers and page modules) has shipped, so new routes go in `webapp/routes/`.

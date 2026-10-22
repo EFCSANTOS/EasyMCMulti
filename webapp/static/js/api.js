@@ -1,4 +1,4 @@
-// EZ Minecraft dashboard, part 1 of 6: Shared state, auth/HTTP (fetchJson), toasts and list helpers.
+// EZ Minecraft dashboard, part 1 of 7: Shared state, auth/HTTP (fetchJson), toasts and list helpers.
 // Plain scripts that share one global scope, loaded in order by webapp/pages/layout.py::SCRIPTS.
 
 const appState = {

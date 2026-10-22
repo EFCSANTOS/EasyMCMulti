@@ -3,11 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import re
 import threading
+import time
 from typing import Any
 
 # Vanilla/Paper/Fabric/Forge log format: "[12:00:00] [Server thread/INFO]: Steve joined the game".
 # Requiring the name right after "]: " keeps chat lines ("]: <Steve> ...") from matching.
 _PLAYER_EVENT = re.compile(r"\]: (\w{1,16}) (joined|left) the game$")
+# Names shown under "Recently seen" on the Players page (joined, or refused by the whitelist).
+RECENT_PLAYERS_LIMIT = 20
 
 
 @dataclass
@@ -20,6 +23,8 @@ class RuntimeState:
     install_progress: float = 0.0
     install_message: str = ""
     online_players: set[str] = field(default_factory=set)
+    # name -> {"last_seen": epoch seconds, "rejected": refused by the whitelist}; in memory only.
+    recent_players: dict[str, dict[str, Any]] = field(default_factory=dict)
     lan_address: str = "unknown"
     public_address: str | None = None
     playit_state: str = "unknown"
@@ -76,6 +81,20 @@ class RuntimeState:
                 self.online_players.add(name)
             else:
                 self.online_players.discard(name)
+        if event == "joined":
+            self.note_player(name, rejected=False)
+
+    def note_player(self, name: str, rejected: bool) -> None:
+        """Remember a player who joined or was refused, newest first, at most RECENT_PLAYERS_LIMIT."""
+        with self.lock:
+            self.recent_players.pop(name, None)
+            self.recent_players[name] = {"last_seen": time.time(), "rejected": rejected}
+            while len(self.recent_players) > RECENT_PLAYERS_LIMIT:
+                self.recent_players.pop(next(iter(self.recent_players)))
+
+    def recent(self) -> list[dict[str, Any]]:
+        with self.lock:
+            return [{"name": name, **info} for name, info in reversed(self.recent_players.items())]
 
     def clear_players(self) -> None:
         with self.lock:

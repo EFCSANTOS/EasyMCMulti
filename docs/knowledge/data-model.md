@@ -25,6 +25,11 @@ so a power cut never leaves a truncated file. The previous version stays as `<fi
 (`fsutil.read_json`) fall back to it when the main file is damaged, rewrite the main file from it
 and log `[config] <file> was damaged; restored the previous copy.` to the console.
 
+**Server player lists** (written by Minecraft, edited by `core/players.py` while the server is
+stopped): `whitelist.json` `[{uuid, name}]`, `ops.json` `[{uuid, name, level, bypassesPlayerLimit}]`,
+`banned-players.json` `[{uuid, name, created, source, expires, reason}]`, `banned-ips.json`
+`[{ip, created, source, expires, reason}]` — in each server dir (workflows.md §21).
+
 ## Config profile (`core/config_store`, schema `webapp/common.py::_default_config`)
 | Key | Type | Default |
 |---|---|---|

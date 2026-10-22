@@ -29,7 +29,7 @@
   `/health`), `system` (metrics, status, console history, config, versions), `server` (install +
   lifecycle jobs — `start_lifecycle_job`, `busy_error`, `launch_server`, `launch_when_free`,
   `install_server`, `request_stop`, `stop_and_wait`, `restart_job`, `server_running` — commands,
-  admin), `backups`, `mods` (+ Modrinth), `worlds`, `remote` (PlayIt + Cloudflare), `updates`
+  admin), `backups`, `mods` (+ Modrinth), `worlds`, `players` (whitelist/ops/bans), `remote` (PlayIt + Cloudflare), `updates`
   (self-update + alert settings).
 - `background.py` — `run_in_background`, `autostart`, `shutdown`.
 - `pages/` — `widgets.py` (`_ICON_PATHS`, `_icon`, `_copy_button`, `_switch`), `sections_main.py`
