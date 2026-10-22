@@ -75,6 +75,7 @@ function bindEvents() {
   on('world-create-form', 'submit', (event) => createWorld(event));
   bindPlayers();
   bindIdentity();
+  on('storage-refresh-button', 'click', () => loadStorage(true));
   on('mod-updates-check', 'click', (event, button) => checkModUpdates(button));
   on('mod-updates-all', 'click', (event, button) => applyModUpdates(null, button));
   on('mod-updates-rollback', 'click', (event, button) => rollbackModUpdates(button));
@@ -115,7 +116,7 @@ async function boot() {
   loadServerIcon();
   await loadStatus();
   await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(), loadInvite(), loadModpack(),
-    loadDiagnosis(), loadLogs(), loadModUpdates(), loadProperties(),
+    loadDiagnosis(), loadLogs(), loadModUpdates(), loadProperties(), loadStorage(),
     startConsole()]);
   initModBrowser(); // after loadInstalledMods so cards can show "Installed"
 

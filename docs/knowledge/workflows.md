@@ -562,6 +562,20 @@ Core details (`core/playit.py`):
   null removes) → `_server_properties_from_config` writes them on the next start, managed keys
   winning.
 
+## 30. Storage use and cleanup (FEAT-15)
+- `core/storage.py::usage(active_dir)` (cached 5 min; `?fresh=true` re-measures) walks the data
+  folder with `os.scandir`: per server dir its own size (active ↔ "not in use; last used <date>"
+  from `logs/latest.log`/`server.properties` mtime), its backups (info, managed on the Backups page),
+  `*-pre-restore-*` folders, `installer.jar`, `logs/*.log.gz` older than 30 days, each `java/jre-N`
+  (deletable when no server dir's version needs Java N), and top-level files (tools, settings).
+  `disk()` = `shutil.disk_usage` + `low` (< 2 GB or < 10 % free).
+- `POST /api/storage/delete {id}`: 409 while running or busy; the id is looked up in a fresh scan
+  (unknown → 404, not deletable — e.g. the active server dir or backups → 409), so clients name items,
+  never paths.
+- Scheduler `storage_tick`: low space → one `backup`-category alert ("Storage almost full") until
+  space recovers. Backups page → Storage card (free/total, list, Delete with a confirm that says what
+  is lost).
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

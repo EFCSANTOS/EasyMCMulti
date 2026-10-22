@@ -73,6 +73,8 @@ class RuntimeState:
     mod_updates: list[dict[str, Any]] = field(default_factory=list)
     mod_updates_at: float = 0.0
     mod_updates_notified: str = ""
+    # FEAT-15: a low-space alert was sent; cleared once there is enough space again.
+    low_space_alerted: bool = False
     crash_times: list[float] = field(default_factory=list)
     # Outcome of the last background lifecycle job (create/start/restart/world switch), for the UI.
     operation_error: str = ""
