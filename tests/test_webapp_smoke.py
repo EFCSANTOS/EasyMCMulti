@@ -2749,3 +2749,24 @@ def test_old_jars_are_removed_after_the_server_ran_fine(outdated_mods, fake_serv
 
 def test_vanilla_has_no_mod_updates():
     assert client.post("/api/mods/updates/check", auth=AUTH).status_code == 400
+
+
+# ---------- GET /api/status is a pure read (FIX-06) ----------
+def test_status_reflects_config_without_writing_runtime(offline_network):
+    runtime = app.state.runtime
+    runtime.loader, runtime.version, runtime.lan_address, runtime.public_address = "marker", "0", "unset", None
+    config_store.save({"loader": "paper", "version": "1.21.4"})
+    first = client.get("/api/status", auth=AUTH).json()
+    config_store.save({"loader": "fabric", "version": "1.21.1"})
+    second = client.get("/api/status", auth=AUTH).json()
+    assert (first["loader"], first["version"]) == ("paper", "1.21.4")
+    assert (second["loader"], second["version"]) == ("fabric", "1.21.1")
+    assert second["lan_address"] == "192.168.1.50" and second["public_address"] == "203.0.113.9"
+    assert second["playit"]["state"] in {"not-configured", "configured", "stopped", "running"}
+    assert (runtime.loader, runtime.version, runtime.lan_address, runtime.public_address) == ("marker", "0", "unset", None)
+
+
+def test_status_handler_has_no_runtime_assignments():
+    source = open(os.path.join(os.path.dirname(webapp_module.__file__), "routes", "system.py"), encoding="utf-8").read()
+    handler = source[source.index("def status_payload"):source.index('@app.get("/api/console")')]
+    assert not re.search(r"runtime\.\w+\s*=[^=]", handler)

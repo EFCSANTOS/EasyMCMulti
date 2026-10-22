@@ -132,9 +132,12 @@ forge/neoforge MC versions derived from promos/Maven, sorted by `_version_key` d
 NeoForge→MC mapping `_neoforge_to_mc`: `21.1.x`→`1.21.1`, `21.0.x`→`1.21`, major ≥25 → `<a>.<b>`.
 
 ## 9. Status
-`GET /api/status`: refresh loader/version from config; `netinfo.lan_ip()` / `public_ip()` (cached
-5 min); `_playit_state` → `"running"` (agent alive) / `"configured"` / `"not-configured"`; address
-fallback to public IP; returns `runtime.snapshot()` (PlayIt nested under `playit.{state,address}`).
+`GET /api/status` → `system.py::status_payload(config)`, a **pure read** (FIX-06): `runtime.snapshot()`
+with loader/version from the config, `netinfo.lan_ip()` / `public_ip()` (cached 5 min), and
+`playit.{state, address}` (`_playit_state` → `"running"` (agent alive) / `"configured"` /
+`"not-configured"`; address falls back to the public IP) merged into the returned dict — nothing
+is assigned to `runtime`. Loader/version are stored on `runtime` where they change (config save,
+create, start).
 Browser polls it every 5 s; displayed join addresses append the port from the loaded config.
 The Remote page additionally calls `GET /api/playit/status` for the real tunnel address.
 

@@ -23,7 +23,7 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 ## Fixes (correctness, security, robustness)
 | ID | Title | Priority | Effort | Depends on |
 |---|---|---|---|---|
-| [FIX-06](fixes/FIX-06-status-endpoint-side-effects.md) | Make `GET /api/status` a pure read | P2 | S | — |
+| — | All fixes have shipped (FIX-01 … FIX-06). | | | |
 
 ## Features
 | ID | Title | Priority | Effort | Depends on |

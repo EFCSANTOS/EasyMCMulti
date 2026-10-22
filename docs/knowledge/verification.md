@@ -88,7 +88,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
   `demo-secret` via `test_playit_start_route_starts_the_tunnel`) → autouse `isolated_data_dir` fixture.
 
 ## Documentation vs implementation conflicts (open)
-1. **`/api/status` mutates runtime** (sets loader/version/lan/public/playit) on a GET; side-effectful read.
+1. ~~`/api/status` mutates runtime~~ → fixed by FIX-06: a pure read that merges derived values.
 2. **Browser never uses `/ws/console`** — browsers cannot set `Authorization` on a WebSocket; the
    route is only usable by non-browser clients (and the test). The GUI polls REST instead.
 ## Security

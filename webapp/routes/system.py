@@ -22,17 +22,29 @@ def register(app: FastAPI, s: Services) -> None:
     def system_metrics(_: str = Depends(require_auth)) -> dict[str, Any]:
         return common._system_metrics_snapshot()
 
+    def status_payload(config: dict[str, Any]) -> dict[str, Any]:
+        """The runtime snapshot plus values derived from the config, the network and PlayIt.
+
+        A pure read (FIX-06): polling it never changes `runtime`, so behaviour doesn't depend on
+        whether a dashboard tab is open. State that must be kept is stored where it changes
+        (config save, server start, PlayIt start/stop).
+        """
+        payload = runtime.snapshot()
+        public_address = netinfo.public_ip()
+        playit_cfg = playit.load_config()
+        payload.update(
+            loader=str(config.get("loader", runtime.loader)),
+            version=str(config.get("version", runtime.version)),
+            lan_address=netinfo.lan_ip(),
+            public_address=public_address,
+            playit={"state": common._playit_state(runtime, playit_cfg),
+                    "address": playit_cfg.get("address") or public_address},
+        )
+        return payload
+
     @app.get("/api/status")
     def status(_: str = Depends(require_auth)) -> dict[str, Any]:
-        config = common._effective_config()
-        runtime.loader = str(config.get("loader", runtime.loader))
-        runtime.version = str(config.get("version", runtime.version))
-        runtime.lan_address = netinfo.lan_ip()
-        runtime.public_address = netinfo.public_ip()
-        playit_cfg = playit.load_config()
-        runtime.playit_state = common._playit_state(runtime, playit_cfg)
-        runtime.playit_address = playit_cfg.get("address") or runtime.public_address
-        return runtime.snapshot()
+        return status_payload(common._effective_config())
 
     @app.get("/api/console")
     def console_history(_: str = Depends(require_auth)) -> dict[str, Any]:
