@@ -288,6 +288,46 @@ function initModBrowser() {
   browseMods(true);
 }
 
+// ---------- Storage ----------
+const STORAGE_KINDS = { server: 'Server folder', 'pre-restore': 'Old world copy', installer: 'Installer',
+  logs: 'Old logs', backups: 'Backups', java: 'Java runtime', other: 'Tools and settings' };
+
+function renderStorage(data) {
+  const list = document.getElementById('storage-list');
+  if (!list) return;
+  const { free, total, low } = data.disk;
+  const freeText = document.getElementById('storage-free');
+  freeText.textContent = `${formatBytes(free)} free of ${formatBytes(total)} (${Math.round((free / total) * 100)}%). `
+    + `This app uses ${formatBytes(data.total)}.${low ? ' Running low: free some space so the world can save safely.' : ''}`;
+  freeText.classList.toggle('hint-error', Boolean(low));
+  renderItems(list, data.items || [], (item) => {
+    const title = el('div', 'item-title', item.name);
+    if (item.active) title.appendChild(el('span', 'badge badge-live', 'In use'));
+    const button = item.deletable ? rowButton('Delete', 'btn-danger', (b) => deleteStorageItem(item, b)) : null;
+    return itemRow(title, item.detail, `${STORAGE_KINDS[item.kind] || item.kind} · ${formatBytes(item.size)}`, button);
+  }, 'Nothing stored yet.');
+}
+
+async function loadStorage(fresh = false) {
+  if (!document.getElementById('storage-list')) return;
+  try {
+    renderStorage(await fetchJson(fresh ? '/api/storage?fresh=true' : '/api/storage'));
+  } catch (error) {
+    setStatus(`Storage unavailable: ${error.message}`, 'error');
+  }
+}
+
+async function deleteStorageItem(item, button) {
+  const warning = item.kind === 'server'
+    ? '\n\nThis deletes the server and its worlds and backups. Download or back up anything you want to keep first.' : '';
+  if (!window.confirm(`Delete ${item.name}? This frees ${formatBytes(item.size)} and can't be undone.${warning}`)) return;
+  await runAction(button, null, async () => {
+    const data = await fetchJson('/api/storage/delete', 'POST', { id: item.id });
+    renderStorage(data);
+    return data.message;
+  });
+}
+
 // ---------- Mod updates ----------
 function renderModUpdates(data) {
   const list = document.getElementById('mod-updates-list');

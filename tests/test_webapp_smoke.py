@@ -2949,3 +2949,71 @@ def test_managed_property_list_matches_the_settings_form():
     text = client.get("/dashboard/advanced").text
     for element_id in ("server-icon-input", "motd-preview", "properties-list", "properties-save-button"):
         assert f'id="{element_id}"' in text
+
+
+# ---------- Storage use and cleanup (FEAT-15) ----------
+from core import storage as storage_core  # noqa: E402
+
+
+@pytest.fixture
+def storage_tree():
+    """Active vanilla 1.21.7 server + an unused Fabric 1.20.1 one + two Java runtimes."""
+    active = common_module._server_dir_for_config(common_module._effective_config())  # vanilla-1.21.7
+    old = os.path.join(paths.SERVERS_DIR, "fabric-1.20.1")
+
+    def write(path, size):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(b"x" * size)
+
+    write(os.path.join(active, "world", "level.dat"), 1000)
+    write(os.path.join(active, "world-backup-world-20261001-100000-auto.zip"), 500)
+    write(os.path.join(active, "world-pre-restore-20260901-120000", "level.dat"), 300)
+    write(os.path.join(active, "installer.jar"), 200)
+    write(os.path.join(active, "logs", "2026-01-01-1.log.gz"), 50)
+    os.utime(os.path.join(active, "logs", "2026-01-01-1.log.gz"), (1, 1))
+    write(os.path.join(old, "world", "level.dat"), 4000)
+    write(os.path.join(paths.JAVA_DIR, "jre-21", "bin", "java"), 700)
+    write(os.path.join(paths.JAVA_DIR, "jre-8", "bin", "java"), 600)
+    return {"active": active, "old": old}
+
+
+def test_storage_usage_breaks_down_the_data_folder(storage_tree):
+    data = client.get("/api/storage?fresh=true", auth=AUTH).json()
+    items = {item["id"]: item for item in data["items"]}
+    assert items["server:vanilla-1.21.7"]["active"] and not items["server:vanilla-1.21.7"]["deletable"]
+    assert items["server:vanilla-1.21.7"]["size"] == 1000
+    assert items["server:fabric-1.20.1"]["deletable"] and items["server:fabric-1.20.1"]["size"] == 4000
+    assert items["backups:vanilla-1.21.7"]["size"] == 500 and not items["backups:vanilla-1.21.7"]["deletable"]
+    assert items["prerestore:vanilla-1.21.7/world-pre-restore-20260901-120000"]["size"] == 300
+    assert items["installer:vanilla-1.21.7"]["size"] == 200 and items["oldlogs:vanilla-1.21.7"]["size"] == 50
+    assert not items["java:jre-21"]["deletable"]  # 1.21.7 needs Java 21
+    assert items["java:jre-8"]["deletable"]  # nobody needs Java 8 here (1.20.1 needs 17)
+    assert data["disk"]["free"] > 0 and data["total"] >= 1000 + 4000 + 500 + 300 + 200 + 50 + 700 + 600
+
+
+def test_storage_cleanup_is_safe(storage_tree, fake_server):
+    assert client.post("/api/storage/delete", auth=AUTH, json={"id": "server:vanilla-1.21.7"}).status_code == 409
+    assert client.post("/api/storage/delete", auth=AUTH, json={"id": "server:../../etc"}).status_code == 404
+    assert client.post("/api/storage/delete", auth=AUTH, json={"id": "backups:vanilla-1.21.7"}).status_code == 409
+    response = client.post("/api/storage/delete", auth=AUTH, json={"id": "server:fabric-1.20.1"})
+    assert response.status_code == 200 and "freed" in response.json()["message"]
+    assert not os.path.exists(storage_tree["old"])
+    assert client.post("/api/storage/delete", auth=AUTH, json={"id": "java:jre-8"}).status_code == 200
+    assert client.post("/api/storage/delete", auth=AUTH, json={"id": "oldlogs:vanilla-1.21.7"}).status_code == 200
+    assert os.path.exists(os.path.join(storage_tree["active"], "world", "level.dat"))
+    _start()
+    assert client.post("/api/storage/delete", auth=AUTH, json={"id": "installer:vanilla-1.21.7"}).status_code == 409
+
+
+def test_low_space_alert_is_sent_once(monkeypatch, sent_emails):
+    app.state.runtime.low_space_alerted = False
+    monkeypatch.setattr(storage_core, "disk", lambda path=None: {"total": 100 * 2**30, "free": 2**29, "low": True})
+    app.state.services.storage_tick()
+    app.state.services.storage_tick()
+    assert _wait_until(lambda: any("Storage almost full" in s for s, _ in sent_emails))
+    time.sleep(0.1)
+    assert sum("Storage almost full" in s for s, _ in sent_emails) == 1
+    monkeypatch.setattr(storage_core, "disk", lambda path=None: {"total": 100 * 2**30, "free": 50 * 2**30, "low": False})
+    app.state.services.storage_tick()
+    assert app.state.runtime.low_space_alerted is False

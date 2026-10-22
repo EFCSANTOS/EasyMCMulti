@@ -361,7 +361,7 @@ _SECTION_ALERTS = f"""
               {_switch("alerts-notify-tunnels", "Tunnel problems", "PlayIt or the dashboard link stopped unexpectedly.", True)}
               {_switch("alerts-notify-updates", "Updates", "A new version is available, or an update failed.", True)}
               {_switch("alerts-notify-security", "Sign-in lockouts", "Someone entered a wrong dashboard password too many times.", True)}
-              {_switch("alerts-notify-backup", "Backup problems", "A scheduled or safety backup failed, or storage is running out.", True)}
+              {_switch("alerts-notify-backup", "Backups and storage", "A backup failed, or the device is running out of space.", True)}
             </div>
             <h3 class="subhead">Discord</h3>
             <p class="hint">In your Discord server: channel settings → Integrations → Webhooks → New Webhook → Copy
