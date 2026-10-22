@@ -530,6 +530,19 @@ Core details (`core/playit.py`):
   `--series-1`, 4px rounded tops, 2px gaps, hover tooltip kept inside the card) and per-player rows
   (Online badge, playtime, sessions, last/first seen).
 
+## 28. Performance presets and JVM flags (FEAT-13)
+- `downloaders.jvm_flags(ram_mb, is_phone)`: Aikar's G1 flags (without the obsolete
+  `G1RSetUpdatingPauseTimePercent`); > 12 GB heap → the large-heap sizing (16M regions);
+  `-XX:+AlwaysPreTouch` only off phones. `launch_args(..., extra_flags)` puts them after `-Xms/-Xmx`.
+- `launch_server`: flags when `jvm_preset_flags` (default True), then `shlex.split(jvm_extra_args)`.
+  `jvm_extra_args` validation: one line, ≤ 500 chars, only `-X…`/`-D…` tokens (no `-jar`, `@argfile`
+  or program names) → else 422.
+- `GET /api/system/host` → `{ram_mb, phone}`. Server setup → Performance card: presets Phone (2 GB,
+  view 6, simulation 4), Balanced (3 GB, 10/8), PC with many mods (6 GB, 10/8), each capped at the
+  device's safe maximum (≈50 % of RAM on a phone, ≈70 % on a PC, in 256 MB steps) and saved with
+  `PUT /api/config`; RAM advice under the memory input ("Recommended: min–max", red above the max;
+  modded loaders recommend ≥ 3 GB); the flags switch; extra options; a Chunky tip on Paper.
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

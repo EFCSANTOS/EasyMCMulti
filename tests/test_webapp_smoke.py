@@ -2855,3 +2855,40 @@ def test_server_output_feeds_the_activity_log(fake_server, monkeypatch):
     data = client.get("/api/players/activity", auth=AUTH).json()
     assert data["players"][0]["online"] is False
     assert 'id="activity-chart"' in client.get("/dashboard/players").text
+
+
+# ---------- Performance presets and JVM flags (FEAT-13) ----------
+def test_jvm_flags_variants():
+    normal = downloaders.jvm_flags(4096)
+    assert "-XX:+UseG1GC" in normal and "-XX:+AlwaysPreTouch" in normal and "-XX:G1HeapRegionSize=8M" in normal
+    assert "-XX:+AlwaysPreTouch" not in downloaders.jvm_flags(2048, is_phone=True)
+    assert "-XX:G1HeapRegionSize=16M" in downloaders.jvm_flags(16384)
+    args = downloaders.launch_args("vanilla", "java", "/srv", 2048, ["-XX:+UseG1GC"])
+    assert args[:5] == ["java", "-Xms2048M", "-Xmx2048M", "-XX:+UseG1GC", "-jar"]
+
+
+def test_launch_uses_flags_switch_and_extra_args(fake_server, monkeypatch):
+    calls = []
+    monkeypatch.setattr(downloaders, "launch_args", lambda loader, java, sdir, ram, flags=(): calls.append(list(flags)) or ["java"])
+    config_store.save({"jvm_extra_args": "-XX:+UseStringDeduplication -Dmy.flag=yes"})
+    _start()
+    assert "-XX:+UseG1GC" in calls[-1] and calls[-1][-2:] == ["-XX:+UseStringDeduplication", "-Dmy.flag=yes"]
+    client.post("/api/server/stop", auth=AUTH)
+    fake_server[0].exit(0)
+    config_store.save({"jvm_preset_flags": False, "jvm_extra_args": ""})
+    _start()
+    assert calls[-1] == []
+
+
+def test_extra_jvm_args_are_validated():
+    for bad in ("-jar evil.jar", "@argfile.txt", "-Xmx1G\nstop", "nogui", '-Dunterminated="x'):
+        assert client.put("/api/config", auth=AUTH, json={"jvm_extra_args": bad}).status_code == 422, bad
+    assert client.put("/api/config", auth=AUTH, json={"jvm_extra_args": "-XX:+UseStringDeduplication"}).status_code == 200
+
+
+def test_host_info_and_performance_card():
+    info = client.get("/api/system/host", auth=AUTH).json()
+    assert set(info) == {"ram_mb", "phone"}
+    text = client.get("/dashboard/setup").text
+    for marker in ('data-preset="phone"', 'id="jvm-preset-flags"', 'id="ram-advice"', 'id="paper-pregen-hint"'):
+        assert marker in text

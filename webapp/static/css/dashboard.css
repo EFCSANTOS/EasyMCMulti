@@ -1093,6 +1093,11 @@ select[aria-invalid="true"] {
   gap: 0.5rem;
 }
 
+/* RAM advice when the value is too high for the device. */
+.hint.hint-error {
+  color: var(--critical);
+}
+
 /* Small heading inside a card (e.g. "Discord" in the Alerts card). */
 .subhead {
   margin: 1.5rem 0 0.35rem;

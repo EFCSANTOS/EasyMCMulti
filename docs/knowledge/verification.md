@@ -44,6 +44,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Console | Works — live over `/ws/console` (headless Edge: a command echoed in 0.03 s, no polling while the socket is open); `?since=` polling fallback; filters, search, ↑ history, Tab completion; chat box on the overview |
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
+| Performance presets, RAM advice, JVM flags | Works in tests and headless Edge on a simulated 4 GB phone (every preset capped at 2048 MB, red advice above it); the flags are not yet run against a real JVM here |
 | Player activity and playtime | Works in tests (sessions, stops, crash mid-session, compaction, half-written line) and headless Edge (10 days of synthetic play: rows, chart, tooltip at phone width) |
 | Mod updates (check, update, undo) | Works in tests (fake Modrinth: one request, hash check, dependency, rollback, cleanup) and against the live Modrinth API (old Lithium 0.13.0 → 0.15.4 offered, downloaded, hash-verified, `.old` kept, re-check empty); UI not yet clicked through with real mods |
 | Crash diagnosis + log viewer | Works in tests (8 real-format log fixtures in `tests/fixtures/logs/`, alert text, fixes, traversal) and headless Edge (fake Fabric crash → card with "Install sodium" on Overview without opening the console; log list and viewer) |

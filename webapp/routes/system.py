@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 
-from core import config_store, downloaders, netinfo, playit
+from core import config_store, downloaders, hostenv, netinfo, playit
 from webapp import common
 from webapp.services import Services, require_auth
 from webapp.validation import validate_config_update
@@ -41,6 +41,11 @@ def register(app: FastAPI, s: Services) -> None:
                     "address": playit_cfg.get("address") or public_address},
         )
         return payload
+
+    @app.get("/api/system/host")
+    def host_info(_: str = Depends(require_auth)) -> dict[str, Any]:
+        """What the performance presets and RAM advice need (FEAT-13)."""
+        return {"ram_mb": common._host_ram_mb(), "phone": hostenv.is_termux()}
 
     @app.get("/api/status")
     def status(_: str = Depends(require_auth)) -> dict[str, Any]:

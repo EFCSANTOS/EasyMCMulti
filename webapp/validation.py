@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from collections.abc import Callable
 from typing import Any, Literal
 
@@ -99,10 +100,27 @@ class ConfigUpdate(BaseModel):
     backup_keep_recent: int | None = Field(None, ge=1, le=100)
     backup_keep_daily: int | None = Field(None, ge=0, le=60)
     backup_prune_manual: bool | None = None
+    jvm_preset_flags: bool | None = None
+    jvm_extra_args: str | None = Field(None, max_length=500, pattern=_ONE_LINE)
     restart_daily_time: str | None = Field(None, pattern=_TIME_OR_EMPTY)
     idle_stop_minutes: int | None = Field(None, ge=0, le=1440)
     quiet_hours_start: str | None = Field(None, pattern=_TIME_OR_EMPTY)
     quiet_hours_end: str | None = Field(None, pattern=_TIME_OR_EMPTY)
+
+    @field_validator("jvm_extra_args")
+    @classmethod
+    def _only_jvm_options(cls, value: str | None) -> str | None:
+        """Options only: no -jar / @argfile / extra program, so the launch command can't be replaced."""
+        if not value:
+            return value
+        try:
+            tokens = shlex.split(value)
+        except ValueError as exc:
+            raise ValueError(f"can't be parsed ({exc})") from None
+        for token in tokens:
+            if not token.startswith(("-X", "-D")) or token.lower() in ("-jar",) or token.startswith("@"):
+                raise ValueError(f"only -X… and -D… JVM options are allowed, not '{token}'")
+        return value
 
     @field_validator("ram_mb")
     @classmethod
