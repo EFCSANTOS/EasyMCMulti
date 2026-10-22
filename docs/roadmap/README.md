@@ -50,7 +50,6 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 ## Code quality
 | ID | Title | Priority | Effort | Depends on |
 |---|---|---|---|---|
-| [QUAL-01](quality/QUAL-01-split-app-module.md) | Split `webapp/app.py` into routers and page modules | P2 | M | — |
 | [QUAL-02](quality/QUAL-02-test-suite-and-ci.md) | Test suite structure, `core/` unit tests and CI | P2 | M | — |
 
 ## Suggested order
@@ -59,7 +58,7 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 2. **Friends can join without the owner** — FEAT-02, FEAT-03, FEAT-04, FEAT-05 (FIX-05 has shipped).
 3. **Hands-off running** — FEAT-01, FEAT-06, FEAT-08, FEAT-07.
 4. **Polish** — everything else, picking by what the group actually asks for.
-QUAL-01 is easiest right before a batch of new pages (FEAT-02/03/10), so routes land in their new homes.
+QUAL-01 (split `app.py` into routers and page modules) has shipped, so new routes go in `webapp/routes/`.
 
 ## Maintenance
 When an item ships: move its key facts into `docs/knowledge/` (workflows, data-model,

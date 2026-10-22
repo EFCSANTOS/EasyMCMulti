@@ -12,14 +12,23 @@ os.environ["EZ_WEBAPP_PASSWORD"] = "s3cret-pass"
 import pytest
 from fastapi.testclient import TestClient
 
-from core import config_store, fsutil, notifier, paths, playit
+from core import cloudflared, config_store, downloaders, fsutil, java_manager, modrinth, notifier, paths, playit
 from webapp import auth
 from webapp.app import create_app
 
 webapp_module = importlib.import_module("webapp.app")
+# Shared helpers and constants the routers use as common.NAME: patch them here.
+common_module = importlib.import_module("webapp.common")
+layout_module = importlib.import_module("webapp.pages.layout")
 
 app = create_app()
 client = TestClient(app)
+
+
+def _dashboard_js():
+    """All dashboard scripts, in load order."""
+    js_dir = os.path.join(os.path.dirname(webapp_module.__file__), "static", "js")
+    return "\n".join(open(os.path.join(js_dir, name), encoding="utf-8").read() for name in layout_module.SCRIPTS)
 
 
 @pytest.fixture(autouse=True)
@@ -103,9 +112,7 @@ def test_advanced_page_has_save_control():
 
 
 def test_dashboard_js_only_calls_existing_api_routes():
-    js_path = os.path.join(os.path.dirname(webapp_module.__file__), "static", "js", "dashboard.js")
-    with open(js_path, "r", encoding="utf-8") as handle:
-        source = handle.read()
+    source = _dashboard_js()
     route_paths = {route.path for route in app.routes}
     called = set(re.findall(r"['`](/api/[^'`?]*)", source))
     assert called, "expected dashboard.js to call the API"
@@ -153,8 +160,8 @@ def test_modrinth_install_accepts_project_id(monkeypatch):
         captured["target_folder"] = target_folder
         return "fake-mod.jar"
 
-    monkeypatch.setattr(webapp_module.modrinth, "install", fake_install)
-    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {"loader": "fabric", "version": "1.21.7"})
+    monkeypatch.setattr(modrinth, "install", fake_install)
+    monkeypatch.setattr(common_module, "_effective_config", lambda: {"loader": "fabric", "version": "1.21.7"})
 
     response = client.post(
         "/api/modrinth/install",
@@ -222,10 +229,10 @@ class DummyAgent:
 @pytest.fixture
 def fake_playit(monkeypatch):
     """Stub the PlayIt network/agent calls."""
-    monkeypatch.setattr(webapp_module.playit, "ensure_agent", lambda log=print: "agent")
-    monkeypatch.setattr(webapp_module.playit, "PlayitAgent", DummyAgent)
-    monkeypatch.setattr(webapp_module.playit, "ensure_tunnel", lambda secret, port, log, timeout_sec=120, should_abort=None: "demo.example:25565")
-    monkeypatch.setattr(webapp_module.playit, "kill_stale_agents", lambda log=print: 0)
+    monkeypatch.setattr(playit, "ensure_agent", lambda log=print: "agent")
+    monkeypatch.setattr(playit, "PlayitAgent", DummyAgent)
+    monkeypatch.setattr(playit, "ensure_tunnel", lambda secret, port, log, timeout_sec=120, should_abort=None: "demo.example:25565")
+    monkeypatch.setattr(playit, "kill_stale_agents", lambda log=print: 0)
     app.state.runtime.playit_agent = None
     app.state.runtime.playit_setup = "idle"
     app.state.runtime.playit_crash_times = []
@@ -257,7 +264,7 @@ def test_playit_configure_returns_approval_link_and_finishes_in_background(fake_
         playit.save_config("new-secret", "")
         return "new-secret"
 
-    monkeypatch.setattr(webapp_module.playit, "claim_interactive", fake_claim)
+    monkeypatch.setattr(playit, "claim_interactive", fake_claim)
     response = client.post("/api/playit/configure", auth=("admin", "s3cret-pass"))
     payload = response.json()
     assert payload["setup"] == "awaiting-approval"
@@ -276,7 +283,7 @@ def test_playit_configure_returns_approval_link_and_finishes_in_background(fake_
 
 def test_playit_configure_reset_forgets_saved_account(fake_playit, monkeypatch):
     playit.save_config("old-secret", "old.example:1")
-    monkeypatch.setattr(webapp_module.playit, "claim_interactive",
+    monkeypatch.setattr(playit, "claim_interactive",
                         lambda log, should_cancel, timeout_sec=300, on_url=None: on_url("https://playit.gg/claim/new") or threading.Event().wait())
     response = client.post("/api/playit/configure", auth=("admin", "s3cret-pass"), json={"reset": True})
     payload = response.json()
@@ -318,9 +325,9 @@ class FakeQuickTunnel:
 @pytest.fixture
 def fake_cloudflared(monkeypatch):
     FakeQuickTunnel.instances = []
-    monkeypatch.setattr(webapp_module.cloudflared, "ensure_binary", lambda log=print: "cloudflared")
-    monkeypatch.setattr(webapp_module.cloudflared, "QuickTunnel", FakeQuickTunnel)
-    monkeypatch.setattr(webapp_module, "WEB_TUNNEL_RETRY_SEC", 0)
+    monkeypatch.setattr(cloudflared, "ensure_binary", lambda log=print: "cloudflared")
+    monkeypatch.setattr(cloudflared, "QuickTunnel", FakeQuickTunnel)
+    monkeypatch.setattr(common_module, "WEB_TUNNEL_RETRY_SEC", 0)
     yield FakeQuickTunnel.instances
     client.post("/api/remote-dashboard", auth=("admin", "s3cret-pass"), json={"enabled": False})
 
@@ -331,7 +338,7 @@ def test_remote_dashboard_toggle(fake_cloudflared):
     assert _wait_until(lambda: client.get("/api/remote-dashboard", auth=("admin", "s3cret-pass")).json()["state"] == "running")
     status = client.get("/api/remote-dashboard", auth=("admin", "s3cret-pass")).json()
     assert status["url"] == "https://demo-1.trycloudflare.com"
-    assert fake_cloudflared[0].port == webapp_module.WEB_PORT
+    assert fake_cloudflared[0].port == common_module.WEB_PORT
 
     response = client.post("/api/remote-dashboard", auth=("admin", "s3cret-pass"), json={"enabled": False})
     payload = response.json()
@@ -353,7 +360,7 @@ def test_remote_dashboard_reports_missing_binary(monkeypatch):
     def missing(log=print):
         raise RuntimeError("cloudflared is not installed. Install it in Termux with: pkg install cloudflared")
 
-    monkeypatch.setattr(webapp_module.cloudflared, "ensure_binary", missing)
+    monkeypatch.setattr(cloudflared, "ensure_binary", missing)
     client.post("/api/remote-dashboard", auth=("admin", "s3cret-pass"), json={"enabled": True})
     assert _wait_until(lambda: app.state.runtime.web_tunnel_state == "error")
     status = client.get("/api/remote-dashboard", auth=("admin", "s3cret-pass")).json()
@@ -499,8 +506,8 @@ def test_metrics_survive_blocked_cpu_counters(monkeypatch):
                 total = 4096
             return Mem()
 
-    monkeypatch.setattr(webapp_module, "psutil", BlockedPsutil)
-    snapshot = webapp_module._system_metrics_snapshot()
+    monkeypatch.setattr(common_module, "psutil", BlockedPsutil)
+    snapshot = common_module._system_metrics_snapshot()
     assert snapshot["cpu"] == 0.0
     assert snapshot["ram"] == 1024
     assert snapshot["ramTotal"] == 4096
@@ -516,17 +523,17 @@ def test_playit_agent_uses_termux_chroot_on_termux(monkeypatch):
 
 
 def test_playit_agent_name_is_platform_aware(monkeypatch):
-    monkeypatch.setattr(webapp_module.playit.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(webapp_module.playit.platform, "machine", lambda: "aarch64")
-    assert webapp_module.playit._agent_binary_name() == "playit-linux-aarch64"
+    monkeypatch.setattr(playit.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(playit.platform, "machine", lambda: "aarch64")
+    assert playit._agent_binary_name() == "playit-linux-aarch64"
 
-    monkeypatch.setattr(webapp_module.playit.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(webapp_module.playit.platform, "machine", lambda: "x86_64")
-    assert webapp_module.playit._agent_binary_name() == "playit-linux-amd64"
+    monkeypatch.setattr(playit.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(playit.platform, "machine", lambda: "x86_64")
+    assert playit._agent_binary_name() == "playit-linux-amd64"
 
-    monkeypatch.setattr(webapp_module.playit.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(webapp_module.playit.platform, "machine", lambda: "armv7l")
-    assert webapp_module.playit._agent_binary_name() == "playit-linux-armv7"
+    monkeypatch.setattr(playit.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(playit.platform, "machine", lambda: "armv7l")
+    assert playit._agent_binary_name() == "playit-linux-armv7"
 
 
 def test_config_can_persist_values():
@@ -601,12 +608,12 @@ def test_server_start_installs_before_launch(monkeypatch):
         calls["server_dir"] = server_dir
         calls["kwargs"] = kwargs
 
-    monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: False)
-    monkeypatch.setattr(webapp_module.downloaders, "prepare", fake_prepare)
-    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required, log=print: "java")
-    monkeypatch.setattr(webapp_module.downloaders, "launch_args", lambda *args, **kwargs: ["java", "-jar", "server.jar"])
-    monkeypatch.setattr(webapp_module, "ServerProcess", DummyProcess)
-    monkeypatch.setattr(webapp_module, "update_properties", fake_update_properties)
+    monkeypatch.setattr(common_module, "_server_is_installed", lambda target_dir, loader: False)
+    monkeypatch.setattr(downloaders, "prepare", fake_prepare)
+    monkeypatch.setattr(java_manager, "ensure_java", lambda required, log=print: "java")
+    monkeypatch.setattr(downloaders, "launch_args", lambda *args, **kwargs: ["java", "-jar", "server.jar"])
+    monkeypatch.setattr(common_module, "ServerProcess", DummyProcess)
+    monkeypatch.setattr(common_module, "update_properties", fake_update_properties)
 
     response = _start(json={"server_port": 25566, "motd": "Advanced test", "max_players": 12})
     assert response.status_code == 202
@@ -660,11 +667,11 @@ def test_restart_waits_for_previous_process_to_exit(monkeypatch):
         def kill(self):
             self.running = False
 
-    monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: True)
-    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required, log=print: "java")
-    monkeypatch.setattr(webapp_module.downloaders, "launch_args", lambda *args, **kwargs: ["java"])
-    monkeypatch.setattr(webapp_module, "update_properties", lambda server_dir, **kwargs: None)
-    monkeypatch.setattr(webapp_module, "ServerProcess", StoppableProcess)
+    monkeypatch.setattr(common_module, "_server_is_installed", lambda target_dir, loader: True)
+    monkeypatch.setattr(java_manager, "ensure_java", lambda required, log=print: "java")
+    monkeypatch.setattr(downloaders, "launch_args", lambda *args, **kwargs: ["java"])
+    monkeypatch.setattr(common_module, "update_properties", lambda server_dir, **kwargs: None)
+    monkeypatch.setattr(common_module, "ServerProcess", StoppableProcess)
 
     previous = StoppableProcess()
     previous.start()
@@ -713,12 +720,12 @@ class RecordingProcess:
 @pytest.fixture
 def fake_server(monkeypatch):
     RecordingProcess.instances = []
-    monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: True)
-    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required, log=print: "java")
-    monkeypatch.setattr(webapp_module.downloaders, "launch_args", lambda *args, **kwargs: ["java"])
-    monkeypatch.setattr(webapp_module, "update_properties", lambda server_dir, **kwargs: None)
-    monkeypatch.setattr(webapp_module, "ServerProcess", RecordingProcess)
-    monkeypatch.setattr(webapp_module, "CRASH_RESTART_DELAY_SEC", 0)
+    monkeypatch.setattr(common_module, "_server_is_installed", lambda target_dir, loader: True)
+    monkeypatch.setattr(java_manager, "ensure_java", lambda required, log=print: "java")
+    monkeypatch.setattr(downloaders, "launch_args", lambda *args, **kwargs: ["java"])
+    monkeypatch.setattr(common_module, "update_properties", lambda server_dir, **kwargs: None)
+    monkeypatch.setattr(common_module, "ServerProcess", RecordingProcess)
+    monkeypatch.setattr(common_module, "CRASH_RESTART_DELAY_SEC", 0)
     runtime = app.state.runtime
     runtime.process = None
     runtime.crash_times = []
@@ -764,7 +771,7 @@ def test_crash_triggers_automatic_restart(fake_server):
 def test_crash_restart_pauses_after_limit(fake_server):
     _start()
     now = time.monotonic()
-    app.state.runtime.crash_times = [now] * webapp_module.CRASH_RESTART_LIMIT
+    app.state.runtime.crash_times = [now] * common_module.CRASH_RESTART_LIMIT
     fake_server[0].exit(1)
     time.sleep(0.2)
     assert len(fake_server) == 1
@@ -787,8 +794,8 @@ def test_deliberate_stops_are_not_crashes(fake_server):
 
 
 def test_auto_restart_can_be_disabled(fake_server, monkeypatch):
-    original = webapp_module._effective_config
-    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {**original(), "auto_restart": False})
+    original = common_module._effective_config
+    monkeypatch.setattr(common_module, "_effective_config", lambda: {**original(), "auto_restart": False})
     _start()
     fake_server[0].exit(1)
     time.sleep(0.2)
@@ -796,8 +803,8 @@ def test_auto_restart_can_be_disabled(fake_server, monkeypatch):
 
 
 def test_autostart_launches_server_and_playit(fake_server, fake_playit, fake_cloudflared, monkeypatch):
-    original = webapp_module._effective_config
-    monkeypatch.setattr(webapp_module, "_effective_config",
+    original = common_module._effective_config
+    monkeypatch.setattr(common_module, "_effective_config",
                         lambda: {**original(), "autostart_server": True, "autostart_playit": True})
     monkeypatch.delenv("EZ_NO_AUTOSTART", raising=False)
     playit.save_config("demo-secret", "")
@@ -807,8 +814,8 @@ def test_autostart_launches_server_and_playit(fake_server, fake_playit, fake_clo
 
 
 def test_autostart_respects_kill_switch(fake_server, monkeypatch):
-    original = webapp_module._effective_config
-    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {**original(), "autostart_server": True})
+    original = common_module._effective_config
+    monkeypatch.setattr(common_module, "_effective_config", lambda: {**original(), "autostart_server": True})
     monkeypatch.setenv("EZ_NO_AUTOSTART", "1")
     app.state.autostart()
     time.sleep(0.2)
@@ -834,7 +841,7 @@ def test_always_on_settings_render_on_setup_page():
 
 
 def test_mod_upload_rejected_for_vanilla(monkeypatch):
-    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {"loader": "vanilla", "version": "1.21.7"})
+    monkeypatch.setattr(common_module, "_effective_config", lambda: {"loader": "vanilla", "version": "1.21.7"})
     response = client.post(
         "/api/server/mods/upload",
         auth=("admin", "s3cret-pass"),
@@ -845,7 +852,7 @@ def test_mod_upload_rejected_for_vanilla(monkeypatch):
 
 
 def test_player_tracking_from_console_lines():
-    runtime = webapp_module.RuntimeState()
+    runtime = common_module.RuntimeState()
     runtime.track_player_event("[12:00:00] [Server thread/INFO]: Steve joined the game")
     runtime.track_player_event("[12:00:01] [Server thread/INFO]: Alex joined the game")
     runtime.track_player_event("[12:00:02] [Server thread/INFO]: <Steve> Bob joined the game")
@@ -864,7 +871,7 @@ def _make_backup(server_dir, name, members):
 
 
 def test_backup_restore_round_trip_and_validation(monkeypatch):
-    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {"loader": "vanilla", "version": "1.21.7"})
+    monkeypatch.setattr(common_module, "_effective_config", lambda: {"loader": "vanilla", "version": "1.21.7"})
     app.state.runtime.process = None
     server_dir = paths.server_dir("vanilla", "1.21.7")
     good = _make_backup(server_dir, "world-backup-20260101-000000.zip", ["world/level.dat"])
@@ -888,7 +895,7 @@ def test_backup_restore_round_trip_and_validation(monkeypatch):
 
 
 def test_playit_config_does_not_expose_secret(monkeypatch):
-    monkeypatch.setattr(webapp_module.playit, "load_config", lambda: {"secret": "top-secret", "address": "demo.example"})
+    monkeypatch.setattr(playit, "load_config", lambda: {"secret": "top-secret", "address": "demo.example"})
     response = client.get("/api/playit/config", auth=("admin", "s3cret-pass"))
     assert response.status_code == 200
     assert "top-secret" not in response.text
@@ -919,7 +926,7 @@ def test_playit_config_put_cancels_pending_approval(fake_playit, monkeypatch):
             time.sleep(0.01)
         raise RuntimeError("Setup cancelled.")
 
-    monkeypatch.setattr(webapp_module.playit, "claim_interactive", fake_claim)
+    monkeypatch.setattr(playit, "claim_interactive", fake_claim)
     auth = ("admin", "s3cret-pass")
     assert client.post("/api/playit/configure", auth=auth).json()["setup"] == "awaiting-approval"
     response = client.put("/api/playit/config", auth=auth, json={"secret": "ab12cd34ef"})
@@ -937,7 +944,7 @@ def test_wrong_password_is_rejected():
 
 
 def test_playit_status_is_not_running_without_agent(monkeypatch):
-    monkeypatch.setattr(webapp_module.playit, "load_config", lambda: {"secret": "demo-secret", "address": "demo.example"})
+    monkeypatch.setattr(playit, "load_config", lambda: {"secret": "demo-secret", "address": "demo.example"})
     app.state.runtime.playit_agent = None
     response = client.get("/api/playit/status", auth=("admin", "s3cret-pass"))
     assert response.status_code == 200
@@ -969,7 +976,7 @@ def test_crash_sends_email_and_repeats_are_throttled(fake_server, sent_emails):
 
 def test_auto_restart_paused_sends_down_alert(fake_server, sent_emails):
     _start()
-    app.state.runtime.crash_times = [time.monotonic()] * webapp_module.CRASH_RESTART_LIMIT
+    app.state.runtime.crash_times = [time.monotonic()] * common_module.CRASH_RESTART_LIMIT
     fake_server[0].exit(1)
     assert _wait_until(lambda: any("DOWN" in subject for subject, _ in sent_emails))
 
@@ -1010,7 +1017,7 @@ def test_alert_test_endpoint(monkeypatch):
 
 
 def test_playit_agent_crash_restarts_and_alerts(fake_playit, sent_emails, monkeypatch):
-    monkeypatch.setattr(webapp_module, "PLAYIT_RETRY_SEC", 0)
+    monkeypatch.setattr(common_module, "PLAYIT_RETRY_SEC", 0)
     agents = []
 
     class TrackedAgent(DummyAgent):
@@ -1019,7 +1026,7 @@ def test_playit_agent_crash_restarts_and_alerts(fake_playit, sent_emails, monkey
             self.on_exit = on_exit
             agents.append(self)
 
-    monkeypatch.setattr(webapp_module.playit, "PlayitAgent", TrackedAgent)
+    monkeypatch.setattr(playit, "PlayitAgent", TrackedAgent)
     playit.save_config("demo-secret", "")
     client.post("/api/playit/start", auth=("admin", "s3cret-pass"))
     agents[0].running = False
@@ -1034,7 +1041,7 @@ def test_playit_agent_crash_restarts_and_alerts(fake_playit, sent_emails, monkey
 
 
 def test_playit_rejected_key_stops_agent_without_restart(fake_playit, sent_emails, monkeypatch):
-    monkeypatch.setattr(webapp_module, "PLAYIT_RETRY_SEC", 0)
+    monkeypatch.setattr(common_module, "PLAYIT_RETRY_SEC", 0)
     monkeypatch.setattr(playit.time, "sleep", lambda seconds: None)
     agents = []
 
@@ -1054,9 +1061,9 @@ def test_playit_rejected_key_stops_agent_without_restart(fake_playit, sent_email
                             "error=ApiError(Auth(InvalidAgentKey))")
         raise RuntimeError("playit API /tunnels/create: AgentVersionTooOld")
 
-    monkeypatch.setattr(webapp_module.playit, "PlayitAgent", TalkingAgent)
+    monkeypatch.setattr(playit, "PlayitAgent", TalkingAgent)
     monkeypatch.setattr(playit, "_api", fake_api)
-    monkeypatch.setattr(webapp_module.playit, "ensure_tunnel",
+    monkeypatch.setattr(playit, "ensure_tunnel",
                         lambda secret, port, log, timeout_sec=120, should_abort=None: playit._ensure_tunnel(
                             secret, port, log, timeout_sec, playit._is_mc_tunnel, "EZ", "minecraft-java", "Minecraft Java",
                             should_abort))
@@ -1077,7 +1084,7 @@ def test_playit_rejected_key_stops_agent_without_restart(fake_playit, sent_email
 
 
 def test_playit_agent_restarts_pause_after_repeated_exits(fake_playit, sent_emails, monkeypatch):
-    monkeypatch.setattr(webapp_module, "PLAYIT_RETRY_SEC", 0)
+    monkeypatch.setattr(common_module, "PLAYIT_RETRY_SEC", 0)
     events = []
     agents = []
 
@@ -1087,23 +1094,23 @@ def test_playit_agent_restarts_pause_after_repeated_exits(fake_playit, sent_emai
             self.on_output, self.on_exit = on_output, on_exit
             agents.append(self)
 
-    monkeypatch.setattr(webapp_module.playit, "kill_stale_agents", lambda log=print: events.append("kill") or 0)
-    monkeypatch.setattr(webapp_module.playit, "PlayitAgent", FailingAgent)
+    monkeypatch.setattr(playit, "kill_stale_agents", lambda log=print: events.append("kill") or 0)
+    monkeypatch.setattr(playit, "PlayitAgent", FailingAgent)
     playit.save_config("ab12cd34ef", "")
     auth = ("admin", "s3cret-pass")
     client.post("/api/playit/start", auth=auth)
     assert events == ["kill"]  # leftovers are cleared before the first agent starts
 
-    for attempt in range(webapp_module.PLAYIT_CRASH_LIMIT + 1):
+    for attempt in range(common_module.PLAYIT_CRASH_LIMIT + 1):
         agent = agents[-1]
         agent.on_output("playitd error: IPC error: Another instance is already running")
         agent.running = False
         agent.on_exit(1)
-        if attempt < webapp_module.PLAYIT_CRASH_LIMIT:
+        if attempt < common_module.PLAYIT_CRASH_LIMIT:
             assert _wait_until(lambda: len(agents) == attempt + 2 and agents[-1].is_running())
 
     threading.Event().wait(0.2)
-    assert len(agents) == webapp_module.PLAYIT_CRASH_LIMIT + 1  # no restart after the limit
+    assert len(agents) == common_module.PLAYIT_CRASH_LIMIT + 1  # no restart after the limit
     status = client.get("/api/playit/status", auth=auth).json()
     assert status["setup"] == "error"
     assert "Another instance is already running" in status["error"]
@@ -1124,7 +1131,7 @@ def test_playit_secret_validation_and_ansi_stripping():
 
 
 def test_remote_dashboard_is_on_by_default():
-    assert webapp_module._default_config()["remote_dashboard"] is True
+    assert common_module._default_config()["remote_dashboard"] is True
     text = client.get("/dashboard/setup").text
     for element_id in ("alerts-form", "alerts-email-enabled", "alerts-heartbeat-url", "alerts-test-button"):
         assert f'id="{element_id}"' in text
@@ -1262,7 +1269,8 @@ def test_update_failure_is_reported(monkeypatch):
 
 def test_dashboard_assets_are_cache_busted():
     text = client.get("/dashboard/setup").text
-    assert f"/dashboard.js?v={webapp_module.ASSET_VERSION}" in text
+    for name in layout_module.SCRIPTS:
+        assert f"/js/{name}?v={layout_module.ASSET_VERSION}" in text
     assert 'id="update-apply-button"' in text
 
 
@@ -1332,9 +1340,9 @@ def test_world_import_rejects_bad_zips(tmp_path):
 
 
 def test_worlds_endpoints_create_switch_rename_delete(monkeypatch):
-    original = webapp_module._effective_config
+    original = common_module._effective_config
     app.state.runtime.process = None
-    sdir = webapp_module._server_dir_for_config(original())
+    sdir = common_module._server_dir_for_config(original())
     os.makedirs(os.path.join(sdir, "world"), exist_ok=True)  # the default world, as after a first start
     with open(os.path.join(sdir, "world", "level.dat"), "w", encoding="utf-8") as handle:
         handle.write("x")
@@ -1346,7 +1354,7 @@ def test_worlds_endpoints_create_switch_rename_delete(monkeypatch):
     client.post(f"/api/worlds/{folder}/activate", auth=("admin", "s3cret-pass"))
     config = original()
     assert config["level_name"] == folder and config["level_seed"] == "123"
-    assert webapp_module._server_properties_from_config(config)["level-name"] == folder
+    assert common_module._server_properties_from_config(config)["level-name"] == folder
 
     renamed = client.post(f"/api/worlds/{folder}/rename", auth=("admin", "s3cret-pass"), json={"name": "Hardcore"}).json()
     assert next(w for w in renamed["worlds"] if w["folder"] == folder)["name"] == "Hardcore"
@@ -1361,7 +1369,7 @@ def test_worlds_endpoints_create_switch_rename_delete(monkeypatch):
 
 
 def test_world_upload_download_and_switch_restarts_running_server(fake_server):
-    sdir = webapp_module._server_dir_for_config(webapp_module._effective_config())
+    sdir = common_module._server_dir_for_config(common_module._effective_config())
     os.makedirs(os.path.join(sdir, "world"), exist_ok=True)
     with open(os.path.join(sdir, "world", "level.dat"), "w", encoding="utf-8") as handle:
         handle.write("x")
@@ -1388,10 +1396,10 @@ def test_world_upload_download_and_switch_restarts_running_server(fake_server):
 
 
 def test_backup_follows_the_active_world(monkeypatch):
-    original = webapp_module._effective_config
-    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {**original(), "level_name": "skyblock"})
+    original = common_module._effective_config
+    monkeypatch.setattr(common_module, "_effective_config", lambda: {**original(), "level_name": "skyblock"})
     app.state.runtime.process = None
-    sdir = webapp_module._server_dir_for_config(original())
+    sdir = common_module._server_dir_for_config(original())
     os.makedirs(os.path.join(sdir, "skyblock"), exist_ok=True)
     with open(os.path.join(sdir, "skyblock", "level.dat"), "w", encoding="utf-8") as handle:
         handle.write("v1")
@@ -1448,8 +1456,8 @@ def fake_modrinth(monkeypatch):
     monkeypatch.setattr(modrinth, "_get", fake_get)
     monkeypatch.setattr(modrinth, "download", fake_download)
     modrinth._categories_cache.update(at=0.0, items=[])
-    original = webapp_module._effective_config
-    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {**original(), "loader": "fabric", "version": "1.21.7"})
+    original = common_module._effective_config
+    monkeypatch.setattr(common_module, "_effective_config", lambda: {**original(), "loader": "fabric", "version": "1.21.7"})
     app.state.runtime.process = None
     return calls
 
@@ -1486,8 +1494,8 @@ def test_mod_install_brings_required_dependencies_and_can_be_removed(fake_modrin
 
 
 def test_mod_browser_explains_vanilla(monkeypatch):
-    original = webapp_module._effective_config
-    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {**original(), "loader": "vanilla"})
+    original = common_module._effective_config
+    monkeypatch.setattr(common_module, "_effective_config", lambda: {**original(), "loader": "vanilla"})
     response = client.get("/api/modrinth/search", auth=("admin", "s3cret-pass"))
     assert response.status_code == 400
     assert "Vanilla" in response.json()["detail"]
@@ -1649,9 +1657,9 @@ def slow_install(fake_server, monkeypatch):
         if not gate.wait(5):
             raise RuntimeError("test gate never opened")
 
-    monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: False)
-    monkeypatch.setattr(webapp_module.downloaders, "prepare", prepare)
-    monkeypatch.setattr(webapp_module, "accept_eula", lambda target_dir: None)
+    monkeypatch.setattr(common_module, "_server_is_installed", lambda target_dir, loader: False)
+    monkeypatch.setattr(downloaders, "prepare", prepare)
+    monkeypatch.setattr(common_module, "accept_eula", lambda target_dir: None)
     yield gate
     gate.set()
     _wait_idle()
@@ -1705,8 +1713,8 @@ def test_failed_install_is_reported_through_status(fake_server, monkeypatch):
     def broken(*args, **kwargs):
         raise RuntimeError("download blocked")
 
-    monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: False)
-    monkeypatch.setattr(webapp_module.downloaders, "prepare", broken)
+    monkeypatch.setattr(common_module, "_server_is_installed", lambda target_dir, loader: False)
+    monkeypatch.setattr(downloaders, "prepare", broken)
     assert _start().status_code == 202
     status = client.get("/api/status", auth=("admin", "s3cret-pass")).json()
     assert status["install_status"] == "failed"
@@ -1843,7 +1851,7 @@ def test_config_rejects_bad_values_naming_the_field():
 
 
 def test_config_ram_is_capped_by_host_memory(monkeypatch):
-    monkeypatch.setattr(webapp_module, "_host_ram_mb", lambda: 4096)
+    monkeypatch.setattr(common_module, "_host_ram_mb", lambda: 4096)
     response = client.put("/api/config", auth=("admin", "s3cret-pass"), json={"ram_mb": 8192})
     assert response.status_code == 422 and "4096" in response.json()["detail"][0]["msg"]
     assert client.put("/api/config", auth=("admin", "s3cret-pass"), json={"ram_mb": 3072}).status_code == 200
@@ -1867,6 +1875,5 @@ def test_stored_garbage_falls_back_to_defaults(fake_server):
 
 
 def test_dashboard_highlights_rejected_fields():
-    js_path = os.path.join(os.path.dirname(webapp_module.__file__), "static", "js", "dashboard.js")
-    source = open(js_path, encoding="utf-8").read()
+    source = _dashboard_js()
     assert "markInvalidFields" in source and "aria-invalid" in source

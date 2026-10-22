@@ -23,7 +23,7 @@ conflict #1 in verification.md.
   `runtime` at the moment of change: in `PUT /api/config`, `launch_server`, PlayIt start/stop.
 
 ## Implementation notes
-- `webapp/app.py`: split into `_status_payload(config) -> dict` (pure) and keep the route a thin
+- `webapp/routes/system.py`: split into `_status_payload(config) -> dict` (pure) and keep the route a thin
   wrapper. Check other readers of `runtime.loader` / `runtime.lan_address` still get fresh values.
 - Test: two consecutive GETs with a changed config in between return the new values while
   `runtime` fields are untouched by the GET.

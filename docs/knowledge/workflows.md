@@ -17,7 +17,8 @@ is under 12 characters; `GET /api/remote-dashboard` returns `weak_password` for 
 - `/` → `_render_dashboard_page("overview")`
 - `/dashboard` → 302 to `/dashboard/overview`
 - `/dashboard/{section}` → page; unknown → 404
-- `/dashboard.css`, `/dashboard.js` → `FileResponse` from `webapp/static/...`
+- `/dashboard.css`, `/js/{name}` (names in `pages/layout.py::SCRIPTS`, else 404) → `FileResponse`
+  from `webapp/static/...`; pages load the scripts in `SCRIPTS` order with `?v=ASSET_VERSION`
 - `/login` → `webapp/templates/login.html`
 - Every page: top bar with `#server-state` pill and Start/Restart/Stop (enabled by state), toast
   `#action-status`.
