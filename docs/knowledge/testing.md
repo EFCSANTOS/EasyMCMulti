@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py` (+ `tests/fixtures/logs/` for FEAT-08); sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-176 passed (~33 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+179 passed (~34 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Patching
@@ -56,6 +56,8 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Activity (FEAT-12): playtime/sessions/online from a synthetic join/leave/stop stream (plus a
+  half-written line), hour averages; compaction keeps totals; the server output and a crash feed the log.
 - Live console (FEAT-11): `?since=` returns only newer lines; chat builds valid `tellraw` JSON even
   with quotes/backslashes, 409 when stopped, one-line/length validation; filter and chat controls render.
 - Pure status (FIX-06): two GETs around a config change return the new loader/version and addresses

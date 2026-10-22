@@ -2803,3 +2803,55 @@ def test_console_page_has_filters_and_overview_has_chat():
     console = client.get("/dashboard/console").text
     assert 'id="console-filter"' in console and 'id="console-search"' in console
     assert 'id="chat-form"' in client.get("/dashboard/overview").text
+
+
+# ---------- Player activity and playtime (FEAT-12) ----------
+from core import activity  # noqa: E402
+
+T0 = 1_760_000_000.0
+
+
+def test_playtime_from_joins_leaves_and_stops():
+    for event, name, offset in (("join", "Alex", 0), ("join", "Sam", 600), ("join", "Alex", 900),
+                                ("leave", "Alex", 3600), ("server_stop", "", 7200), ("join", "Alex", 8000)):
+        activity.record(event, name, t=T0 + offset)
+    with open(os.path.join(paths.DATA_DIR, "activity.jsonl"), "a", encoding="utf-8") as handle:
+        handle.write('{"t": 17600')  # cut short by a power loss
+    data = activity.summary(now=T0 + 9000)
+    rows = {row["name"]: row for row in data["players"]}
+    assert rows["Alex"]["playtime_seconds"] == 3600 + 1000 and rows["Alex"]["sessions"] == 2
+    assert rows["Alex"]["online"] is True and data["players"][0]["name"] == "Alex"
+    assert rows["Sam"]["playtime_seconds"] == 6600 and rows["Sam"]["online"] is False  # the stop closed Sam
+    assert abs(sum(data["hours"]) - (4600 + 6600) / (30 * 3600)) < 0.005  # hours are rounded to 3 decimals
+
+
+def test_compaction_keeps_totals():
+    year = activity.COMPACT_AFTER_SEC
+    activity.record("join", "Old", t=T0 - year - 5000)
+    activity.record("server_stop", t=T0 - year - 1000)
+    activity.record("join", "Old", t=T0 - 100)
+    activity.record("leave", "Old", t=T0)
+    before = activity.summary(now=T0 + 10)["players"][0]
+    assert activity.compact(now=T0 + 10) > 0
+    after = activity.summary(now=T0 + 10)["players"][0]
+    assert (after["playtime_seconds"], after["sessions"]) == (before["playtime_seconds"], before["sessions"]) == (4100, 2)
+    assert "totals" in open(os.path.join(paths.DATA_DIR, "activity.jsonl"), encoding="utf-8").read()
+
+
+def test_server_output_feeds_the_activity_log(fake_server, monkeypatch):
+    captured = {}
+    original = RecordingProcess.__init__
+
+    def capture(self, args, cwd, on_output, on_exit):
+        captured["on_output"] = on_output
+        original(self, args, cwd, on_output, on_exit)
+
+    monkeypatch.setattr(RecordingProcess, "__init__", capture)
+    _start()
+    captured["on_output"]("[12:00:00] [Server thread/INFO]: Alex joined the game")
+    data = client.get("/api/players/activity", auth=AUTH).json()
+    assert data["players"][0]["name"] == "Alex" and data["players"][0]["online"] is True
+    fake_server[0].exit(1)  # crash mid-session
+    data = client.get("/api/players/activity", auth=AUTH).json()
+    assert data["players"][0]["online"] is False
+    assert 'id="activity-chart"' in client.get("/dashboard/players").text

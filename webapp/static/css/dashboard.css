@@ -848,6 +848,38 @@ select[aria-invalid="true"] {
   transform: translateX(-50%);
 }
 
+/* Players → Activity: 24 bars, average players online per hour of day. */
+.activity-chart svg {
+  display: block;
+  width: 100%;
+  height: 140px;
+}
+
+.activity-chart .bar {
+  fill: var(--series-1);
+  pointer-events: none; /* the wider .bar-hit rect underneath takes the hover */
+}
+
+.activity-chart .bar-hit {
+  fill: transparent;
+  cursor: default;
+}
+
+.activity-chart .bar-hit:hover + .bar,
+.activity-chart .bar.is-hover {
+  fill: #5a9ef0;
+}
+
+.activity-chart .axis-label {
+  fill: var(--faint);
+  font-size: 11px;
+}
+
+.activity-chart .baseline {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
 .chart-tip strong {
   font-variant-numeric: tabular-nums;
 }

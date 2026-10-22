@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 
-from core import config_store, players
+from core import activity, config_store, players
 from webapp import common
 from webapp.services import Services, require_auth
 from webapp.validation import require_player, validate_config_update
@@ -115,6 +115,10 @@ def register(app: FastAPI, s: Services) -> None:
         ("bans", "remove"): "{name} was unbanned.",
         ("ips", "remove"): "{name} was unbanned.",
     }
+
+    @app.get("/api/players/activity")
+    def player_activity(_: str = Depends(require_auth)) -> dict[str, Any]:
+        return activity.summary()
 
     @app.get("/api/players/lists")
     def player_lists(_: str = Depends(require_auth)) -> dict[str, Any]:
