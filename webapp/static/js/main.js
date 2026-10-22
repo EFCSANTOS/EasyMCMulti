@@ -63,6 +63,7 @@ function bindEvents() {
   on('world-upload-input', 'change', (event, input) => uploadWorld(input));
   on('world-create-form', 'submit', (event) => createWorld(event));
   bindPlayers();
+  on('modpack-export-button', 'click', (event, button) => exportModpack(button));
   bindInvite();
 
   ['op', 'deop', 'kick', 'ban', 'day', 'night', 'clear', 'rain', 'save'].forEach((action) => {
@@ -87,7 +88,7 @@ async function boot() {
   bindMetrics();
   await loadConfig();
   await loadStatus();
-  await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(), loadInvite(),
+  await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(), loadInvite(), loadModpack(),
     refreshConsole(true)]);
   initModBrowser(); // after loadInstalledMods so cards can show "Installed"
 

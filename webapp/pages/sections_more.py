@@ -6,6 +6,20 @@ from webapp.pages.widgets import _copy_button, _icon
 
 _SECTION_MODS = f"""
         <section id="mods" class="stack">
+          <div id="modpack-card" class="card" hidden>
+            <div class="card-header">
+              <div>
+                <h2>Mod pack for friends</h2>
+                <p class="card-sub">One file with every mod players need. They import it in the Modrinth App or
+                  Prism Launcher (Add instance → Import) and can join right away.</p>
+              </div>
+              <div class="card-tools">
+                <button id="modpack-export-button" class="btn btn-primary btn-sm" type="button">{_icon("archive")} Export pack (.mrpack)</button>
+              </div>
+            </div>
+            <p class="hint">Server-only mods are left out. With the public status page on, friends can download the
+              pack there too, so you don't have to send it.</p>
+          </div>
           <div class="card">
             <div class="card-header">
               <div>

@@ -384,6 +384,25 @@ Core details (`core/playit.py`):
 - Link base: the Cloudflare link when it is up, else `http://<LAN IP>:<WEB_PORT>` (LAN-only, flagged
   by `url_is_lan_only`). The "New dashboard link" email includes the new status page link.
 
+## 23. Mod pack for friends (FEAT-04)
+- `core/modpack.py::build(sdir, loader, mc_version, name)` → `<sdir>/ez-modpack.mrpack` + summary
+  `<sdir>/ez-modpack.json`; only for Fabric/Forge/NeoForge with jars in the mods folder (else
+  `ValueError` → 400; Paper/vanilla invites say "no mods needed").
+- Every jar is hashed (SHA-1 + SHA-512); one `POST /v2/version_files` (by SHA-1) + one
+  `GET /v2/projects?ids=` give the CDN URL and `client_side`/`server_side`. Known + client not
+  "unsupported" → `files[]` entry (`path` `mods/<jar>`, hashes, `env`, `downloads`, `fileSize`);
+  client "unsupported" → left out (`excluded`); unknown jar → bundled under `overrides/mods/` with a
+  licence warning. Modrinth unreachable → everything bundled + warning.
+- `dependencies`: `minecraft` + `fabric-loader`/`forge`/`neoforge` from `loader_version()`
+  (installed `libraries/` folders; Fabric before first start: `server.jar` → `install.properties`).
+  Not found → omitted + warning "start the server once".
+- Cached by `fingerprint` (loader, version, name, each jar's name/size/mtime): rebuilt only on
+  change; one build at a time (`modpack_lock` in `routes/mods.py`).
+- Owner: Mods page card "Mod pack for friends" (shown when `GET /api/modpack` → `available`):
+  `POST /api/modpack/build` → summary toast (+ warnings), then `GET /api/modpack/download`.
+- Friends: status page shows "Download the mod pack" (`/s/<token>/modpack.mrpack`, no auth, 404 when
+  the token is wrong or there is nothing to pack); the invite says to get it there.
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

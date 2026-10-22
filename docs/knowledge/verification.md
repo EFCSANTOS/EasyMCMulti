@@ -45,6 +45,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
 | Mod browser (browse/category/sort/details, install + dependencies, remove), upload jars | Works; live read-only check against Modrinth; vanilla → 400 with explanation |
+| Mod pack export (.mrpack) | Works in tests (faked Modrinth) and against the live Modrinth API (Fabric API, Lithium, spark: every CDN download matched the index's SHA-512 and size); headless Edge export downloads the file. **Not yet imported into Prism Launcher / Modrinth App** |
 | Invite friends + public status page | Works in tests and headless Edge (invite text, enable/regenerate/disable, signed-out public page at desktop and phone width); copy uses a textarea fallback when the Clipboard API is denied |
 | Players (whitelist on/off, add/remove, operators with level, unban, recently seen) | Works in tests (commands while running, JSON + offline/Mojang UUIDs while stopped) and in headless Edge (stopped server, desktop + phone width); not yet tried against a real running server |
 | Worlds (upload, switch, rename, download, delete, new) | Works in tests (incl. real zip handling); not yet tried with a large real world over the Cloudflare link (~100 MB upload limit) |

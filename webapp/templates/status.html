@@ -77,6 +77,18 @@
       }
       button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       .note { margin-top: 1.4rem; color: var(--faint); font-size: 0.8rem; }
+      .button {
+        display: inline-flex;
+        align-items: center;
+        min-height: 36px;
+        padding: 0 0.9rem;
+        border-radius: 8px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        font-weight: 650;
+        text-decoration: none;
+      }
+      .hint { display: block; margin-top: 0.4rem; color: var(--muted); font-size: 0.82rem; }
       .error { color: var(--critical); }
     </style>
   </head>
@@ -106,6 +118,13 @@
           <dt>Players</dt>
           <dd id="players">—</dd>
         </div>
+        <div id="modpack-row" hidden>
+          <dt>Mods</dt>
+          <dd>
+            <a id="modpack" class="button" href="#" download>Download the mod pack</a>
+            <span class="hint">Open it with the Modrinth App or Prism Launcher (Add instance → Import).</span>
+          </dd>
+        </div>
       </dl>
       <p id="note" class="note">Updates every 30 seconds.</p>
     </main>
@@ -133,14 +152,20 @@
         let players = data.online ? `${data.players_online} of ${data.players_max} online` : 'Server is offline';
         if (data.online && data.player_names && data.player_names.length) players += `: ${data.player_names.join(', ')}`;
         setText('players', players);
+        document.getElementById('modpack-row').hidden = !data.modpack_url;
+        if (data.modpack_url) document.getElementById('modpack').href = `${basePath()}/${data.modpack_url}`;
         const note = document.getElementById('note');
         note.className = 'note';
         note.textContent = 'Updates every 30 seconds.';
       }
 
+      function basePath() {
+        return location.pathname.replace(/\/$/, '');
+      }
+
       async function refresh() {
         try {
-          const response = await fetch(`${location.pathname.replace(/\/$/, '')}/status.json`, { cache: 'no-store' });
+          const response = await fetch(`${basePath()}/status.json`, { cache: 'no-store' });
           if (response.status === 404) {
             const note = document.getElementById('note');
             note.className = 'note error';
