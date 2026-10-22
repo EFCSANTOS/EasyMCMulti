@@ -4,7 +4,7 @@
 address; traffic is encrypted between the browser and Cloudflare. The address changes every time
 cloudflared restarts. Quick tunnels are meant for testing/personal use and have no uptime guarantee.
 
-Binary: Termux -> `pkg install cloudflared` (patched for Android); Windows/Linux -> downloaded from
+Binary: Termux -> `pkg install cloudflared` (patched for Android; installed automatically); Windows/Linux -> downloaded from
 the official GitHub releases into EZ_Server_Data/ if not already on PATH.
 """
 import os
@@ -41,12 +41,16 @@ def _asset_name():
 
 
 def ensure_binary(log=print):
-    """Return a cloudflared executable, downloading it if needed (never on Termux)."""
+    """Return a cloudflared executable: on PATH, else `pkg install` on Termux, else downloaded."""
     on_path = shutil.which("cloudflared")
     if on_path:
         return on_path
     if hostenv.is_termux():
-        raise RuntimeError("cloudflared is not installed. Install it in Termux with: pkg install cloudflared")
+        hostenv.termux_install("cloudflared", log)  # Termux ships a build patched for Android
+        on_path = shutil.which("cloudflared")
+        if not on_path:
+            raise RuntimeError("cloudflared was installed but is not on PATH. Restart Termux and try again.")
+        return on_path
     path = os.path.join(paths.DATA_DIR, _asset_name())
     if not os.path.exists(path):
         paths.ensure_dirs()
