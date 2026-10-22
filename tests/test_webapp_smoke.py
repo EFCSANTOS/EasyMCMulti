@@ -2788,7 +2788,7 @@ def test_console_since_returns_only_newer_lines():
 def test_chat_uses_tellraw_json_and_validates(fake_server):
     assert client.post("/api/server/chat", auth=AUTH, json={"message": "hi"}).status_code == 409
     _start()
-    tricky = 'hi "all" \ ok'
+    tricky = r'hi "all" \ ok'  # a quote and a backslash must survive the tellraw JSON
     assert client.post("/api/server/chat", auth=AUTH, json={"message": tricky}).status_code == 200
     command = fake_server[0].sent[-1]
     assert command.startswith("tellraw @a ")
