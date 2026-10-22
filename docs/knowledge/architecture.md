@@ -37,6 +37,10 @@
   `_INSTALL_BANNER`, `_TOPBAR_CONTROLS`, `_DASHBOARD_PAGES`, `_render_dashboard_page`, `SCRIPTS`,
   `ASSET_VERSION`).
 
+### `core/` additions (after the audit)
+- `fsutil.py` (atomic writes, FIX-03), `players.py` (whitelist/ops/bans JSON, UUIDs, refusal
+  parsing, FEAT-02), `modpack.py` (`.mrpack` build, loader version detection, FEAT-04).
+
 ### `webapp/auth.py`
 `validate_auth_settings`, `get_expected_credentials`, `credentials_match` (constant time),
 `password_is_weak`, `SessionStore` (in-memory tokens, sliding expiry), `LoginLimiter` (per-IP and

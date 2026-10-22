@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import os
+import threading
 from typing import Any
 
 import requests
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
-from core import modrinth
+from core import modpack, modrinth, paths
 from webapp import common
 from webapp.services import Services, require_auth
 
@@ -138,3 +140,47 @@ def register(app: FastAPI, s: Services) -> None:
         if dependencies:
             message += f" Also installed required: {', '.join(dependencies)}."
         return {"ok": True, "filename": installed, "dependencies": dependencies, "message": message}
+
+    # ---------- Client mod pack (.mrpack) for friends (FEAT-04) ----------
+    # One build at a time: hashing big jars twice in parallel only wastes the CPU.
+    modpack_lock = threading.Lock()
+
+    def ensure_modpack() -> tuple[str, dict[str, Any]]:
+        """(pack path, summary), rebuilt only when the mods changed. ValueError when not applicable."""
+        config = common._effective_config()
+        sdir = common._server_dir_for_config(config)
+        with modpack_lock:
+            summary = modpack.build(sdir, str(config.get("loader", "vanilla")), str(config.get("version", "")),
+                                    str(config.get("motd") or "Minecraft server"),
+                                    log=lambda line: append_console_line(f"[modpack] {line}"))
+        return modpack.pack_path(sdir), summary
+
+    def modpack_available() -> bool:
+        config = common._effective_config()
+        loader = str(config.get("loader", "vanilla"))
+        folder = paths.content_folder(loader, common._server_dir_for_config(config))
+        return modpack.supported(loader) and bool(folder and os.path.isdir(folder)
+                                                  and any(n.lower().endswith(".jar") for n in os.listdir(folder)))
+
+    s.ensure_modpack = ensure_modpack
+    s.modpack_available = modpack_available
+
+    @app.get("/api/modpack")
+    def modpack_info(_: str = Depends(require_auth)) -> dict[str, Any]:
+        config = common._effective_config()
+        return {"available": modpack_available(), "loader": str(config.get("loader", "vanilla"))}
+
+    @app.post("/api/modpack/build")
+    def build_modpack(_: str = Depends(require_auth)) -> dict[str, Any]:
+        try:
+            return ensure_modpack()[1]
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/modpack/download")
+    def download_modpack(_: str = Depends(require_auth)) -> FileResponse:
+        try:
+            path, summary = ensure_modpack()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return FileResponse(path, media_type="application/x-modrinth-modpack+zip", filename=summary["filename"])

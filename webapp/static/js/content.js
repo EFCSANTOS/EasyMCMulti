@@ -259,6 +259,38 @@ function initModBrowser() {
   browseMods(true);
 }
 
+// ---------- Mod pack for friends (.mrpack) ----------
+async function loadModpack() {
+  const card = document.getElementById('modpack-card');
+  if (!card) return;
+  try {
+    card.hidden = !(await fetchJson('/api/modpack')).available;
+  } catch (error) {
+    card.hidden = true;
+  }
+}
+
+function describeModpack(summary) {
+  let text = `Pack ready: ${summary.modrinth} mod(s) from Modrinth`;
+  if (summary.bundled.length) text += `, ${summary.bundled.length} bundled`;
+  if (summary.excluded.length) text += `; left out (server-only): ${summary.excluded.join(', ')}`;
+  return `${text}.`;
+}
+
+async function exportModpack(button) {
+  await runAction(button, 'Building the pack: hashing mods and asking Modrinth…', async () => {
+    const summary = await fetchJson('/api/modpack/build', 'POST');
+    const link = el('a');
+    link.href = '/api/modpack/download';
+    link.download = summary.filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    // Warnings: bundled jars (licence), undetected loader version, Modrinth offline.
+    return [describeModpack(summary), ...summary.warnings].join(' ');
+  });
+}
+
 // ---------- Worlds ----------
 function formatSize(bytes) {
   return bytes ? formatBytes(bytes) : '';
