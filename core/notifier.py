@@ -1,22 +1,26 @@
-"""Alerts: email through SMTP (e.g. Gmail with an app password) and an uptime heartbeat.
+"""Alerts: email through SMTP (e.g. Gmail with an app password), Discord webhooks and an uptime heartbeat.
 
 Email covers what the app itself can see (crashes, new dashboard link, tunnel problems).
 The heartbeat covers what it cannot: if the phone dies, loses internet or the app is killed,
 the pings to the heartbeat URL stop and the external service (e.g. healthchecks.io, free)
 emails the user.
 
-Settings live in EZ_Server_Data/notify_config.json. The SMTP password is stored there in plain
-text (like the PlayIt secret) and is never returned by the API.
+Discord (FEAT-05) has two webhooks: the owner channel gets the same alerts as email; the friends
+channel only gets online/offline, joins/leaves and the status page link (never the dashboard link).
+
+Settings live in EZ_Server_Data/notify_config.json. The SMTP password and webhook URLs are stored
+there in plain text (like the PlayIt secret) and are never returned by the API.
 """
-import json
 import os
+import re
 import smtplib
 import ssl
+import time
 from email.message import EmailMessage
 
 import requests
 
-from . import paths
+from . import fsutil, paths
 
 _CONFIG_FILE = os.path.join(paths.DATA_DIR, "notify_config.json")
 
@@ -32,36 +36,54 @@ DEFAULTS = {
     "notify_link": True,
     "notify_tunnels": True,
     "notify_updates": True,
+    "notify_security": True,
+    "notify_backup": True,
     "heartbeat_url": "",
+    # Discord webhooks (secret URLs) and what the friends channel gets.
+    "discord_owner_url": "",
+    "discord_friends_url": "",
+    "friends_notify_status": True,
+    "friends_notify_players": True,
+    "friends_notify_link": True,
 }
-PUBLIC_KEYS = [key for key in DEFAULTS if key != "smtp_password"]
+# Write-only: an empty value keeps the saved one, null removes it; the API only says whether it is set.
+SECRET_KEYS = ("smtp_password", "discord_owner_url", "discord_friends_url")
+PUBLIC_KEYS = [key for key in DEFAULTS if key not in SECRET_KEYS]
+DISCORD_WEBHOOK = re.compile(r"^https://(?:(?:ptb|canary)\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$")
+DISCORD_MAX_LENGTH = 2000
 
 
 def load_config():
     config = dict(DEFAULTS)
-    try:
-        with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
-            stored = json.load(f)
-        if isinstance(stored, dict):
-            config.update(stored)
-    except (OSError, ValueError):
-        pass
+    stored = fsutil.read_json(_CONFIG_FILE, {})
+    if isinstance(stored, dict):
+        config.update(stored)
     return config
 
 
 def save_config(update):
-    """Merge `update` into the saved settings. An empty smtp_password keeps the saved one."""
+    """Merge `update` into the saved settings.
+
+    Secrets (SECRET_KEYS): empty keeps the saved value, None removes it. Raises ValueError for a
+    webhook URL that isn't a Discord webhook.
+    """
     config = load_config()
     for key, value in update.items():
         if key not in DEFAULTS and key != "last_link":
             continue
-        if key == "smtp_password" and not value:
-            continue
+        if key in SECRET_KEYS:
+            if value is None:
+                config[key] = ""
+                continue
+            if not value:
+                continue
+            if key.startswith("discord_") and not DISCORD_WEBHOOK.match(str(value).strip()):
+                raise ValueError("That is not a Discord webhook URL (Server settings → Integrations → Webhooks → Copy URL).")
+            value = str(value).strip()
         config[key] = value
     config["smtp_port"] = int(config.get("smtp_port") or 587)
     paths.ensure_dirs()
-    with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
+    fsutil.write_json_atomic(_CONFIG_FILE, config)
     return config
 
 
@@ -70,6 +92,8 @@ def public_config():
     config = load_config()
     data = {key: config[key] for key in PUBLIC_KEYS}
     data["password_set"] = bool(config.get("smtp_password"))
+    data["discord_owner_set"] = bool(config.get("discord_owner_url"))
+    data["discord_friends_set"] = bool(config.get("discord_friends_url"))
     return data
 
 
@@ -97,6 +121,24 @@ def send_email(config, subject, body):
             smtp.starttls(context=context)
             smtp.login(config["smtp_user"], config["smtp_password"])
             smtp.send_message(msg)
+
+
+def send_discord(url, content):
+    """Post one message to a Discord webhook. Waits once on a 429 (rate limit). Raises on failure."""
+    body = {"content": content[:DISCORD_MAX_LENGTH], "allowed_mentions": {"parse": []}}  # no @everyone from names
+    for attempt in range(2):
+        response = requests.post(url, json=body, timeout=15)
+        if response.status_code == 429 and attempt == 0:
+            try:
+                wait = float(response.json().get("retry_after", 1))
+            except ValueError:
+                wait = 1.0
+            time.sleep(min(wait, 10.0))
+            continue
+        if response.status_code >= 400:
+            raise RuntimeError(f"Discord answered HTTP {response.status_code}")
+        return
+    raise RuntimeError("Discord rate limit: try again in a moment")
 
 
 def ping_heartbeat(url):

@@ -1,16 +1,25 @@
 # Testing
 
 ## Layout
-`tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
+`tests/test_webapp_smoke.py` (+ `tests/fixtures/logs/` for FEAT-08); sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-76 passed (~15 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+190 passed (~34 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
+
+## Patching
+Routers use shared helpers as `common.NAME`, so monkeypatch `common_module` (`webapp.common`) for
+`_effective_config`, `_server_is_installed`, `ServerProcess`, `update_properties`, `accept_eula`,
+`psutil`, timeouts (`CRASH_RESTART_DELAY_SEC`, `PLAYIT_RETRY_SEC`, `WEB_TUNNEL_RETRY_SEC`) and
+`_host_ram_mb`; core functions are patched on their `core` module (`downloaders.prepare`, …).
 
 ## Data isolation
 Autouse fixture `isolated_data_dir` redirects `paths.DATA_DIR/JAVA_DIR/SERVERS_DIR`,
 `config_store._FILE` and `playit._CONFIG_FILE` to `tmp_path`, so tests no longer touch the real
 `EZ_Server_Data/`. Any new module-level path constant derived from `paths.DATA_DIR` must be added to
-this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
+this fixture. It also clears `app.state.sessions`, `app.state.login_limiter` and the shared
+client's cookies, so a lockout or login in one test never leaks into the next; tests that need a
+browser session use their own `TestClient(app)` (optionally `client=(ip, port)` to pick the peer
+IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 `playit_config.json` — a real install may still contain leftovers such as `motd: "Advanced test"`,
 `server_port: 25566`, or a `demo-secret` PlayIt config.)
 
@@ -29,9 +38,13 @@ this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.j
 - `/` dashboard content; `/dashboard/{7 sections}`; `#action-status` and server controls on every
   page; each feature's controls present on its page; Advanced page save button; no credentials in HTML.
 - **JS ↔ API contract**: `test_dashboard_js_only_calls_existing_api_routes` regex-extracts every
-  `/api/...` literal in `dashboard.js` and asserts a matching route exists (templated URLs match by
+  `/api/...` literal in every script of `layout.SCRIPTS` (`_dashboard_js()`) and asserts a matching route exists (templated URLs match by
   prefix).
 - `/api/console`, `/api/status` (401 unauth, 200 auth with keys).
+- Login (FIX-01): cookie flags and cookie auth, lockout after 5 failures (also for the right
+  password and Basic auth), expiry with a patched `clock`, per-IP isolation, spoofed vs loopback
+  `CF-Connecting-IP`, global ceiling, one security alert per lockout, logout, sliding session
+  expiry, CSRF (non-JSON / cross-origin → 403), WS with cookie, `weak_password` flag.
 - `/api/modrinth/install` forwards `project_id`; mod upload → 400 for vanilla.
 - `/api/backups`, `/api/mods` keys.
 - `/api/admin/{9 actions}` status ∈ {200,409,400}.
@@ -43,6 +56,69 @@ this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.j
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Storage (FEAT-15, `storage_tree` fixture): breakdown sizes and flags, Java need from server
+  versions; deletes refused for the active dir, backups, unknown ids and while running; low-space
+  alert once until recovered.
+- Known flake: one unidentified failure seen once in ~10 full runs while headless Edge was busy;
+  not reproducible since (QUAL-02 restructures the suite).
+- Identity (FEAT-14): icon checks from raw PNG headers (size, type, 64 KB); extra properties round
+  trip, managed/locked/bad keys and multi-line values → 422, null removes; MOTD `§` written as
+  `\u00a7` with the owner's `\n` intact; `MANAGED` equals the Settings form's keys.
+- Performance (FEAT-13): flag variants (phone, > 12 GB), launch args with the switch on/off and extra
+  args appended; extra-args validation (`-jar`, `@file`, newline, bare words, bad quoting → 422);
+  host info endpoint and the Performance card render.
+- Activity (FEAT-12): playtime/sessions/online from a synthetic join/leave/stop stream (plus a
+  half-written line), hour averages; compaction keeps totals; the server output and a crash feed the log.
+- Live console (FEAT-11): `?since=` returns only newer lines; chat builds valid `tellraw` JSON even
+  with quotes/backslashes, 409 when stopped, one-line/length validation; filter and chat controls render.
+- Pure status (FIX-06): two GETs around a config change return the new loader/version and addresses
+  while the `runtime` fields stay untouched; the handler source has no `runtime.x =` assignment.
+- Mod updates (FEAT-07, `outdated_mods` fixture fakes `mod_updates.requests.post`/`download` and
+  `modrinth.install`): one bulk request finds two updates; update replaces the jar, keeps `.old`,
+  updates the record, installs the dependency, backs up first; undo restores; a corrupted download
+  changes nothing; 409 while running; `.old` removed after 5 min of running; vanilla → 400.
+- Diagnosis (FEAT-08): every rule against a real-format snippet in `tests/fixtures/logs/` (add a
+  fixture there for each new rule); crash → stored diagnosis + "Likely cause" in the alert, cleared on
+  start; EULA fix; kill only Java (fake psutil); log list/view (truncation, .gz), download, traversal.
+- Schedule (FEAT-06, `scheduler_tick(datetime)` with fixed times): warnings at 10/5/1 then one
+  restart a day; a late joiner hears the real minutes left; no restart when >30 min late; idle stop
+  only after N empty minutes, cancelled by a join, `stopped_reason` shown and cleared, friends told
+  once; quiet hours wrap midnight and block autostart; time/minute validation.
+- Backups (FEAT-01): name parsing (old and labelled); retention picks the right set and spares
+  manual backups; `backup_tick` with a patched clock only backs up a changing world and sends
+  `save-off`/`save-all flush`/`save-on`; manual vs safety labels and pruning; low disk → 500 +
+  alert; deleting a world makes an `auto-pre-delete` backup and is refused when it fails; config ranges.
+- Dashboard scripts: no top-level name defined twice across the shared-scope scripts.
+- Discord (FEAT-05, `discord_posts` fixture stubs `notifier.send_discord`, batch window 0.05 s):
+  webhook URLs write-only and validated; owner alerts only to the owner hook; friends hook gets
+  online (with address)/offline/joins and never a trycloudflare link; status page link to friends;
+  join+leave in one batch says nothing; switches; 429 retry; test button posts to both.
+- Mod pack (FEAT-04, `fabric_server` fixture fakes `modpack._lookup`/`_projects`): index format,
+  hashes and env; server-only mod excluded; unknown jar in `overrides/mods/`; cached until a jar
+  changes; Modrinth down → all bundled; Paper/empty → 400; loader version detection for
+  Fabric/Forge/NeoForge; friends download it signed out from the status page.
+- Status page (FEAT-03, `offline_network` fixture fakes `netinfo.public_ip`/`lan_ip`): off by
+  default (404, owner API needs auth); only public fields and no secrets/emails/LAN IP/token in page
+  or JSON; show-LAN/show-names switches; PlayIt address preferred, public IP fallback; regenerate and
+  disable kill the old link; token refused by `PUT /api/config`; invite text with mods required;
+  new-link email carries the status link.
+- Players (FEAT-02): stopped-server whitelist edit writes the offline UUID (Notch →
+  `b50ad385-…`); online mode resolves through a faked Mojang API (unknown → 400); running server
+  sends the right commands (`SYNC_WAIT_SEC` patched small); bad names/levels/IPs/reasons → 400;
+  409 while a lifecycle job holds the lock; refused joins land in "Recently seen".
+- Input validation (FIX-05): bad player names / multi-line or over-long commands → 400 and nothing
+  sent; each bad config field → 422 naming it, unknown key → 422, nothing saved; `ram_mb` above host
+  RAM (`_host_ram_mb` patched) → 422; start payload validated; stored garbage → defaults + one console
+  warning, and start still works.
+- Atomic writes (FIX-03): `.bak` kept and no `.tmp` left for every settings file; a truncated
+  `launcher_config.json` is restored from `.bak`, repaired on disk and logged; a failed replace
+  leaves the original intact; `PUT /api/config` → 500 on a disk error. Patch inside
+  `monkeypatch.context()` — `monkeypatch.undo()` would also undo the data-dir redirect.
+- Lifecycle jobs (FIX-02/04): create returns 202 within 2 s and installs on the thread (gated fake
+  `prepare`); every lifecycle route → 409 "Busy" while one runs; 4 concurrent starts → one 202 and
+  one process; a failed install → `install_status="failed"` + `operation_error` + console line; the
+  crash-restart path waits for the lock and doesn't double-start. Helpers `_start()` and
+  `_wait_idle()` wait for the background job — use them instead of a bare start POST.
 - Player tracking from join/leave lines (incl. chat-spoof rejection).
 - Backup list + restore round trip; restore rejects zip-slip archives and paths outside the server dir.
 - `/api/playit/config` never returns the secret; wrong password → 401.

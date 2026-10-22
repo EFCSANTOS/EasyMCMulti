@@ -26,6 +26,11 @@
   box-sizing: border-box;
 }
 
+/* `hidden` must win over classes that set display (grid/flex rows, the icon placeholder…). */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -532,6 +537,12 @@ input::placeholder {
   color: var(--faint);
 }
 
+/* Set by markInvalidFields when the server rejects a value (422). */
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
+  border-color: var(--critical);
+}
+
 .hint {
   display: block;
   margin-top: 0.3rem;
@@ -842,6 +853,38 @@ input::placeholder {
   transform: translateX(-50%);
 }
 
+/* Players → Activity: 24 bars, average players online per hour of day. */
+.activity-chart svg {
+  display: block;
+  width: 100%;
+  height: 140px;
+}
+
+.activity-chart .bar {
+  fill: var(--series-1);
+  pointer-events: none; /* the wider .bar-hit rect underneath takes the hover */
+}
+
+.activity-chart .bar-hit {
+  fill: transparent;
+  cursor: default;
+}
+
+.activity-chart .bar-hit:hover + .bar,
+.activity-chart .bar.is-hover {
+  fill: #5a9ef0;
+}
+
+.activity-chart .axis-label {
+  fill: var(--faint);
+  font-size: 11px;
+}
+
+.activity-chart .baseline {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
 .chart-tip strong {
   font-variant-numeric: tabular-nums;
 }
@@ -1047,6 +1090,139 @@ input::placeholder {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* RAM advice when the value is too high for the device. */
+.hint.hint-error {
+  color: var(--critical);
+}
+
+/* ---------- Server identity (FEAT-14) ---------- */
+.motd-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+
+.motd-swatch {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* Looks like an entry in Minecraft's multiplayer list. */
+.motd-preview {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: #000;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.motd-preview-icon {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #5cb85c 0 34%, #3f8f3a 34% 42%, #8b5a2b 42% 100%);
+}
+
+.motd-preview-name {
+  color: #fff;
+}
+
+#motd-preview {
+  color: #aaaaaa;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.icon-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.server-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  image-rendering: pixelated;
+}
+
+.server-icon-empty {
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border-strong);
+  color: var(--faint);
+  font-size: 0.75rem;
+}
+
+.properties-list {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.property-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 220px);
+  gap: 0.25rem 0.75rem;
+  align-items: center;
+}
+
+.property-row code {
+  font-size: 0.85rem;
+}
+
+.property-row .hint {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+@media (max-width: 560px) {
+  .property-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Small heading inside a card (e.g. "Discord" in the Alerts card). */
+.subhead {
+  margin: 1.5rem 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+/* Crash diagnosis card: stands out from the normal cards. */
+.callout-card {
+  border-left: 3px solid var(--critical);
+}
+
+/* ---------- Invite card ---------- */
+.invite-text {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .mod-toolbar {

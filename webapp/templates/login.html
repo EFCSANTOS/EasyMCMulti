@@ -128,19 +128,17 @@
     </main>
 
     <script>
-      function buildBasicAuth(username, password) {
-        return 'Basic ' + btoa(username + ':' + password);
-      }
-
       function showError(message) {
         document.getElementById('error-message').textContent = message || '';
       }
 
-      window.addEventListener('load', () => {
-        const username = sessionStorage.getItem('ez_auth_username');
-        const password = sessionStorage.getItem('ez_auth_password');
-        if (username && password) {
-          window.location.href = '/dashboard';
+      // Already signed in (the session cookie is HttpOnly, so ask the server).
+      window.addEventListener('load', async () => {
+        try {
+          const response = await fetch('/api/session', { credentials: 'same-origin' });
+          if (response.ok) window.location.href = '/dashboard';
+        } catch (error) {
+          // offline; stay on the form
         }
       });
 
@@ -157,17 +155,19 @@
         button.disabled = true;
         showError('');
         try {
-          const response = await fetch('/api/status', {
-            headers: { Authorization: buildBasicAuth(username, password) },
+          const response = await fetch('/api/login', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
           });
           if (response.status === 401) {
             throw new Error('Wrong username or password.');
           }
           if (!response.ok) {
-            throw new Error(`Server error (HTTP ${response.status}).`);
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.detail || `Server error (HTTP ${response.status}).`);
           }
-          sessionStorage.setItem('ez_auth_username', username);
-          sessionStorage.setItem('ez_auth_password', password);
           window.location.href = '/dashboard';
         } catch (error) {
           showError(error.message || 'Authentication failed.');

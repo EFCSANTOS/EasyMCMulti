@@ -1,25 +1,12 @@
 # Verification & Gaps
 
-## Must fix (next commits)
-**Login is LAN-grade but can now be reached from the internet.** The optional remote dashboard
-(`POST /api/remote-dashboard`, Cloudflare quick tunnel, 2026-10-22) is HTTPS, so the password is
-encrypted in transit, but:
-- no lockout or rate limit on wrong passwords — anyone with the link can brute-force;
-- Basic auth re-sends the password on every request, and the browser keeps it in `sessionStorage`;
-- Cloudflare sees traffic in clear at its edge (TLS terminates there).
-
-Owner decision 2026-10-22: ship remote access with the current login, fix in an upcoming commit.
-**Priority raised:** since 2026-10-22 the link is **on by default** (`remote_dashboard` default
-True), so every install is reachable from the internet unless the owner switches it off.
-Required fix: server-side login sessions (HttpOnly, Secure, SameSite cookie, expiry), failed-login
-lockout / backoff (per client IP from `CF-Connecting-IP` when behind the tunnel), minimum password
-length enforced at startup when remote access is enabled, and stop storing the password
-client-side. Mitigations shipped meanwhile: confirm dialog + callout on the Remote page, random
-unlisted link that changes on every restart, `termux-setup.sh` requires a 12+ character password. Marked in code at
-`webapp/auth.py` ("MUST FIX").
+## Must fix
+Nothing open. The login hardening that was here (sessions + lockout for the internet-facing
+dashboard link, on by default) shipped as FIX-01 — see "Security" below. Remaining by-design
+limit: Cloudflare sees traffic in clear at its edge (TLS terminates there).
 
 ## Fetch status
-Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/dashboard.js`, `templates/*.html`),
+Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/*.js`, then one `dashboard.js`, `templates/*.html`),
 `tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 76 passed.
 UI redesign (2026-10-22) verified with headless Edge screenshots at 1440 px and 390 px.
 Same day: cleanup + English-only pass + GUI feature check (see "Fixed 2026-10-22").
@@ -29,7 +16,8 @@ GUI verified by: smoke tests, a live uvicorn boot hitting every page and the GUI
 server / PlayIt agent.
 
 ## Verified route table
-UI: `/`, `/login`, `/dashboard`, `/dashboard/{section}`, `/dashboard.css`, `/dashboard.js`.
+UI: `/`, `/login`, `/dashboard`, `/dashboard/{section}`, `/dashboard.css`, `/js/{name}` (only names in
+`layout.SCRIPTS`).
 Health: `/health`.
 Metrics aliases: `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/metrics`.
 Status/console: `/api/status`, `/api/console`.
@@ -43,22 +31,35 @@ Admin: `POST /api/admin/{action}`.
 Modrinth: `GET /api/modrinth/search`, `POST /api/modrinth/install`.
 PlayIt: `GET /api/playit/status`, `POST /api/playit/{configure,start,stop}`, `GET`/`PUT /api/playit/config`.
 Remote dashboard: `GET/POST /api/remote-dashboard`.
-WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
+Auth: `POST /api/login`, `POST /api/logout`, `GET /api/session`.
+WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failure).
 
 ## GUI feature status (dashboard ↔ API)
 | Feature | Status |
 |---|---|
-| Login / sign out | Works (sessionStorage Basic auth) |
+| Login / sign out | Works — HttpOnly session cookie, lockout after 5 wrong passwords (FIX-01) |
 | Loader + version pickers | Works — versions fetched from `/api/versions/{loader}`, refreshed on loader change |
 | Save config (Setup and Advanced pages) | Works — saves only the fields present on the page |
-| Create / start / stop / restart server | Works (restart waits for exit; see below) |
-| Console | Works — polled every 2 s via `GET /api/console` |
+| Create / start / stop / restart server | Works — background jobs (202), one at a time (409 "Busy"), progress banner on every page; live-checked in headless Edge with a slow fake install |
+| Console | Works — live over `/ws/console` (headless Edge: a command echoed in 0.03 s, no polling while the socket is open); `?since=` polling fallback; filters, search, ↑ history, Tab completion; chat box on the overview |
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
+| Storage use and cleanup | Works in tests (synthetic tree: sizes, active/unused, Java need, safe deletes, low-space alert once) and headless Edge (unused server folder deleted; the active one has no Delete) |
+| Server icon, MOTD editor, all properties | Works in tests and headless Edge (a 300×200 JPEG became a 64×64 PNG; two-line coloured MOTD preview; property filter/save; managed keys disabled). **Not yet seen in a real Minecraft multiplayer list** |
+| Performance presets, RAM advice, JVM flags | Works in tests and headless Edge on a simulated 4 GB phone (every preset capped at 2048 MB, red advice above it); the flags are not yet run against a real JVM here |
+| Player activity and playtime | Works in tests (sessions, stops, crash mid-session, compaction, half-written line) and headless Edge (10 days of synthetic play: rows, chart, tooltip at phone width) |
+| Mod updates (check, update, undo) | Works in tests (fake Modrinth: one request, hash check, dependency, rollback, cleanup) and against the live Modrinth API (old Lithium 0.13.0 → 0.15.4 offered, downloaded, hash-verified, `.old` kept, re-check empty); UI not yet clicked through with real mods |
+| Crash diagnosis + log viewer | Works in tests (8 real-format log fixtures in `tests/fixtures/logs/`, alert text, fixes, traversal) and headless Edge (fake Fabric crash → card with "Install sodium" on Overview without opening the console; log list and viewer) |
+| Schedule (daily restart with chat warnings, idle stop, quiet hours) | Works in tests with a patched clock and headless Edge (settings save and reload); **not yet run against a real Minecraft server** |
+| Scheduled backups, retention, safety backups | Works in tests (patched clock, quiet save sequence, low-disk guard, delete safety) and headless Edge (manual backup listed with kind/size/total, schedule saved); **quiet save not yet run against a real Minecraft server** |
 | Mod browser (browse/category/sort/details, install + dependencies, remove), upload jars | Works; live read-only check against Modrinth; vanilla → 400 with explanation |
+| Discord alerts (owner + friends webhooks) | Works in tests (routing, batching, switches, rate limit, URL never returned) and headless Edge (invalid URL rejected, save/remove); **not yet posted to a real Discord webhook** |
+| Mod pack export (.mrpack) | Works in tests (faked Modrinth) and against the live Modrinth API (Fabric API, Lithium, spark: every CDN download matched the index's SHA-512 and size); headless Edge export downloads the file. **Not yet imported into Prism Launcher / Modrinth App** |
+| Invite friends + public status page | Works in tests and headless Edge (invite text, enable/regenerate/disable, signed-out public page at desktop and phone width); copy uses a textarea fallback when the Clipboard API is denied |
+| Players (whitelist on/off, add/remove, operators with level, unban, recently seen) | Works in tests (commands while running, JSON + offline/Mojang UUIDs while stopped) and in headless Edge (stopped server, desktop + phone width); not yet tried against a real running server |
 | Worlds (upload, switch, rename, download, delete, new) | Works in tests (incl. real zip handling); not yet tried with a large real world over the Cloudflare link (~100 MB upload limit) |
 | PlayIt configure / start / stop / status | Works; configure runs in the background and the dashboard shows the approval link (open from any device); "Change account" resets |
-| Remote dashboard (Cloudflare) | Works: live-checked on Windows 2026-10-22 (download, registration-gated link, request served through `trycloudflare.com`); login caveat — see Must fix |
+| Remote dashboard (Cloudflare) | Works: live-checked on Windows 2026-10-22 (download, registration-gated link, request served through `trycloudflare.com`); login has sessions + lockout |
 | ~~Dashboard over PlayIt~~ | Removed: PlayIt's `/tunnels/create` rejects untyped tunnels (`TunnelTypeRequiresDescription`); `/v1/tunnels/create` rejected every body that matches the published client ("failed to parse body"); the website did not let the owner add a custom TCP tunnel either |
 | System metrics charts | Works (overview only) |
 | Player count + names | Works — parsed from server join/leave console lines |
@@ -91,9 +92,8 @@ WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
   `demo-secret` via `test_playit_start_route_starts_the_tunnel`) → autouse `isolated_data_dir` fixture.
 
 ## Documentation vs implementation conflicts (open)
-1. **`/api/status` mutates runtime** (sets loader/version/lan/public/playit) on a GET; side-effectful read.
-2. **Browser never uses `/ws/console`** — browsers cannot set `Authorization` on a WebSocket; the
-   route is only usable by non-browser clients (and the test). The GUI polls REST instead.
+1. ~~`/api/status` mutates runtime~~ → fixed by FIX-06: a pure read that merges derived values.
+2. ~~Browser never uses `/ws/console`~~ → fixed: cookie sessions (FIX-01) + live console (FEAT-11).
 ## Security
 Fixed 2026-10-22:
 - `GET /api/playit/config` returned the PlayIt secret key → now `{address, secret_present}` only.
@@ -103,12 +103,25 @@ Fixed 2026-10-22:
 - Credentials compared with `!=` → `secrets.compare_digest` (`auth.py::_credentials_match`).
 - `run.bat` hard-coded `admin`/`admin` → uses env vars or prompts (password hidden).
 - `crash_reporter.DEV_EMAIL` third-party address → module deleted.
+- Login was Basic auth re-sent on every request, kept in `sessionStorage`, with no limit on wrong
+  passwords (FIX-01) → `POST /api/login` sets an in-memory session cookie (`ezmc_session`,
+  HttpOnly, SameSite=Strict, Secure via the tunnel, 7-day sliding expiry); 5 wrong passwords per IP
+  in 15 min, or 30 overall, lock sign-in for 15 min (429 + `Retry-After`) and send a `security`
+  alert. Basic auth still works for scripts and shares the counter. Cookie-authenticated writes must
+  be JSON/multipart from the same origin, and cookie WebSockets same-origin (CSRF/CSWSH).
+  `CF-Connecting-IP` is trusted only from loopback (cloudflared). Weak password (< 12
+  chars) with the link on → startup warning + Remote page banner.
 
 Open / by design:
-- UI routes (`/`, `/login`, `/dashboard/*`, `/dashboard.{css,js}`, `/health`) are unauthenticated:
+- UI routes (`/`, `/login`, `/dashboard/*`, `/dashboard.css`, `/js/*`, `/health`) are unauthenticated:
   static shells only; all data goes through authenticated `/api/*` (decisions.md).
-- Credentials live in browser `sessionStorage` and travel as Basic auth (plain HTTP on the LAN,
-  HTTPS through the Cloudflare link); **must fix** before relying on remote access (top of this file).
+- Public status page `/s/<token>` (opt-in, off by default): anyone with the link sees the server
+  name, state, player count (and names unless hidden) and join address. Without PlayIt the address
+  is the owner's **public IP**; the switch hint says so. Tests assert no secrets, emails, the LAN IP
+  (unless "show LAN" is on) or the token itself appear in the page or JSON.
+- On the LAN the dashboard is plain HTTP, so the password crosses the network in clear once per
+  login (HTTPS through the Cloudflare link). Sessions live in memory: a dashboard restart signs
+  everyone out.
 - `playit_config.json` stores the secret in plaintext on the host; `notify_config.json` stores the
   SMTP app password in plaintext (never returned by the API). Use an app password, not the account
   password, so it can be revoked on its own.

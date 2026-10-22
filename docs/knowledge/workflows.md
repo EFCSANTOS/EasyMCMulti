@@ -2,15 +2,23 @@
 
 ## 1. Authentication
 `create_app()` → `validate_auth_settings()` raises `RuntimeError` if env vars missing.
-REST: `require_auth` → `verify_credentials`. WS: `verify_basic_auth_header`; failure → `close(1008)`.
-Browser: `/login` form → `GET /api/status` probe → creds in `sessionStorage` → every request sends
-Basic header. Sign out clears `sessionStorage` only (no server session exists).
+REST and WS: `auth.authenticate` accepts the `ezmc_session` cookie or HTTP Basic; WS failure →
+`close(1008)`.
+Browser: `/login` form → `POST /api/login {username, password}` → `Set-Cookie: ezmc_session`
+(HttpOnly, SameSite=Strict, Secure when `X-Forwarded-Proto: https` / `CF-Connecting-IP`, 7 days,
+sliding) → the browser sends it on every request. Sign out → `POST /api/logout` deletes the session.
+Lockout: a wrong password (login or Basic) counts per client IP (`CF-Connecting-IP` only when the
+peer is loopback, i.e. cloudflared); 5 in 15 min → 429 + `Retry-After` for 15 min; 30 across all IPs
+→ everyone locked for 15 min. First lockout → `[auth]` console line + `security` alert. A live
+session keeps working during a lockout. Startup logs a warning when the link is on and the password
+is under 12 characters; `GET /api/remote-dashboard` returns `weak_password` for the Remote page banner.
 
 ## 2. Dashboard
 - `/` → `_render_dashboard_page("overview")`
 - `/dashboard` → 302 to `/dashboard/overview`
 - `/dashboard/{section}` → page; unknown → 404
-- `/dashboard.css`, `/dashboard.js` → `FileResponse` from `webapp/static/...`
+- `/dashboard.css`, `/js/{name}` (names in `pages/layout.py::SCRIPTS`, else 404) → `FileResponse`
+  from `webapp/static/...`; pages load the scripts in `SCRIPTS` order with `?v=ASSET_VERSION`
 - `/login` → `webapp/templates/login.html`
 - Every page: top bar with `#server-state` pill and Start/Restart/Stop (enabled by state), toast
   `#action-status`.
@@ -45,16 +53,20 @@ from Adoptium, extracts to `java/jre-<N>/`, deletes the zip.
 paper: latest build; fabric: latest stable loader+installer server jar). forge/neoforge download
 `installer.jar` and run `java -jar installer.jar --installServer` (non-zero exit → `RuntimeError`).
 Forge build = `<mc>-recommended` else `<mc>-latest` promo; NeoForge = highest matching build.
-Install runs synchronously inside the HTTP request (can take minutes).
+Install runs on a background lifecycle job (§5b), never inside the HTTP request (can take minutes;
+the Cloudflare link drops requests after ~100 s).
 
 ## 4. Create server
-`POST /api/server/create`: merge payload → save → `ensure_server_installed` →
-`update_properties(**_server_properties_from_config)`. Returns state/operation/loader/version/server_dir.
+`POST /api/server/create`: 409 if the server runs; merge payload → save → **202**
+`{state, operation:"creating", loader, version, message}`; the job (`install_server`) runs
+`ensure_server_installed` → `update_properties(**_server_properties_from_config)` and ends with
+`operation_message="Server <loader> <version> is ready."`.
 
 ## 5. Start
 `POST /api/server/start`:
-- If running → `{message:"Server already running."}`.
-- Merge payload → save → `state/operation="starting"`.
+- If running → 200 `{message:"Server already running."}`.
+- Merge payload → save → clear `crash_times` → **202** `state/operation="starting"`; the job runs
+  `launch_server()` (below) and ends with `operation_message="Server started."`.
 - Define `on_exit` (console line; state→stopped, process=None **only if `runtime.process` is still
   this process**, so a late exit from a restarted process cannot clobber its replacement).
 - `ensure_server_installed` → `update_properties` → `ensure_java` → `launch_args(loader, java, dir, ram)`.
@@ -62,14 +74,15 @@ Install runs synchronously inside the HTTP request (can take minutes).
 - `state="running"`, `operation="idle"`, console `"[server] started with {loader} {version}"`.
 
 ## 5a. Always-on (config keys `autostart_server`, `autostart_playit`, `auto_restart`)
-- `launch_server(payload=None)` holds the start logic; `POST /api/server/start` clears
-  `runtime.crash_times` (re-arms crash restarts) and calls it.
+- `launch_server(payload=None)` holds the start logic (caller holds the lifecycle lock);
+  `POST /api/server/start` clears `runtime.crash_times` (re-arms crash restarts) and runs it as a job.
 - Crash = exit code ≠ 0 while `runtime.stop_requested` is False (set by Stop, Restart, a console
   `stop`/`/stop`, and shutdown; cleared by `launch_server`). With `auto_restart` (default True),
   `handle_crash` schedules `restart_after_crash` after `CRASH_RESTART_DELAY_SEC` (10 s) on a daemon
   `threading.Timer`; more than `CRASH_RESTART_LIMIT` (3) crashes within `CRASH_WINDOW_SEC` (600 s)
-  → `state="crashed"` and a console message instead. The timer re-checks `stop_requested` and
-  whether a server is already running before launching.
+  → `state="crashed"` and a console message instead. The timer calls `launch_when_free`, which
+  waits up to `LIFECYCLE_WAIT_SEC` (600 s) for the lifecycle lock, then re-checks `stop_requested`
+  and whether a server is already running before launching. Autostart/resume use the same helper.
 - FastAPI `lifespan` (`_lifespan`): startup calls `app.state.autostart()` — background threads for
   `start_agent_and_tunnels` (if `autostart_playit` and a secret exists) and `launch_server` (if
   `autostart_server`); failures go to the console as `[autostart] …`. `EZ_NO_AUTOSTART=1` skips it.
@@ -77,19 +90,48 @@ Install runs synchronously inside the HTTP request (can take minutes).
   `SHUTDOWN_STOP_TIMEOUT_SEC` (45 s) then kill, and stops the PlayIt agent, so no orphan Java keeps
   the port or world lock across dashboard restarts. (TestClient without `with` runs neither.)
 
+## 5b. Lifecycle jobs and the lifecycle lock (FIX-02 / FIX-04)
+- `runtime.lifecycle` (non-reentrant `threading.Lock`) is held for the whole of any operation that
+  changes the server process: create/install, start, stop, restart, world switch, backup restore.
+- Routes never wait: `lifecycle.acquire(blocking=False)` or **409** `"Busy: <operation> in progress…"`.
+  Background callers (crash timer, autostart, resume after update) use `launch_when_free`.
+- `start_lifecycle_job(operation, job, failure, state=None)`: takes the lock, sets
+  state/operation, clears `operation_error`/`operation_message`, runs `job` on a daemon thread and
+  releases the lock when it ends. Success → `operation_message` = the job's return value. Failure →
+  state `running`/`stopped` by whether a process is alive, `operation="idle"`,
+  `operation_error="<failure>: <exc>"` and a `[server]` console line (an install failure also sets
+  `install_status="failed"`).
+- State changes go through `RuntimeState.set_state(state, operation)` (under `runtime.lock`).
+- Browser: lifecycle buttons get 202 + a message toast; `trackOperation` marks the operation as
+  running; the status poll runs every 1 s (`STATUS_BUSY_POLL_MS`) while `operation != "idle"` or an
+  install runs, else every 5 s, and on busy → idle toasts `operation_error` (error) or
+  `operation_message`. Start/Stop/Restart stay disabled while an operation runs. The install banner
+  (`_INSTALL_BANNER`) is on every page.
+
 ## 6. Stop / restart / command
-- Stop: sets `stop_requested`; if not running → message; else `state/operation="stopping"`,
-  `process.stop()` (sends `"stop"`).
-- Restart: `stop_server(_)` → `_wait_for_exit(process, RESTART_STOP_TIMEOUT_SEC=60)` → on timeout
-  console line + `process.kill()` + wait 10 s → `start_server(None, _)`. Blocks the request while the
-  world saves.
-- Command: empty → 400; not running → 409; else `process.send(cmd)` + console `"> cmd"`.
+- Stop: 409 if a lifecycle job runs; sets `stop_requested`; if not running → message; else
+  `state/operation="stopping"`, `process.stop()` (sends `"stop"`); returns at once.
+- Restart: **202**, job `restart_job` = `stop_and_wait()` (`request_stop` →
+  `_wait_for_exit(process, RESTART_STOP_TIMEOUT_SEC=60)` → on timeout console line +
+  `process.kill()` + wait 10 s) → `launch_server()`.
+- Command: `validation.require_command` → 400 if empty, longer than 256 or containing a line break /
+  control character (one stdin line, always); not running → 409; else `process.send(cmd)` + console
+  `"> cmd"`.
 
 ## 7. Console
-`GET /api/console` → `{lines: list(history)}`. WS replays last 500, then streams via queue.
-`publish` trims, appends history, drops oldest when queue full, thread-safe.
-Browser: `refreshConsole` polls `GET /api/console` every 2 s (keeps scroll pinned to bottom); the
-GUI does not use the WS because browsers cannot send Basic auth on a WebSocket.
+`GET /api/console[?since=<n>]` → `{lines, last}`: every publish increments
+`WebSocketManager.last_seq`; with `since` only the lines after that sequence number
+(`lines_since`). WS replays last 500, then streams via queue. `publish` trims, appends history,
+drops oldest when queue full, thread-safe.
+Browser (FEAT-11, `console.js`): `startConsole` loads the history, then opens `/ws/console` (session
+cookie; `wss://` through the Cloudflare link) and appends each message (DOM capped at 2000 lines,
+`textContent` only). If the socket closes or can't open: full reload, then poll `?since=<last>`
+every `CONSOLE_POLL_MS` (2 s) and retry the socket every 30 s. Console page: filter Everything / Chat
+only (`]: <Name> …` or `[chat] …`) / Warnings & errors, plus a search box. Command box: ↑/↓ recall
+the last 50 commands (`localStorage` `ez_command_history`), Tab completes an online player's name.
+Chat (overview): `POST /api/server/chat {message}` (one line, ≤ 200 chars, 409 when stopped) sends
+`tellraw @a ["", {"text": "[Dashboard] "…}, {"text": "<user>: "…}, {"text": message}]` built with
+`json.dumps`, and logs `[chat] <user>: <message>`.
 
 ## 8. Versions
 `GET /api/versions/{loader}`: unknown loader → 400; `downloaders.list_versions(loader, include_snapshots=False)`;
@@ -99,9 +141,12 @@ forge/neoforge MC versions derived from promos/Maven, sorted by `_version_key` d
 NeoForge→MC mapping `_neoforge_to_mc`: `21.1.x`→`1.21.1`, `21.0.x`→`1.21`, major ≥25 → `<a>.<b>`.
 
 ## 9. Status
-`GET /api/status`: refresh loader/version from config; `netinfo.lan_ip()` / `public_ip()` (cached
-5 min); `_playit_state` → `"running"` (agent alive) / `"configured"` / `"not-configured"`; address
-fallback to public IP; returns `runtime.snapshot()` (PlayIt nested under `playit.{state,address}`).
+`GET /api/status` → `system.py::status_payload(config)`, a **pure read** (FIX-06): `runtime.snapshot()`
+with loader/version from the config, `netinfo.lan_ip()` / `public_ip()` (cached 5 min), and
+`playit.{state, address}` (`_playit_state` → `"running"` (agent alive) / `"configured"` /
+`"not-configured"`; address falls back to the public IP) merged into the returned dict — nothing
+is assigned to `runtime`. Loader/version are stored on `runtime` where they change (config save,
+create, start).
 Browser polls it every 5 s; displayed join addresses append the port from the loaded config.
 The Remote page additionally calls `GET /api/playit/status` for the real tunnel address.
 
@@ -109,11 +154,33 @@ The Remote page additionally calls `GET /api/playit/status` for the real tunnel 
 Aliases `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/metrics` →
 `{cpu, ram, ramTotal, uptime}` (psutil or Windows ctypes fallback).
 
-## 11. Backups
-- Create: zip the **active** world (+ dimension folders) → `world-backup-<folder>-<ts>.zip`
-  (see §19); not generated yet → `{ok:false}`.
-- List: `GET /api/server/backups` → `{backups:[...]}`; legacy `GET /api/backups`.
-- Restore: 409 if server running; `backup_path`/`name` reduced to basename, must be a
+## 11. Backups (FEAT-01: schedule, retention, safety backups)
+- Names (`core/backups.py`): `world-backup-<folder>-<YYYYmmdd-HHMMSS>[-<label>].zip`; labels
+  `manual` (button), `auto` (schedule), `auto-pre-<reason>` (`update`, `delete`). Older names
+  without a label (or without a folder) parse as `manual`.
+- Create (`routes/backups.py::create_backup(label, folder=None, wait=False)`): one at a time
+  (`backup_lock`; manual while one runs → 409); world not generated → `{ok:false}`; **low-disk guard**:
+  free space < 2 × the last backup of that world → refused + `backup` alert. Server running (active
+  world): `save-off` → `save-all flush` → wait for "Saved the game|world" (`wait_for_console`,
+  `BACKUP_SAVE_TIMEOUT_SEC` 30 s; on timeout zip anyway with a console note) → zip → `save-on`.
+  Server stopped: zip under the lifecycle lock (nobody can start it mid-zip). Then prune and log
+  `[backup] created …; removed N old backup(s)`.
+- Retention (`to_prune`, per world folder): keep the newest `backup_keep_recent` (8) plus the newest
+  of each of the last `backup_keep_daily` (7) days; manual backups only when `backup_prune_manual`.
+- Schedule: `webapp/scheduler.py::scheduler_loop` (started by autostart) calls `backup_tick` every
+  `SCHEDULER_TICK_SEC` (60 s):
+  off when `backup_interval_hours` is 0 (default 6); `runtime.backup_dirty` is set while the server
+  runs and cleared by a backup made while it is stopped, so an unchanged world isn't backed up again;
+  due when the newest backup of the active world is older than the interval.
+- Safety backups: `s.safety_backup(reason, folder=None)` before deleting a world (failure → the
+  delete is refused, 500) and before the self-update restart (failure → alert, update continues).
+  Restore keeps its own safety copy (the folder rename below).
+- Failures: console `[backup] … failed: …` + `notify("backup", "Backup failed", …)`.
+- List: `GET /api/server/backups` → `{backups:[paths], items:[{name, path, folder, label, size,
+  created, auto}], total_size, schedule}`; legacy `GET /api/backups`. Backups page: list with kind,
+  world, size; total; "Automatic backups" card (interval, keep latest, keep per day, prune manual).
+- Restore: 409 if a lifecycle job runs (Busy) or the server runs; holds the lifecycle lock while
+  extracting; `backup_path`/`name` reduced to basename, must be a
   `world-backup-*.zip` in the current server dir; every zip member must be under `world/` (else 400);
   move current `world/` to `world-backup-pre-restore-<ts>`; extract; legacy `POST /api/backups/restore`.
 
@@ -130,8 +197,9 @@ Aliases `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/me
   `{ok, filename, message}`. The GUI sends the search result's `slug`.
 
 ## 13. Admin
-`POST /api/admin/{action}`: not running → 409; unknown → 400; player required for op/deop/kick/ban
-(checked by action name);
+`POST /api/admin/{action}`: not running → 409; op/deop/kick/ban need a valid player
+(`validation.require_player`: `^[A-Za-z0-9_]{3,16}$`, optionally prefixed with `.` for Floodgate
+Bedrock names) → else 400; unknown action → 400;
 maps to MC commands (`time set day`, `weather clear`, `save-all`, …); sends + logs `"> cmd"`.
 
 ## 14. PlayIt
@@ -218,18 +286,29 @@ Core details (`core/playit.py`):
 - Autostart restores it when `remote_dashboard` is on — **default True** since 2026-10-22 (owner
   decision), so it comes up on every boot unless switched off; shutdown stops it (config stays on).
   Each new link is emailed when alerts are configured (§17).
-- The link is HTTPS but login is still Basic auth without lockout → verification.md "Must fix".
+- Login through the link uses sessions + lockout (§1).
 
-## 17. Alerts (email + heartbeat)
+## 17. Alerts (email + Discord + heartbeat)
 - Settings: `core/notifier.py`, file `EZ_Server_Data/notify_config.json` (keys `notifier.DEFAULTS` +
-  internal `last_link`). `GET /api/notifications` → `public_config()` (no `smtp_password`, adds
-  `password_set`); `PUT` merges (empty `smtp_password` keeps the saved one; `last_link` cannot be
-  set from the API); `POST /api/notifications/test` sends a test email and/or pings the heartbeat
-  (400 if neither is configured, 502 with the reason on failure). Server setup → Alerts card.
-- `notify(category, subject, body, throttle=True)` (inside `create_app`): only when
-  `email_ready()` and `notify_<category>` is on (`server` / `link` / `tunnels`); same subject at most
-  once per `ALERT_REPEAT_SEC` (600 s); sends on a daemon thread via SMTP (STARTTLS on 587, SSL on
-  465); logs `[notify] email sent|failed`. Body adds host name, time, current dashboard link.
+  internal `last_link`). `GET /api/notifications` → `public_config()` (no secrets: adds
+  `password_set`, `discord_owner_set`, `discord_friends_set`); `PUT` merges — secrets
+  (`SECRET_KEYS`: SMTP password, both webhook URLs) keep the saved value when empty and are removed
+  with `null`; webhook URLs must match `DISCORD_WEBHOOK` (else 400); `last_link` cannot be set from
+  the API. `POST /api/notifications/test` sends a test email, posts to each configured webhook and/or
+  pings the heartbeat (400 if nothing is configured, 502 with the reason on failure). Server setup →
+  Alerts card.
+- `notify(category, subject, body, throttle=True)` (`services.py`): when `notify_<category>` is on
+  (`server` / `link` / `tunnels` / `updates` / `security`) and email is ready and/or the **owner**
+  webhook is set; same subject at most once per `ALERT_REPEAT_SEC` (600 s); sends on a daemon thread
+  via SMTP (STARTTLS on 587, SSL on 465) and `send_discord`; logs `[notify] email|Discord (owner)
+  sent|failed`. Body adds host name, time, current dashboard link.
+- **Friends** webhook (FEAT-05), `notify_friends(kind, text)` gated by `friends_notify_<kind>`:
+  `status` — "Server is online: <Loader> <version> at <address>" after a start, "Server is offline."
+  on a deliberate stop, crash / unexpected-stop messages; `players` — joins/leaves from
+  `track_player_event` batched for `FRIENDS_BATCH_SEC` (30 s) into one "A, B joined · C left" (join
+  and leave inside one batch cancel out); `link` — the new status page link (never the dashboard
+  link). `send_discord` posts `{content (≤ 2000), allowed_mentions: {parse: []}}` (no @everyone from
+  player names) and waits once on a 429 (`retry_after`, ≤ 10 s).
 - Hooks: crash (`Minecraft server crashed`), limit reached (`… DOWN (auto-restart paused)`), restart
   failed / back online, unexpected exit with auto-restart off, autostart failures, new Cloudflare
   link (`link`, unthrottled, only when it differs from `last_link`), Cloudflare link down / failed
@@ -277,15 +356,16 @@ Core details (`core/playit.py`):
   but not generated yet, `exists: false`) ∪ the active folder; includes size and last played.
 - Endpoints: `GET/POST /api/worlds` (create: name + optional seed), `POST /api/worlds/upload`
   (multipart `file` + `name`; streamed to `DATA_DIR/upload-*.zip` then `import_zip`), `POST
-  /api/worlds/{folder}/activate` (if the server runs: stop → wait → switch → `launch_server`; for an
-  ungenerated world also sets `level_seed` to its seed), `POST …/rename`, `DELETE …` (refused for
+  /api/worlds/{folder}/activate` (if the server runs: **202** + lifecycle job "switching world":
+  `stop_and_wait` → switch → `launch_server`; otherwise switches under the lock; for an ungenerated
+  world also sets `level_seed` to its seed), `POST …/rename`, `DELETE …` (refused for
   the active world), `GET …/download` (zip, temp file removed after sending).
 - `import_zip`: picks the shallowest `level.dat` that isn't a dimension folder (handles
   `saves/<name>/`, plain `<name>/` and root-level zips; ignores `__MACOSX`), imports matching
   `_nether`/`_the_end` siblings, extracts member-by-member with path checks (rejects `..`, absolute,
   drive letters) and removes partial output on failure.
-- Backups follow the active world: `world-backup-<folder>-<ts>.zip` via `worlds.export_zip`
-  (`save-all flush` first if running); restore accepts any members under valid world folder names
+- Backups follow the active world: `world-backup-<folder>-<ts>-<label>.zip` via `worlds.export_zip`
+  (quiet save first if running, §11); restore accepts any members under valid world folder names
   and renames each existing folder to `<folder>-pre-restore-<ts>` before extracting.
 - Worlds are per server dir (loader + version), like before.
 
@@ -306,6 +386,195 @@ Core details (`core/playit.py`):
   jars are in use) and its record entry.
 - UI: toolbar (search, category, sort), card grid with icon/author/stats/chips/Install, "Load more",
   `<dialog id="mod-details">` filled with DOM nodes (textContent only).
+
+## 21. Players (Players page, FEAT-02)
+- Lists are the server's own files in the server dir (`core/players.py::FILES`): `whitelist.json`,
+  `ops.json`, `banned-players.json`, `banned-ips.json`; per server dir, like worlds.
+- `GET /api/players/lists` → `{whitelist:[{name}], ops:[{name, level}], bans:[{name, reason}],
+  ips:[{ip, reason}], recent:[{name, last_seen, rejected, whitelisted}], whitelist_enabled,
+  online_mode, server_running, message}`.
+- `POST /api/players/{whitelist|ops|bans|ips}` `{action, name|ip, level?, reason?}`; names through
+  `require_player`, IPs through `ipaddress`, reason one line ≤ 100, level 1–4. Actions: whitelist
+  add/remove/enable/disable, ops add/remove, bans add/remove, ips remove.
+  - **Server running:** console command (`whitelist add`, `op`, `deop`, `ban <name> <reason>`,
+    `pardon`, `pardon-ip`), then wait up to `SYNC_WAIT_SEC` (3 s) for the server to rewrite the file.
+    `op` uses the server's default level (other levels only while stopped).
+  - **Server stopped:** edit the JSON under the lifecycle lock (409 Busy otherwise) with
+    `players.add/remove` (atomic writes). UUID: Mojang profile API in online mode (unknown name →
+    400; Bedrock "." names refused while stopped), else the offline UUID (`offline_uuid`: MD5 of
+    `OfflinePlayer:<name>` as UUID v3). Removing an unlisted name → 404.
+  - `enable`/`disable`: saves `white_list` in the config (applied to `server.properties` on the next
+    start) and, if running, sends `whitelist on|off`.
+- Recently seen: `RuntimeState.recent_players` (in memory, newest 20): joins (`track_player_event`)
+  and whitelist refusals (`players.rejected_name`, three log formats anchored to the line prefix so
+  chat can't fake them) from the server output.
+- UI (`static/js/players.js`): whitelist switch + warning when off, add forms (native `pattern`
+  matches `require_player`), rows with Remove / Unban / "Add to whitelist" (textContent only).
+
+## 22. Invite friends + public status page (FEAT-03)
+- "Invite friends" card (`pages/sections_invite.py`) on Overview and Remote access:
+  `GET /api/status-page` (auth) → `{enabled, show_names, show_lan, url, url_is_lan_only, invite}`;
+  "Copy invite" copies `invite` (address, `<Loader> <version>`, "(mods required…)" when a
+  Fabric/Forge/NeoForge server has jars, status page link when on).
+- `POST /api/status-page {action}`: `enable` (creates `status_page_token` = `secrets.token_urlsafe(16)`
+  if none), `disable`, `regenerate` (new token; old link 404s at once), `settings {show_names?, show_lan?}`.
+  The token is never accepted from `PUT /api/config` (not in `ConfigUpdate`).
+- Public, **no auth**: `GET /s/{token}` → `templates/status.html` (`Cache-Control: no-store`,
+  `X-Robots-Tag: noindex`), which polls `GET /s/{token}/status.json` every 30 s. Disabled, empty or
+  wrong token (`secrets.compare_digest`) → 404. JSON: `name` (MOTD), `online`, `state`,
+  `players_online`, `players_max`, `address`, `version`, `loader`, `mods_required`, `modpack_url`
+  (FEAT-04), plus `player_names` if `status_page_show_names`, `lan_address` if `status_page_show_lan`.
+- Address: the PlayIt address if configured, else `<public IP>[:port]` (omits `:25565`), else empty.
+- Link base: the Cloudflare link when it is up, else `http://<LAN IP>:<WEB_PORT>` (LAN-only, flagged
+  by `url_is_lan_only`). The "New dashboard link" email includes the new status page link.
+
+## 23. Mod pack for friends (FEAT-04)
+- `core/modpack.py::build(sdir, loader, mc_version, name)` → `<sdir>/ez-modpack.mrpack` + summary
+  `<sdir>/ez-modpack.json`; only for Fabric/Forge/NeoForge with jars in the mods folder (else
+  `ValueError` → 400; Paper/vanilla invites say "no mods needed").
+- Every jar is hashed (SHA-1 + SHA-512); one `POST /v2/version_files` (by SHA-1) + one
+  `GET /v2/projects?ids=` give the CDN URL and `client_side`/`server_side`. Known + client not
+  "unsupported" → `files[]` entry (`path` `mods/<jar>`, hashes, `env`, `downloads`, `fileSize`);
+  client "unsupported" → left out (`excluded`); unknown jar → bundled under `overrides/mods/` with a
+  licence warning. Modrinth unreachable → everything bundled + warning.
+- `dependencies`: `minecraft` + `fabric-loader`/`forge`/`neoforge` from `loader_version()`
+  (installed `libraries/` folders; Fabric before first start: `server.jar` → `install.properties`).
+  Not found → omitted + warning "start the server once".
+- Cached by `fingerprint` (loader, version, name, each jar's name/size/mtime): rebuilt only on
+  change; one build at a time (`modpack_lock` in `routes/mods.py`).
+- Owner: Mods page card "Mod pack for friends" (shown when `GET /api/modpack` → `available`):
+  `POST /api/modpack/build` → summary toast (+ warnings), then `GET /api/modpack/download`.
+- Friends: status page shows "Download the mod pack" (`/s/<token>/modpack.mrpack`, no auth, 404 when
+  the token is wrong or there is nothing to pack); the invite says to get it there.
+
+## 24. Schedule: daily restart, idle stop, quiet hours (FEAT-06)
+- `webapp/scheduler.py`: one loop, one tick (`scheduler_tick(now)`): backups (§11), then the
+  daily restart, then the idle stop. Server setup → Schedule card (config keys below; saved with the
+  other setup fields through `CONFIG_FIELDS`).
+- **Daily restart** at `restart_daily_time` ("HH:MM" host local time, "" = off), only while running:
+  within 10 minutes of the time, if someone is online, `say Server restarting in N minute(s).` at
+  10, 5 and 1 minutes (N is the real time left, so a late joiner hears "3", not "5");
+  `runtime.restart_warnings_sent` prevents repeats. At the time (up to `RESTART_LATE_LIMIT` = 30 min
+  late, not later): `say … now`, `safety_backup("restart")`, then the normal restart job
+  (`start_lifecycle_job("restarting", restart_job)`); `runtime.daily_restart_done` = today's date
+  (cleared again if the lifecycle lock is busy, so the next tick retries); friends get "Daily
+  restart…".
+- **Idle stop** after `idle_stop_minutes` (0 = off) with nobody online: `runtime.empty_since` is set
+  when the server starts and when the last player leaves, cleared by a join. Due → lifecycle lock
+  (non-blocking; skip this tick if busy) → `stopped_reason = "idle"` → `request_stop()` (deliberate,
+  so not a crash) → console line and one friends message with the reason (the generic "Server is
+  offline." is suppressed). `/api/status` returns `stopped_reason`; the pill reads "Stopped · idle".
+  A start clears it.
+- **Quiet hours** `quiet_hours_start`–`quiet_hours_end` (may wrap midnight; "" = off,
+  `common._in_quiet_hours`): `launch_when_free` skips `autostart` and `crash restart` starts in that
+  window (console `[schedule] quiet hours: … skipped`). Manual starts and the daily restart still work.
+
+## 25. Crash diagnosis and log files (FEAT-08)
+- `core/diagnose.py::diagnose(lines, crash_report)` — pure rule table, most specific first; items
+  `{code, title, message, action}`: `missing_dependency` (Fabric "Mod 'X' (x) … requires … of mod
+  'Y' (y), which is missing" and the bare-id form; Forge/NeoForge "Mod ID: 'y', Requested by: 'x', …
+  Actual version: '[MISSING]'" or a wrong version) → `install_mod {slug}`; `incompatible_mods`;
+  `client_only_mod` ("invalid dist DEDICATED_SERVER" / Fabric environment) → `remove_mod {file}` when
+  the jar is named; `wrong_java` (class file version → Java = version − 44); `out_of_memory` →
+  `open_setting setup/ram-input`; `port_in_use` → `kill_process {port}`; `world_locked`; `eula` →
+  `accept_eula`. `first_line(items)` = "Likely cause: …" for alerts.
+- `routes/diagnosis.py::run_diagnosis()` runs on every unexpected exit (in `on_exit`, before the
+  crash handling) over the last `DIAGNOSIS_LINES` (300) console lines + the newest
+  `crash-reports/*.txt` written since `runtime.last_start_at`; stores `runtime.diagnosis` /
+  `diagnosis_at`, logs `[diagnosis] …` lines; the crash / DOWN / stopped-unexpectedly alerts
+  append `first_line`. A start clears it. `GET /api/server/diagnosis` → `{items, at}`;
+  `/api/status` carries `diagnosis_at` so the dashboard reloads the card when it changes.
+- `POST /api/server/diagnosis/fix {kind}` (409 while running): `accept_eula` writes eula.txt;
+  `kill_process {port}` finds the listening PID with psutil and terminates it **only if the
+  process name contains "java"** (else 409 naming it; 404 if nothing listens). Install/remove use
+  the existing Modrinth install and mod delete routes.
+- UI: "Why the server stopped" card (Overview, Console) with one button per action (kill asks
+  first); Console → "Log files" lists `logs/*.log|.log.gz` and `crash-reports/*.txt` (name pattern
+  `^[\w.-]+\.(log|txt|log.gz)$`, folder must be one of the two) with View (last 2000 lines,
+  gz decompressed: `GET /api/server/logs/{folder}/{name}`) and Download (`?download=true`).
+
+## 26. Mod and plugin updates (FEAT-07)
+- `core/mod_updates.py::check(dest_dir, loader, mc_version)`: SHA-1 of every jar → **one**
+  `POST /v2/version_files/update {hashes, algorithm: sha1, loaders, game_versions}`; a jar is
+  outdated when the newest version's primary file has another hash. Works for uploaded jars Modrinth
+  recognises. Items: file, title (record title or file name), current, latest, changelog (plain
+  text, 400 chars), new_file, url, hashes, required dependencies. Stored in `runtime.mod_updates`.
+- `update()`: download to `<new>.download`, verify SHA-1 and SHA-512 (mismatch → error, old jar
+  untouched), rename the old jar to `<file>.old` (Minecraft only loads `.jar`), move the new one in,
+  record `filename`/`version` plus `previous`/`previous_version` (one generation: a second update
+  deletes the older `.old`), install missing required dependencies.
+- Routes (`routes/mods.py`): `GET /api/mods/updates`, `POST /api/mods/updates/check` (400 vanilla,
+  502 Modrinth down), `POST /api/mods/updates/apply {files?}` (409 while running; safety backup
+  `auto-pre-mod-update` **before** taking the lifecycle lock, since the backup takes it itself; per-mod
+  failures reported, the rest go on; `pack_changed` → "friends should download the pack again"),
+  `POST /api/mods/updates/rollback` (409 while running; restores every `.old`, removes the new jar,
+  fixes the record).
+- `scheduler.py::old_mods_tick`: once the server has run `OLD_MODS_KEEP_SEC` (300 s) since its last
+  start, `forget_old()` deletes the `.old` jars.
+- Daily: the self-update loop also runs the mod check and alerts (`updates`) once per new set;
+  updates are never installed unattended.
+- UI: Mods page → Updates card (Check, per-mod Update with old → new and changelog, Update all,
+  Undo last update).
+
+## 27. Player activity and playtime (FEAT-12)
+- `core/activity.py`: `record(event, name, server_dir)` appends `{t, event, name, server_dir}` to
+  `EZ_Server_Data/activity.jsonl` — `join` / `leave` from the server output (`on_output`), and
+  `server_stop` from `on_exit` (stop or crash) and at every dashboard start (autostart: the
+  dashboard owns the server, so nobody can still be online), which closes open sessions.
+- `summary(now, days=30)`: replays the file (sorted by `t`; a half-written last line is skipped):
+  per player `playtime_seconds`, `sessions` (a second join without a leave continues the session),
+  `first_seen`, `last_seen`, `online`; plus `hours[24]` = average players online per hour of day over
+  the last 30 days. `compact()` (dashboard start) folds everything before the last `server_stop`
+  older than a year into per-player `totals` lines.
+- `GET /api/players/activity` → summary. Players page → Activity card: SVG bar chart (24 bars,
+  `--series-1`, 4px rounded tops, 2px gaps, hover tooltip kept inside the card) and per-player rows
+  (Online badge, playtime, sessions, last/first seen).
+
+## 28. Performance presets and JVM flags (FEAT-13)
+- `downloaders.jvm_flags(ram_mb, is_phone)`: Aikar's G1 flags (without the obsolete
+  `G1RSetUpdatingPauseTimePercent`); > 12 GB heap → the large-heap sizing (16M regions);
+  `-XX:+AlwaysPreTouch` only off phones. `launch_args(..., extra_flags)` puts them after `-Xms/-Xmx`.
+- `launch_server`: flags when `jvm_preset_flags` (default True), then `shlex.split(jvm_extra_args)`.
+  `jvm_extra_args` validation: one line, ≤ 500 chars, only `-X…`/`-D…` tokens (no `-jar`, `@argfile`
+  or program names) → else 422.
+- `GET /api/system/host` → `{ram_mb, phone}`. Server setup → Performance card: presets Phone (2 GB,
+  view 6, simulation 4), Balanced (3 GB, 10/8), PC with many mods (6 GB, 10/8), each capped at the
+  device's safe maximum (≈50 % of RAM on a phone, ≈70 % on a PC, in 256 MB steps) and saved with
+  `PUT /api/config`; RAM advice under the memory input ("Recommended: min–max", red above the max;
+  modded loaders recommend ≥ 3 GB); the flags switch; extra options; a Chunky tip on Paper.
+
+## 29. Server icon, MOTD editor, all properties (FEAT-14)
+- Icon: the browser crops any picture to a centred square and draws it on a 64×64 `<canvas>`
+  (`identity.js::iconBlob`), then `POST /api/server/icon` (multipart). The server checks the PNG
+  signature, `IHDR` = 64×64 and size < 64 KB (else 400) and writes `server-icon.png` atomically
+  (`fsutil.write_bytes_atomic`); `GET` serves it (404 if none), `DELETE` removes it. No imaging
+  library on the server.
+- MOTD (Settings page): colour swatches and Bold/Italic/Reset insert `§` codes, "New line" inserts
+  the two characters `\n`; a preview styled like the multiplayer list renders them; the length line
+  counts visible characters. `motd` may be 150 chars. Non-ASCII characters (the `§`) are written to
+  server.properties as `\uXXXX` escapes (`properties_meta.escape_value`), which Java's properties
+  loader reads whatever the file encoding; the owner's `\n` stays a properties escape.
+- All properties (Settings page): `GET /api/server/properties` → one row per key in the file, in
+  `properties_meta.KNOWN` (type, description, options for ~45 common keys), in `extra_properties` or
+  managed; managed keys (`properties_meta.MANAGED`, written by the Settings form on every start) and
+  `LOCKED` keys (port, level-name, white-list, RCON) are read-only. `PUT {key: value|null}` merges
+  into config `extra_properties` (validated: key pattern, not managed/locked, one line ≤ 500 chars;
+  null removes) → `_server_properties_from_config` writes them on the next start, managed keys
+  winning.
+
+## 30. Storage use and cleanup (FEAT-15)
+- `core/storage.py::usage(active_dir)` (cached 5 min; `?fresh=true` re-measures) walks the data
+  folder with `os.scandir`: per server dir its own size (active ↔ "not in use; last used <date>"
+  from `logs/latest.log`/`server.properties` mtime), its backups (info, managed on the Backups page),
+  `*-pre-restore-*` folders, `installer.jar`, `logs/*.log.gz` older than 30 days, each `java/jre-N`
+  (deletable when no server dir's version needs Java N), and top-level files (tools, settings).
+  `disk()` = `shutil.disk_usage` + `low` (< 2 GB or < 10 % free).
+- `POST /api/storage/delete {id}`: 409 while running or busy; the id is looked up in a fresh scan
+  (unknown → 404, not deletable — e.g. the active server dir or backups → 409), so clients name items,
+  never paths.
+- Scheduler `storage_tick`: low space → one `backup`-category alert ("Storage almost full") until
+  space recovers. Backups page → Storage card (free/total, list, Delete with a confirm that says what
+  is lost).
 
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash

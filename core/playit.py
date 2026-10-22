@@ -19,7 +19,6 @@ Secret + address are stored LOCALLY (EZ_Server_Data/playit_config.json), never c
 API refs (official client): https://github.com/playit-cloud/playit-api-java
 Auth: header  Authorization: Agent-Key <secret>
 """
-import json
 import os
 import platform
 import re
@@ -32,7 +31,7 @@ import time
 
 import requests
 
-from . import hostenv, paths
+from . import fsutil, hostenv, paths
 
 RELEASES_API = "https://api.github.com/repos/playit-cloud/playit-agent/releases/latest"
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
@@ -100,17 +99,13 @@ def _agent_path() -> str:
 
 # ---------- Local config (secret key + tunnel address) ----------
 def load_config():
-    try:
-        with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+    data = fsutil.read_json(_CONFIG_FILE, {})
+    return data if isinstance(data, dict) else {}
 
 
 def save_config(secret, address=""):
     paths.ensure_dirs()
-    with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump({"secret": secret, "address": address}, f, indent=2)
+    fsutil.write_json_atomic(_CONFIG_FILE, {"secret": secret, "address": address})
 
 
 def forget_config():

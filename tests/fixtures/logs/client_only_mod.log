@@ -1,0 +1,3 @@
+[12:00:07] [modloading-worker-0/ERROR]: Failed to create mod instance. ModID: oculus, class net.coderbot.iris.Iris
+java.lang.RuntimeException: Attempted to load class net/minecraft/client/gui/screens/Screen for invalid dist DEDICATED_SERVER
+	Mod File: /home/user/server/mods/oculus-mc1.20.1-1.6.9.jar

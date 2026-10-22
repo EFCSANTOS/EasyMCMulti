@@ -1,0 +1,2 @@
+[18:22:10] [Server thread/ERROR]: Encountered an unexpected exception
+java.lang.OutOfMemoryError: Java heap space

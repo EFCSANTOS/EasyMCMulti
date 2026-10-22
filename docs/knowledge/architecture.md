@@ -2,34 +2,70 @@
 
 ## Stack (verified)
 - Python 3.13+, FastAPI, Uvicorn, `fastapi.testclient` (tests).
-- `psutil` optional; Windows `ctypes` fallback (`webapp/app.py::_system_metrics_snapshot`).
+- `psutil` optional; Windows `ctypes` fallback (`webapp/common.py::_system_metrics_snapshot`).
 - No database. Files: JSON config (`core/config_store`), `server.properties`, `eula.txt`, `world/`,
   `world-backup-*.zip`, `mods/`, `plugins/`.
 
 ## Module map
-### `webapp/app.py` (HTTP layer, single file)
-- Factory `create_app()`; module-level `app = create_app()`.
-- Constants: `KNOWN_LOADERS`, `FALLBACK_VERSIONS`, `_APP_START_TIME`.
-- Auth: `security = HTTPBasic()`, `require_auth` → `verify_credentials`.
-- Config helpers: `_default_config`, `_effective_config`, `_server_properties_from_config`.
-- Metrics: `_system_metrics_snapshot`.
-- Paths/install: `_server_dir_for_config`, `_server_is_installed`, `ensure_server_installed`.
-- Console: `append_console_line`, `WebSocketManager`.
-- Dashboard: module-level `_render_dashboard_page(section)`; pages (overview, setup, advanced, mods,
-  remote, backups, console) are tuples of `_SECTION_*` HTML constants in `_DASHBOARD_PAGES`.
-- PlayIt: `_playit_on_exit`, `_playit_state(runtime, cfg)` (running only if the agent process is alive).
-- Restart: `_wait_for_exit(process, timeout)`, `RESTART_STOP_TIMEOUT_SEC`.
-- Mods folder: `_content_dir_for_config` → `paths.content_folder` (400 for vanilla).
+### `webapp/` HTTP layer (split by area, QUAL-01)
+- `app.py` — `create_app()`: `create_services(app)`, then `register(app, services)` for each router
+  (pages, system, server, backups, mods, worlds, remote, updates, background), `/ws/console`, and the
+  `app.state` hooks (`autostart`, `shutdown`, `restart_after_crash`, `notify`, `services`);
+  module-level `app = create_app()`; `_lifespan` runs autostart/shutdown.
+- `services.py` — `Services` (a namespace), `create_services(app)`: `runtime`, console
+  (`append_console_line`, `WebSocketManager`), alerts (`notify`, `heartbeat_loop`), login state
+  (`app.state.sessions`/`login_limiter`/`on_lockout`); `require_auth(request)` (the auth dependency).
+- `common.py` — constants (`KNOWN_LOADERS`, `FALLBACK_VERSIONS`, timeouts, `WEB_PORT`, …) and
+  module-level helpers: config (`_default_config`, `_effective_config`, `_host_ram_mb`,
+  `_server_properties_from_config`), paths/install (`_server_dir_for_config`, `_server_is_installed`,
+  `_content_dir_for_config`, `_active_world`), metrics (`_system_metrics_snapshot`, `_memory_usage`),
+  PlayIt (`_playit_on_exit`, `_playit_state`), `_wait_for_exit`, backup name checks; re-exports
+  `ServerProcess`/`accept_eula`/`update_properties`. Routers always write `common.NAME`, so tests
+  monkeypatch `webapp.common`.
+- `routes/*.py` — one `register(app, s)` per area; routes are closures. A router publishes helpers
+  other routers need on `s` (e.g. `s.launch_server`, `s.busy_error`, `s.stop_web_tunnel`) and calls
+  other routers' helpers as `s.name(...)` at call time:
+  `pages` (HTML shells, `/login`, `/api/login|logout|session`, `/dashboard.css`, `/js/{name}`,
+  `/health`), `system` (metrics, status, console history, config, versions), `server` (install +
+  lifecycle jobs — `start_lifecycle_job`, `busy_error`, `launch_server`, `launch_when_free`,
+  `install_server`, `request_stop`, `stop_and_wait`, `restart_job`, `server_running` — commands,
+  admin), `backups`, `mods` (+ Modrinth), `worlds`, `diagnosis` (crash diagnosis + log viewer), `players` (whitelist/ops/bans), `identity` (icon + all properties), `storage` (disk use + cleanup), `public` (invite + `/s/<token>` status page), `remote` (PlayIt + Cloudflare), `updates`
+  (self-update + alert settings).
+- `background.py` — `run_in_background`, `autostart` (also starts `heartbeat_loop` and
+  `scheduler_loop`), `shutdown`.
+- `scheduler.py` — `scheduler_tick(now)` / `scheduler_loop`: backups, daily restart, idle stop
+  (workflows.md §24).
+- `pages/` — `widgets.py` (`_ICON_PATHS`, `_icon`, `_copy_button`, `_switch`), `sections_main.py`
+  and `sections_more.py` (`_SECTION_*` HTML constants), `layout.py` (`_DASHBOARD_NAVIGATION`,
+  `_INSTALL_BANNER`, `_TOPBAR_CONTROLS`, `_DASHBOARD_PAGES`, `_render_dashboard_page`, `SCRIPTS`,
+  `ASSET_VERSION`).
+
+### `core/` additions (after the audit)
+- `storage.py` (disk use and cleanup, FEAT-15), `activity.py` (playtime log, FEAT-12), `mod_updates.py` (mod update check/update/rollback, FEAT-07), `diagnose.py` (crash rule table, FEAT-08), `backups.py` (backup names/retention, FEAT-01),
+  `fsutil.py` (atomic writes, FIX-03), `players.py` (whitelist/ops/bans JSON, UUIDs, refusal
+  parsing, FEAT-02), `modpack.py` (`.mrpack` build, loader version detection, FEAT-04).
 
 ### `webapp/auth.py`
-`validate_auth_settings`, `get_expected_credentials`, `verify_credentials` (HTTPBasic),
-`verify_basic_auth_header` (manual Base64 for WS; requires `Basic user:pass`).
+`validate_auth_settings`, `get_expected_credentials`, `credentials_match` (constant time),
+`password_is_weak`, `SessionStore` (in-memory tokens, sliding expiry), `LoginLimiter` (per-IP and
+global failure windows), `client_ip`, `check_login` (429 / 401 + count), `authenticate` (cookie or
+Basic, works on HTTP and WebSocket; cookie writes pass the same-origin/JSON CSRF check).
+
+### `webapp/properties_meta.py`
+`KNOWN` (type/description/options per common server.properties key), `MANAGED`, `LOCKED`,
+`KEY_PATTERN`, `describe(key)`, `escape_value(value)` (non-ASCII → `\uXXXX`).
+
+### `webapp/validation.py`
+`require_player`, `require_command` (400s), `ConfigUpdate` (Pydantic, `extra="forbid"`; `ram_mb`
+capped by the `ram_cap_mb` validation context), `validate_config_update` (422 in FastAPI's format),
+`clean_stored_config` (lenient read of saved config).
 
 ### `webapp/state.py`
 `RuntimeState` dataclass: loader, version, state, operation, install_*, `online_players` (set;
 `track_player_event(line)` / `clear_players()`), lan_address,
-public_address, playit_*, playit_agent, process, `lock` (RLock);
-`snapshot()` returns JSON-safe dict.
+public_address, playit_*, playit_agent, process, `operation_error`/`operation_message` (outcome
+of the last lifecycle job), `lock` (RLock), `lifecycle` (Lock, one server operation at a time);
+`set_state(state, operation=None)`; `snapshot()` returns JSON-safe dict.
 
 ### `webapp/websocket_manager.py`
 `WebSocketManager`: `history` deque(2000), per-client `asyncio.Queue(250)`, `connect` replays last
@@ -39,7 +75,11 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
 - `paths.py` — `DATA_DIR`/`JAVA_DIR`/`SERVERS_DIR`, `ensure_dirs`, `server_dir(loader, version)`
   (creates dir), `content_folder(loader, sdir)` (paper → `plugins/`, fabric/forge/neoforge → `mods/`,
   vanilla → None). Layout: data-model.md.
-- `config_store.py` — `load()` → dict (`{}` on missing/invalid JSON); `save(data)` swallows `OSError`.
+- `config_store.py` — `load()` → dict (`{}` when missing; the `.bak` copy when damaged);
+  `save(data)` writes atomically and raises `OSError`.
+- `fsutil.py` — `write_text_atomic`, `write_json_atomic` (tmp + fsync + `os.replace`, 3 retries on
+  Windows `PermissionError`, previous copy kept as `.bak`), `read_json(path, default)` (falls back to
+  and repairs from `.bak`), `set_logger(log)` (the web app routes it to the console as `[config]`).
 - `server_process.py` — `accept_eula`, `read_properties`, `update_properties` (read-merge-rewrite via
   `read_properties`), `ServerProcess(args, cwd, on_output, on_exit)` with `start`/`send`/`stop` (sends
   `"stop"`)/`kill` (used by restart on timeout)/`is_running`.
@@ -83,9 +123,14 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
   `uvicorn[standard]`: its uvloop/httptools need compiling on Android), python-multipart (FastAPI
   `File` uploads), psutil (skipped on Termux). `requirements-dev.txt` adds pytest + httpx.
 
-### Frontend (`webapp/static/js/dashboard.js`, `webapp/templates/login.html`)
-- Plain JS, no framework/build. `login.html` checks creds against `GET /api/status`, stores them in
-  `sessionStorage`; `dashboard.js::boot` redirects to `/login` if absent, then binds events, loads
+### Frontend (`webapp/static/js/*.js`, `webapp/templates/login.html`)
+- Plain JS, no framework/build. Six classic scripts sharing one global scope, loaded in order
+  (`layout.SCRIPTS`, served by `/js/{name}`): `api.js` (state, `fetchJson`, toasts, list helpers),
+  `server.js` (config form, status poll, lifecycle buttons), `content.js` (backups, mods, worlds),
+  `settings.js` (PlayIt, alerts, updates, remote link), `console.js` (console, charts), `main.js`
+  (event wiring + `boot`, last). `login.html` posts to `POST /api/login` (sets the HttpOnly cookie;
+  nothing is stored client-side); `boot` calls `GET /api/session` (401 → `/login`),
+  then binds events, loads
   config (+ `/api/versions/{loader}`), status, backups, mods and console. Each loader skips its fetch
   when its elements are not on the current page.
 - Polling: metrics 2 s (overview only, `/api/system/metrics`), console 2 s (`CONSOLE_POLL_MS`, pages
@@ -96,18 +141,19 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
   toast `#action-status`. Theme tokens are CSS custom properties at the top of `dashboard.css`
   (dark only; accent `--accent` green; chart series `--series-1` `#3987e5`; status colors reserved
   for state). `login.html` duplicates the tokens inline.
-- All calls use `fetchJson` with `Authorization: Basic` from `buildBasicAuth` (upload uses raw `fetch`
-  with `FormData`).
+- All calls use `fetchJson` (cookie, `credentials: 'same-origin'`; non-GET always sends JSON, or
+  `FormData`); world download/upload use raw `fetch`/XHR with the same cookie. 401 → `/login`.
 - GUI feature status: verification.md.
 
 ## Control flow (verified)
 1. Uvicorn imports `webapp.app:app` → `create_app()` → `validate_auth_settings()` → attach
    `runtime` and `console_manager` to `app.state`.
-2. REST request → `require_auth` → `verify_credentials` (env vars).
-3. WS `/ws/console` → `verify_basic_auth_header` → `close(1008)` on failure, else `accept()` →
+2. REST request → `require_auth` → session cookie, else Basic credentials (lockout-checked).
+3. WS `/ws/console` → `authenticate` (cookie or Basic) → `close(1008)` on failure, else `accept()` →
    `console_manager.connect` → keepalive loop (`wait_for(..., 30s)`).
-4. Start: `_effective_config` → `ensure_server_installed` (install if missing) →
-   `update_properties` → `ensure_java` → `launch_args` → `ServerProcess.start()`.
+4. Start: route saves the payload → 202 → lifecycle job thread: `ensure_server_installed`
+   (install if missing) → `update_properties` → `ensure_java` → `launch_args` →
+   `ServerProcess.start()`.
 5. Console: `ServerProcess._reader` thread → `on_output` → `console_manager.publish` → client queues.
 6. PlayIt: `load_config` → `ensure_agent` → `PlayitAgent.start(secret)` → `ensure_tunnel` → `save_config`.
 
