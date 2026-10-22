@@ -220,7 +220,7 @@ def fake_playit(monkeypatch):
     """Stub the PlayIt network/agent calls."""
     monkeypatch.setattr(webapp_module.playit, "ensure_agent", lambda log=print: "agent")
     monkeypatch.setattr(webapp_module.playit, "PlayitAgent", DummyAgent)
-    monkeypatch.setattr(webapp_module.playit, "ensure_tunnel", lambda secret, port, log, timeout_sec=120: "demo.example:25565")
+    monkeypatch.setattr(webapp_module.playit, "ensure_tunnel", lambda secret, port, log, timeout_sec=120, should_abort=None: "demo.example:25565")
     app.state.runtime.playit_agent = None
     app.state.runtime.playit_setup = "idle"
     yield
@@ -824,14 +824,18 @@ def test_playit_config_does_not_expose_secret(monkeypatch):
 def test_playit_config_put_saves_and_keeps_secret_when_blank(fake_playit):
     auth = ("admin", "s3cret-pass")
     assert client.put("/api/playit/config", auth=auth, json={"secret": "", "address": ""}).status_code == 400
-    response = client.put("/api/playit/config", auth=auth, json={"secret": "pasted-key", "address": "a.example"})
+    response = client.put("/api/playit/config", auth=auth, json={"secret": "  ab12cd34ef  ", "address": "a.example"})
     assert response.status_code == 200
     assert response.json()["configured"] is True
-    assert "pasted-key" not in response.text
+    assert "ab12cd34ef" not in response.text
     response = client.put("/api/playit/config", auth=auth, json={"secret": "", "address": "b.example"})
     assert response.status_code == 200
-    assert playit.load_config() == {"secret": "pasted-key", "address": "b.example"}
+    assert playit.load_config() == {"secret": "ab12cd34ef", "address": "b.example"}
     assert client.put("/api/playit/config", auth=auth, json={"secret": "x", "extra": 1}).status_code == 400
+    response = client.put("/api/playit/config", auth=auth, json={"secret": "not-a-playit-key"})
+    assert response.status_code == 400
+    assert "hexadecimal" in response.json()["detail"]
+    assert playit.load_config()["secret"] == "ab12cd34ef"
 
 
 def test_playit_config_put_cancels_pending_approval(fake_playit, monkeypatch):
@@ -844,7 +848,7 @@ def test_playit_config_put_cancels_pending_approval(fake_playit, monkeypatch):
     monkeypatch.setattr(webapp_module.playit, "claim_interactive", fake_claim)
     auth = ("admin", "s3cret-pass")
     assert client.post("/api/playit/configure", auth=auth).json()["setup"] == "awaiting-approval"
-    response = client.put("/api/playit/config", auth=auth, json={"secret": "pasted-key"})
+    response = client.put("/api/playit/config", auth=auth, json={"secret": "ab12cd34ef"})
     assert response.status_code == 200
     assert response.json()["setup"] == "idle"
     time.sleep(0.1)
@@ -953,6 +957,59 @@ def test_playit_agent_crash_restarts_and_alerts(fake_playit, sent_emails, monkey
     agents[1].on_exit(1)
     time.sleep(0.2)
     assert len(agents) == 2
+
+
+def test_playit_rejected_key_stops_agent_without_restart(fake_playit, sent_emails, monkeypatch):
+    monkeypatch.setattr(webapp_module, "PLAYIT_RETRY_SEC", 0)
+    monkeypatch.setattr(playit.time, "sleep", lambda seconds: None)
+    agents = []
+
+    class TalkingAgent(DummyAgent):
+        def __init__(self, on_output=None, on_exit=None):
+            super().__init__(on_output, on_exit)
+            self.on_output, self.on_exit = on_output, on_exit
+            agents.append(self)
+
+    def fake_api(path, body, secret=None):
+        if path == "/agents/rundata":
+            return {"data": {"agent_id": "agent-1"}}
+        if path == "/tunnels/list":
+            return {"data": {"tunnels": []}}
+        # The agent can't register with a rejected key, so the API keeps refusing to create the tunnel.
+        agents[0].on_output("ERROR playit_agent_core::agent_control: failed to sign and register "
+                            "error=ApiError(Auth(InvalidAgentKey))")
+        raise RuntimeError("playit API /tunnels/create: AgentVersionTooOld")
+
+    monkeypatch.setattr(webapp_module.playit, "PlayitAgent", TalkingAgent)
+    monkeypatch.setattr(playit, "_api", fake_api)
+    monkeypatch.setattr(webapp_module.playit, "ensure_tunnel",
+                        lambda secret, port, log, timeout_sec=120, should_abort=None: playit._ensure_tunnel(
+                            secret, port, log, timeout_sec, playit._is_mc_tunnel, "EZ", "minecraft-java", "Minecraft Java",
+                            should_abort))
+    playit.save_config("ab12cd34ef", "")
+    auth = ("admin", "s3cret-pass")
+
+    response = client.post("/api/playit/start", auth=auth)
+    assert response.status_code == 502
+    assert "InvalidAgentKey" in response.json()["detail"]
+    assert not agents[0].is_running()
+    status = client.get("/api/playit/status", auth=auth).json()
+    assert status["setup"] == "error" and "Change account" in status["error"]
+    assert any("PlayIt key rejected" in subject for subject, _ in sent_emails)
+
+    agents[0].on_exit(1)  # the stopped agent exits: deliberate, so no restart
+    threading.Event().wait(0.2)  # time.sleep is stubbed above
+    assert len(agents) == 1
+
+
+def test_playit_secret_validation_and_ansi_stripping():
+    assert playit.is_valid_secret(" ab12CD34ef\n")
+    assert not playit.is_valid_secret("pasted-key")
+    assert not playit.is_valid_secret("")
+    assert playit.is_key_rejected("failed to authenticate error=ApiError(Auth(InvalidAgentKey))")
+    assert not playit.is_key_rejected("[playit] Waiting for the playit agent to register...")
+    line = "\x1b[2m2026-10-22T14:06:59Z\x1b[0m \x1b[31mERROR\x1b[0m failed \x1b[3merror\x1b[0m\x1b[2m=\x1b[0mx"
+    assert playit._ANSI_ESCAPE.sub("", line) == "2026-10-22T14:06:59Z ERROR failed error=x"
 
 
 def test_remote_dashboard_is_on_by_default():
