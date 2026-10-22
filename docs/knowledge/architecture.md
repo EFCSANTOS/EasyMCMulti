@@ -10,7 +10,8 @@
 ### `webapp/app.py` (HTTP layer, single file)
 - Factory `create_app()`; module-level `app = create_app()`.
 - Constants: `KNOWN_LOADERS`, `FALLBACK_VERSIONS`, `_APP_START_TIME`.
-- Auth: `security = HTTPBasic()`, `require_auth` → `verify_credentials`.
+- Auth: `require_auth(request)` → `auth.authenticate` with `app.state.sessions`,
+  `app.state.login_limiter`, `app.state.on_lockout`; routes `/api/login`, `/api/logout`, `/api/session`.
 - Config helpers: `_default_config`, `_effective_config`, `_server_properties_from_config`.
 - Metrics: `_system_metrics_snapshot`.
 - Paths/install: `_server_dir_for_config`, `_server_is_installed`, `ensure_server_installed`.
@@ -22,8 +23,10 @@
 - Mods folder: `_content_dir_for_config` → `paths.content_folder` (400 for vanilla).
 
 ### `webapp/auth.py`
-`validate_auth_settings`, `get_expected_credentials`, `verify_credentials` (HTTPBasic),
-`verify_basic_auth_header` (manual Base64 for WS; requires `Basic user:pass`).
+`validate_auth_settings`, `get_expected_credentials`, `credentials_match` (constant time),
+`password_is_weak`, `SessionStore` (in-memory tokens, sliding expiry), `LoginLimiter` (per-IP and
+global failure windows), `client_ip`, `check_login` (429 / 401 + count), `authenticate` (cookie or
+Basic, works on HTTP and WebSocket; cookie writes pass the same-origin/JSON CSRF check).
 
 ### `webapp/state.py`
 `RuntimeState` dataclass: loader, version, state, operation, install_*, `online_players` (set;
@@ -84,8 +87,9 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
   `File` uploads), psutil (skipped on Termux). `requirements-dev.txt` adds pytest + httpx.
 
 ### Frontend (`webapp/static/js/dashboard.js`, `webapp/templates/login.html`)
-- Plain JS, no framework/build. `login.html` checks creds against `GET /api/status`, stores them in
-  `sessionStorage`; `dashboard.js::boot` redirects to `/login` if absent, then binds events, loads
+- Plain JS, no framework/build. `login.html` posts to `POST /api/login` (sets the HttpOnly cookie;
+  nothing is stored client-side); `dashboard.js::boot` calls `GET /api/session` (401 → `/login`),
+  then binds events, loads
   config (+ `/api/versions/{loader}`), status, backups, mods and console. Each loader skips its fetch
   when its elements are not on the current page.
 - Polling: metrics 2 s (overview only, `/api/system/metrics`), console 2 s (`CONSOLE_POLL_MS`, pages
@@ -96,15 +100,15 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
   toast `#action-status`. Theme tokens are CSS custom properties at the top of `dashboard.css`
   (dark only; accent `--accent` green; chart series `--series-1` `#3987e5`; status colors reserved
   for state). `login.html` duplicates the tokens inline.
-- All calls use `fetchJson` with `Authorization: Basic` from `buildBasicAuth` (upload uses raw `fetch`
-  with `FormData`).
+- All calls use `fetchJson` (cookie, `credentials: 'same-origin'`; non-GET always sends JSON, or
+  `FormData`); world download/upload use raw `fetch`/XHR with the same cookie. 401 → `/login`.
 - GUI feature status: verification.md.
 
 ## Control flow (verified)
 1. Uvicorn imports `webapp.app:app` → `create_app()` → `validate_auth_settings()` → attach
    `runtime` and `console_manager` to `app.state`.
-2. REST request → `require_auth` → `verify_credentials` (env vars).
-3. WS `/ws/console` → `verify_basic_auth_header` → `close(1008)` on failure, else `accept()` →
+2. REST request → `require_auth` → session cookie, else Basic credentials (lockout-checked).
+3. WS `/ws/console` → `authenticate` (cookie or Basic) → `close(1008)` on failure, else `accept()` →
    `console_manager.connect` → keepalive loop (`wait_for(..., 30s)`).
 4. Start: `_effective_config` → `ensure_server_installed` (install if missing) →
    `update_properties` → `ensure_java` → `launch_args` → `ServerProcess.start()`.

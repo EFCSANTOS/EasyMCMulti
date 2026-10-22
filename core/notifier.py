@@ -32,6 +32,7 @@ DEFAULTS = {
     "notify_link": True,
     "notify_tunnels": True,
     "notify_updates": True,
+    "notify_security": True,
     "heartbeat_url": "",
 }
 PUBLIC_KEYS = [key for key in DEFAULTS if key != "smtp_password"]

@@ -3,14 +3,17 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-76 passed (~15 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+97 passed (~22 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Data isolation
 Autouse fixture `isolated_data_dir` redirects `paths.DATA_DIR/JAVA_DIR/SERVERS_DIR`,
 `config_store._FILE` and `playit._CONFIG_FILE` to `tmp_path`, so tests no longer touch the real
 `EZ_Server_Data/`. Any new module-level path constant derived from `paths.DATA_DIR` must be added to
-this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
+this fixture. It also clears `app.state.sessions`, `app.state.login_limiter` and the shared
+client's cookies, so a lockout or login in one test never leaks into the next; tests that need a
+browser session use their own `TestClient(app)` (optionally `client=(ip, port)` to pick the peer
+IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 `playit_config.json` — a real install may still contain leftovers such as `motd: "Advanced test"`,
 `server_port: 25566`, or a `demo-secret` PlayIt config.)
 
@@ -32,6 +35,10 @@ this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.j
   `/api/...` literal in `dashboard.js` and asserts a matching route exists (templated URLs match by
   prefix).
 - `/api/console`, `/api/status` (401 unauth, 200 auth with keys).
+- Login (FIX-01): cookie flags and cookie auth, lockout after 5 failures (also for the right
+  password and Basic auth), expiry with a patched `clock`, per-IP isolation, spoofed vs loopback
+  `CF-Connecting-IP`, global ceiling, one security alert per lockout, logout, sliding session
+  expiry, CSRF (non-JSON / cross-origin → 403), WS with cookie, `weak_password` flag.
 - `/api/modrinth/install` forwards `project_id`; mod upload → 400 for vanilla.
 - `/api/backups`, `/api/mods` keys.
 - `/api/admin/{9 actions}` status ∈ {200,409,400}.

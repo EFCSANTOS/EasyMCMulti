@@ -261,15 +261,15 @@ run.bat
 
 This app is intended for local or LAN use.
 
-- Basic auth is enabled for the web app
+- sign-in uses a server-side session cookie; after 5 wrong passwords that address is locked out
+  for 15 minutes (scripts can still use HTTP Basic auth, with the same lockout)
 - credentials must be set through environment variables (`run.bat` prompts for them when unset)
 - the PlayIt secret key never leaves the host (`/api/playit/config` returns only the address)
 - **Dashboard over the internet (Remote access page)** uses a free Cloudflare quick tunnel: an
   `https://…trycloudflare.com` link, so the password is encrypted in transit. The link changes when
-  the tunnel restarts. There is **no lockout for wrong passwords yet**: anyone with the link can keep
-  guessing. Hardening the login is a **must fix** scheduled for an upcoming release
-  (`docs/knowledge/verification.md`). Until then, use a long unique password and keep sharing off
-  when you don't need it. (PlayIt is used only for the Minecraft connection: its API no longer
+  the tunnel restarts. Anyone with the link can try to sign in, so use a long unique password
+  (12+ characters; the Remote page warns about shorter ones) and keep sharing off when you don't
+  need it. (PlayIt is used only for the Minecraft connection: its API no longer
   allows creating the plain TCP tunnel a dashboard would need.)
 - backup restore only accepts the current server's own backups and only extracts `world/`
 - the dashboard pages themselves are public shells; all data and actions require auth

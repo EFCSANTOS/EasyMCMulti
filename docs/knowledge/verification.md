@@ -1,22 +1,9 @@
 # Verification & Gaps
 
-## Must fix (next commits)
-**Login is LAN-grade but can now be reached from the internet.** The optional remote dashboard
-(`POST /api/remote-dashboard`, Cloudflare quick tunnel, 2026-10-22) is HTTPS, so the password is
-encrypted in transit, but:
-- no lockout or rate limit on wrong passwords — anyone with the link can brute-force;
-- Basic auth re-sends the password on every request, and the browser keeps it in `sessionStorage`;
-- Cloudflare sees traffic in clear at its edge (TLS terminates there).
-
-Owner decision 2026-10-22: ship remote access with the current login, fix in an upcoming commit.
-**Priority raised:** since 2026-10-22 the link is **on by default** (`remote_dashboard` default
-True), so every install is reachable from the internet unless the owner switches it off.
-Required fix: server-side login sessions (HttpOnly, Secure, SameSite cookie, expiry), failed-login
-lockout / backoff (per client IP from `CF-Connecting-IP` when behind the tunnel), minimum password
-length enforced at startup when remote access is enabled, and stop storing the password
-client-side. Mitigations shipped meanwhile: confirm dialog + callout on the Remote page, random
-unlisted link that changes on every restart, `termux-setup.sh` requires a 12+ character password. Marked in code at
-`webapp/auth.py` ("MUST FIX").
+## Must fix
+Nothing open. The login hardening that was here (sessions + lockout for the internet-facing
+dashboard link, on by default) shipped as FIX-01 — see "Security" below. Remaining by-design
+limit: Cloudflare sees traffic in clear at its edge (TLS terminates there).
 
 ## Fetch status
 Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/dashboard.js`, `templates/*.html`),
@@ -43,12 +30,13 @@ Admin: `POST /api/admin/{action}`.
 Modrinth: `GET /api/modrinth/search`, `POST /api/modrinth/install`.
 PlayIt: `GET /api/playit/status`, `POST /api/playit/{configure,start,stop}`, `GET`/`PUT /api/playit/config`.
 Remote dashboard: `GET/POST /api/remote-dashboard`.
-WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
+Auth: `POST /api/login`, `POST /api/logout`, `GET /api/session`.
+WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failure).
 
 ## GUI feature status (dashboard ↔ API)
 | Feature | Status |
 |---|---|
-| Login / sign out | Works (sessionStorage Basic auth) |
+| Login / sign out | Works — HttpOnly session cookie, lockout after 5 wrong passwords (FIX-01) |
 | Loader + version pickers | Works — versions fetched from `/api/versions/{loader}`, refreshed on loader change |
 | Save config (Setup and Advanced pages) | Works — saves only the fields present on the page |
 | Create / start / stop / restart server | Works (restart waits for exit; see below) |
@@ -58,7 +46,7 @@ WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 | Mod browser (browse/category/sort/details, install + dependencies, remove), upload jars | Works; live read-only check against Modrinth; vanilla → 400 with explanation |
 | Worlds (upload, switch, rename, download, delete, new) | Works in tests (incl. real zip handling); not yet tried with a large real world over the Cloudflare link (~100 MB upload limit) |
 | PlayIt configure / start / stop / status | Works; configure runs in the background and the dashboard shows the approval link (open from any device); "Change account" resets |
-| Remote dashboard (Cloudflare) | Works: live-checked on Windows 2026-10-22 (download, registration-gated link, request served through `trycloudflare.com`); login caveat — see Must fix |
+| Remote dashboard (Cloudflare) | Works: live-checked on Windows 2026-10-22 (download, registration-gated link, request served through `trycloudflare.com`); login has sessions + lockout |
 | ~~Dashboard over PlayIt~~ | Removed: PlayIt's `/tunnels/create` rejects untyped tunnels (`TunnelTypeRequiresDescription`); `/v1/tunnels/create` rejected every body that matches the published client ("failed to parse body"); the website did not let the owner add a custom TCP tunnel either |
 | System metrics charts | Works (overview only) |
 | Player count + names | Works — parsed from server join/leave console lines |
@@ -103,12 +91,21 @@ Fixed 2026-10-22:
 - Credentials compared with `!=` → `secrets.compare_digest` (`auth.py::_credentials_match`).
 - `run.bat` hard-coded `admin`/`admin` → uses env vars or prompts (password hidden).
 - `crash_reporter.DEV_EMAIL` third-party address → module deleted.
+- Login was Basic auth re-sent on every request, kept in `sessionStorage`, with no limit on wrong
+  passwords (FIX-01) → `POST /api/login` sets an in-memory session cookie (`ezmc_session`,
+  HttpOnly, SameSite=Strict, Secure via the tunnel, 7-day sliding expiry); 5 wrong passwords per IP
+  in 15 min, or 30 overall, lock sign-in for 15 min (429 + `Retry-After`) and send a `security`
+  alert. Basic auth still works for scripts and shares the counter. Cookie-authenticated writes must
+  be JSON/multipart from the same origin, and cookie WebSockets same-origin (CSRF/CSWSH).
+  `CF-Connecting-IP` is trusted only from loopback (cloudflared). Weak password (< 12
+  chars) with the link on → startup warning + Remote page banner.
 
 Open / by design:
 - UI routes (`/`, `/login`, `/dashboard/*`, `/dashboard.{css,js}`, `/health`) are unauthenticated:
   static shells only; all data goes through authenticated `/api/*` (decisions.md).
-- Credentials live in browser `sessionStorage` and travel as Basic auth (plain HTTP on the LAN,
-  HTTPS through the Cloudflare link); **must fix** before relying on remote access (top of this file).
+- On the LAN the dashboard is plain HTTP, so the password crosses the network in clear once per
+  login (HTTPS through the Cloudflare link). Sessions live in memory: a dashboard restart signs
+  everyone out.
 - `playit_config.json` stores the secret in plaintext on the host; `notify_config.json` stores the
   SMTP app password in plaintext (never returned by the API). Use an app password, not the account
   password, so it can be revoked on its own.

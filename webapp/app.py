@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import glob
 import json
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 import os
@@ -18,16 +19,18 @@ except ModuleNotFoundError:  # pragma: no cover - installed in project venv for 
     psutil = None
 
 import requests
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from starlette.background import BackgroundTask
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from core import (
     cloudflared, config_store, downloaders, java_manager, modrinth, netinfo, notifier, paths, playit, updater, worlds,
 )
 from core.server_process import ServerProcess, accept_eula, update_properties
-from webapp.auth import validate_auth_settings, verify_basic_auth_header, verify_credentials
+from webapp.auth import (
+    SESSION_COOKIE, SESSION_TTL_SEC, LoginLimiter, SessionStore, authenticate, check_login, is_https, password_is_weak,
+    validate_auth_settings,
+)
 from webapp.state import RuntimeState
 from webapp.websocket_manager import WebSocketManager
 
@@ -68,10 +71,10 @@ FALLBACK_VERSIONS = {
     "neoforge": ["1.21.7", "1.21.6", "1.21.1", "1.20.1"],
 }
 
-security = HTTPBasic()
-
-def require_auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    return verify_credentials(credentials)
+def require_auth(request: Request) -> str:
+    """Session cookie (browser) or HTTP Basic (scripts); both share the failed-login lockout."""
+    state = request.app.state
+    return authenticate(request, state.sessions, state.login_limiter, state.on_lockout)
 
 
 def _server_properties_from_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -127,7 +130,8 @@ def _default_config() -> dict[str, Any]:
         "auto_update_check": True,
         "auto_update_install": False,
         # Cloudflare link to the dashboard (Remote access page); on by default (owner decision
-        # 2026-10-22) so the link comes up by itself after every boot. See the must-fix note in auth.py.
+        # 2026-10-22) so the link comes up by itself after every boot. Logins lock out after
+        # repeated wrong passwords (webapp/auth.py).
         "remote_dashboard": True,
     }
 
@@ -618,6 +622,7 @@ _SECTION_ALERTS = f"""
               {_switch("alerts-notify-link", "New dashboard link", "Emails the new https link after every restart or reboot.", True)}
               {_switch("alerts-notify-tunnels", "Tunnel problems", "PlayIt or the dashboard link stopped unexpectedly.", True)}
               {_switch("alerts-notify-updates", "Updates", "A new version is available, or an update failed.", True)}
+              {_switch("alerts-notify-security", "Sign-in lockouts", "Someone entered a wrong dashboard password too many times.", True)}
             </div>
             <div class="field heartbeat-field">
               <label for="alerts-heartbeat-url">Heartbeat URL (optional, for when the whole phone goes down)</label>
@@ -831,11 +836,15 @@ _SECTION_REMOTE = f"""
                  data-field="remote_dashboard_url">Off</a>{_copy_button("remote_dashboard_url", "dashboard link")}
             </div>
             <p id="remote-dashboard-error" class="callout callout-error" hidden></p>
+            <p id="remote-dashboard-weak-password" class="callout callout-error" hidden>
+              <strong>Your dashboard password is short.</strong> Anyone with the link can try to guess it. Set
+              EZ_WEBAPP_PASSWORD to 12 or more characters and restart the dashboard.
+            </p>
             <div class="callout callout-info">
               <strong>Encrypted, with limits.</strong> The link changes every time the tunnel restarts, so
               copy it again after a reboot, and a new link can take up to a minute to open everywhere.
-              Anyone with the link can try to sign in, and there is no lockout for wrong passwords yet:
-              use a long, unique password.
+              Anyone with the link can try to sign in; after 5 wrong passwords that address is locked out
+              for 15 minutes. Use a long, unique password.
             </div>
           </div>
           <div class="card">
@@ -1042,6 +1051,18 @@ def create_app() -> FastAPI:
 
         threading.Thread(target=send, name="notify", daemon=True).start()
 
+    # ---------- Login sessions and failed-login lockout ----------
+    app.state.sessions = SessionStore()
+    app.state.login_limiter = LoginLimiter()
+
+    def on_lockout(ip: str) -> None:
+        append_console_line(f"[auth] Too many wrong passwords from {ip}; sign-in locked for 15 minutes.")
+        notify("security", "Sign-in locked after wrong passwords",
+               f"Someone at {ip} entered a wrong dashboard password too many times. Sign-in from there is "
+               "locked for 15 minutes.\n\nIf this wasn't you, change EZ_WEBAPP_PASSWORD to a long, unique one.")
+
+    app.state.on_lockout = on_lockout
+
     def heartbeat_loop() -> None:
         while not runtime.shutting_down:
             url = notifier.load_config().get("heartbeat_url")
@@ -1100,6 +1121,26 @@ def create_app() -> FastAPI:
         template_path = os.path.join(os.path.dirname(__file__), "templates", "login.html")
         with open(template_path, "r", encoding="utf-8") as handle:
             return HTMLResponse(handle.read())
+
+    @app.post("/api/login")
+    def api_login(payload: dict[str, Any], request: Request, response: Response) -> dict[str, Any]:
+        username = str(payload.get("username") or "").strip()
+        password = str(payload.get("password") or "")
+        check_login(request, app.state.login_limiter, username, password, on_lockout)
+        token = app.state.sessions.create(username)
+        response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL_SEC, httponly=True, samesite="strict",
+                            secure=is_https(request), path="/")
+        return {"username": username}
+
+    @app.post("/api/logout")
+    def api_logout(request: Request, response: Response) -> dict[str, Any]:
+        app.state.sessions.delete(request.cookies.get(SESSION_COOKIE))
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return {"message": "Signed out."}
+
+    @app.get("/api/session")
+    def api_session(username: str = Depends(require_auth)) -> dict[str, Any]:
+        return {"username": username}
 
     @app.get("/dashboard")
     def dashboard() -> RedirectResponse:
@@ -1896,6 +1937,7 @@ def create_app() -> FastAPI:
             "state": runtime.web_tunnel_state,
             "url": runtime.web_tunnel_url or "",
             "error": runtime.web_tunnel_error,
+            "weak_password": password_is_weak(),
             "message": message,
         }
 
@@ -1997,6 +2039,11 @@ def create_app() -> FastAPI:
 
     def autostart() -> None:
         """Bring up what the Always-on settings ask for. EZ_NO_AUTOSTART=1 skips it (debugging)."""
+        if _effective_config().get("remote_dashboard") and password_is_weak():
+            warning = ("[auth] WARNING: the remote dashboard link is on and EZ_WEBAPP_PASSWORD is shorter than "
+                       "12 characters. Anyone with the link can try to guess it; set a longer password.")
+            logging.getLogger("uvicorn.error").warning(warning)
+            append_console_line(warning)
         if os.getenv("EZ_NO_AUTOSTART") == "1":
             return
         threading.Thread(target=heartbeat_loop, name="heartbeat", daemon=True).start()
@@ -2180,9 +2227,9 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/console")
     async def console_websocket(websocket: WebSocket) -> None:
-        auth_header = websocket.headers.get("authorization")
+        state = app.state
         try:
-            verify_basic_auth_header(auth_header)
+            authenticate(websocket, state.sessions, state.login_limiter, state.on_lockout)
         except HTTPException:
             await websocket.close(code=1008)
             return
