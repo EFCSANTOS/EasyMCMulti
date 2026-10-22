@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Minecraft server status</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d0e10;
+        --surface: #16181c;
+        --border: #2a2e35;
+        --text: #ecedee;
+        --muted: #9aa1ab;
+        --faint: #6b727c;
+        --accent: #3ecf8e;
+        --accent-ink: #062014;
+        --critical: #e66767;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 1rem;
+        font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+        font-size: 15px;
+        background: var(--bg);
+        color: var(--text);
+        -webkit-font-smoothing: antialiased;
+      }
+      .panel {
+        width: min(440px, 100%);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 1.75rem;
+      }
+      .head { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1.4rem; }
+      .logo {
+        flex: none;
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        background: linear-gradient(180deg, #5cb85c 0 34%, #3f8f3a 34% 42%, #8b5a2b 42% 100%);
+      }
+      h1 { margin: 0; font-size: 1.2rem; font-weight: 650; overflow-wrap: anywhere; }
+      .state { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.88rem; }
+      .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+      .online .dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.18); }
+      .online { color: var(--accent); }
+      dl { margin: 0; display: grid; gap: 0.9rem; }
+      dt { color: var(--faint); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+      dd { margin: 0.2rem 0 0; overflow-wrap: anywhere; }
+      .address { display: flex; gap: 0.5rem; align-items: center; }
+      code {
+        flex: 1;
+        padding: 0.45rem 0.6rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.92rem;
+      }
+      button {
+        min-height: 36px;
+        padding: 0 0.9rem;
+        border: 0;
+        border-radius: 8px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .note { margin-top: 1.4rem; color: var(--faint); font-size: 0.8rem; }
+      .error { color: var(--critical); }
+    </style>
+  </head>
+  <body>
+    <main class="panel">
+      <div class="head">
+        <span class="logo" aria-hidden="true"></span>
+        <div>
+          <h1 id="name">Minecraft server</h1>
+          <span id="state" class="state"><span class="dot"></span><span id="state-label">Checking…</span></span>
+        </div>
+      </div>
+      <dl>
+        <div>
+          <dt>Address</dt>
+          <dd class="address"><code id="address">—</code><button id="copy" type="button">Copy</button></dd>
+        </div>
+        <div id="lan-row" hidden>
+          <dt>Same Wi-Fi</dt>
+          <dd><code id="lan-address"></code></dd>
+        </div>
+        <div>
+          <dt>Version</dt>
+          <dd id="version">—</dd>
+        </div>
+        <div>
+          <dt>Players</dt>
+          <dd id="players">—</dd>
+        </div>
+      </dl>
+      <p id="note" class="note">Updates every 30 seconds.</p>
+    </main>
+
+    <script>
+      const REFRESH_MS = 30000;
+
+      function setText(id, text) {
+        document.getElementById(id).textContent = text;
+      }
+
+      function render(data) {
+        setText('name', data.name);
+        document.title = `${data.name} · Minecraft server`;
+        document.getElementById('state').className = data.online ? 'state online' : 'state';
+        setText('state-label', data.online ? 'Online' : 'Offline');
+        setText('address', data.address || 'Ask the owner for the address');
+        document.getElementById('copy').hidden = !data.address;
+        const lanRow = document.getElementById('lan-row');
+        lanRow.hidden = !data.lan_address;
+        if (data.lan_address) setText('lan-address', data.lan_address);
+        let version = `${data.loader} ${data.version}`;
+        if (data.mods_required) version += ' (mods required)';
+        setText('version', version);
+        let players = data.online ? `${data.players_online} of ${data.players_max} online` : 'Server is offline';
+        if (data.online && data.player_names && data.player_names.length) players += `: ${data.player_names.join(', ')}`;
+        setText('players', players);
+        const note = document.getElementById('note');
+        note.className = 'note';
+        note.textContent = 'Updates every 30 seconds.';
+      }
+
+      async function refresh() {
+        try {
+          const response = await fetch(`${location.pathname.replace(/\/$/, '')}/status.json`, { cache: 'no-store' });
+          if (response.status === 404) {
+            const note = document.getElementById('note');
+            note.className = 'note error';
+            note.textContent = 'This status page was turned off or replaced. Ask the owner for the new link.';
+            return;
+          }
+          render(await response.json());
+        } catch (error) {
+          setText('note', 'Could not reach the server right now; retrying…');
+        }
+      }
+
+      document.getElementById('copy').addEventListener('click', async (event) => {
+        const text = document.getElementById('address').textContent;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (error) {
+          const area = document.createElement('textarea'); // plain-HTTP fallback
+          area.value = text;
+          document.body.appendChild(area);
+          area.select();
+          document.execCommand('copy');
+          area.remove();
+        }
+        event.target.textContent = 'Copied';
+        setTimeout(() => { event.target.textContent = 'Copy'; }, 1500);
+      });
+
+      refresh();
+      setInterval(refresh, REFRESH_MS);
+    </script>
+  </body>
+</html>

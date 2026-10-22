@@ -367,6 +367,23 @@ Core details (`core/playit.py`):
 - UI (`static/js/players.js`): whitelist switch + warning when off, add forms (native `pattern`
   matches `require_player`), rows with Remove / Unban / "Add to whitelist" (textContent only).
 
+## 22. Invite friends + public status page (FEAT-03)
+- "Invite friends" card (`pages/sections_invite.py`) on Overview and Remote access:
+  `GET /api/status-page` (auth) → `{enabled, show_names, show_lan, url, url_is_lan_only, invite}`;
+  "Copy invite" copies `invite` (address, `<Loader> <version>`, "(mods required…)" when a
+  Fabric/Forge/NeoForge server has jars, status page link when on).
+- `POST /api/status-page {action}`: `enable` (creates `status_page_token` = `secrets.token_urlsafe(16)`
+  if none), `disable`, `regenerate` (new token; old link 404s at once), `settings {show_names?, show_lan?}`.
+  The token is never accepted from `PUT /api/config` (not in `ConfigUpdate`).
+- Public, **no auth**: `GET /s/{token}` → `templates/status.html` (`Cache-Control: no-store`,
+  `X-Robots-Tag: noindex`), which polls `GET /s/{token}/status.json` every 30 s. Disabled, empty or
+  wrong token (`secrets.compare_digest`) → 404. JSON: `name` (MOTD), `online`, `state`,
+  `players_online`, `players_max`, `address`, `version`, `loader`, `mods_required`, `modpack_url`
+  (FEAT-04), plus `player_names` if `status_page_show_names`, `lan_address` if `status_page_show_lan`.
+- Address: the PlayIt address if configured, else `<public IP>[:port]` (omits `:25565`), else empty.
+- Link base: the Cloudflare link when it is up, else `http://<LAN IP>:<WEB_PORT>` (LAN-only, flagged
+  by `url_is_lan_only`). The "New dashboard link" email includes the new status page link.
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

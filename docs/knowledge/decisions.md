@@ -67,7 +67,9 @@
 - Player count: implemented from console join/leave lines (data-model.md).
 - Security findings from the audit fixed (verification.md "Security").
 - UI page routes stay unauthenticated by design: they are static shells (no data); every `/api/*`
-  call needs the session cookie (or Basic auth).
+  call needs the session cookie (or Basic auth). The one exception is the opt-in public status page
+  `/s/<token>` (FEAT-03): an unguessable, regenerable token instead of a login, a fixed list of
+  harmless fields, 404 for anything else.
 - Restart race → restart now waits for exit (workflows.md §6).
 - French text in `core/` → translated to English.
 

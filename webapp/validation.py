@@ -74,6 +74,10 @@ class ConfigUpdate(BaseModel):
     auto_update_check: bool | None = None
     auto_update_install: bool | None = None
     remote_dashboard: bool | None = None
+    status_page_enabled: bool | None = None
+    status_page_show_names: bool | None = None
+    status_page_show_lan: bool | None = None
+    # status_page_token is deliberately absent: only POST /api/status-page creates tokens.
 
     @field_validator("ram_mb")
     @classmethod
