@@ -33,6 +33,7 @@ from webapp.auth import (
     validate_auth_settings,
 )
 from webapp.state import RuntimeState
+from webapp.validation import clean_stored_config, require_command, require_player, validate_config_update
 from webapp.websocket_manager import WebSocketManager
 
 KNOWN_LOADERS = ("vanilla", "paper", "fabric", "forge", "neoforge")
@@ -140,11 +141,37 @@ def _default_config() -> dict[str, Any]:
     }
 
 
+_host_ram_cache: list[int | None] = []
+# Where warnings about invalid saved config values go (create_app adds the dashboard console).
+_config_warning_sinks: list[Any] = []
+_config_warned: set[tuple[str, str]] = set()
+
+
+def _host_ram_mb() -> int | None:
+    """Total memory of this machine in MB (None if unknown); the upper bound for ram_mb."""
+    if not _host_ram_cache:
+        total = _memory_usage()[1]
+        _host_ram_cache.append(total // (1024 * 1024) if total > 1 else None)
+    return _host_ram_cache[0]
+
+
+def _warn_bad_config(key: str, value: Any) -> None:
+    marker = (key, repr(value))
+    if marker in _config_warned:
+        return  # _effective_config runs on every poll; say it once
+    _config_warned.add(marker)
+    message = f"[config] Ignoring invalid saved value {key}={value!r}; using the default instead."
+    logging.getLogger("uvicorn.error").warning(message)
+    for sink in _config_warning_sinks:
+        sink(message)
+
+
 def _effective_config() -> dict[str, Any]:
+    """Defaults + saved config. Invalid saved values (old or hand-edited files) fall back to defaults."""
     config = config_store.load()
     merged = _default_config()
     if isinstance(config, dict):
-        merged.update(config)
+        merged.update(clean_stored_config(config, merged, _host_ram_mb(), _warn_bad_config))
     return merged
 
 
@@ -494,7 +521,7 @@ _SECTION_ADVANCED = f"""
             <div class="form-grid">
               <div class="field field-wide">
                 <label for="motd-input">Server name (MOTD)</label>
-                <input id="motd-input" value="EZ Minecraft Server" />
+                <input id="motd-input" maxlength="59" value="EZ Minecraft Server" />
               </div>
               <div class="field">
                 <label for="gamemode-input">Game mode</label>
@@ -529,15 +556,15 @@ _SECTION_ADVANCED = f"""
               </div>
               <div class="field">
                 <label for="maxplayers-input">Max players</label>
-                <input id="maxplayers-input" type="number" min="1" max="1000" value="10" />
+                <input id="maxplayers-input" type="number" min="1" max="100" value="10" />
               </div>
               <div class="field">
                 <label for="viewdist-input">View distance (chunks)</label>
-                <input id="viewdist-input" type="number" min="3" max="32" value="10" />
+                <input id="viewdist-input" type="number" min="2" max="32" value="10" />
               </div>
               <div class="field">
                 <label for="simdist-input">Simulation distance (chunks)</label>
-                <input id="simdist-input" type="number" min="3" max="32" value="10" />
+                <input id="simdist-input" type="number" min="2" max="32" value="10" />
               </div>
             </div>
           </div>
@@ -1029,6 +1056,7 @@ def create_app() -> FastAPI:
         app.state.console_manager.publish(line)
 
     fsutil.set_logger(lambda message: append_console_line(f"[config] {message}"))
+    _config_warning_sinks[:] = [append_console_line]
 
     # ---------- Alerts (email + heartbeat) ----------
     last_alert_at: dict[str, float] = {}
@@ -1203,7 +1231,7 @@ def create_app() -> FastAPI:
     @app.put("/api/config")
     def save_config(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
         config = _effective_config()
-        config.update(payload)
+        config.update(validate_config_update(payload, _host_ram_mb()))
         try:
             config_store.save(config)
         except OSError as exc:
@@ -1269,7 +1297,7 @@ def create_app() -> FastAPI:
     def save_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
         config = _effective_config()
         if payload:
-            config.update(payload)
+            config.update(validate_config_update(payload, _host_ram_mb()))
             config_store.save(config)
         return config
 
@@ -1447,9 +1475,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/server/command")
     def send_command(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
-        command = str(payload.get("command", "")).strip()
-        if not command:
-            raise HTTPException(status_code=400, detail="A command is required.")
+        command = require_command(payload.get("command"))
         if runtime.process is None or not runtime.process.is_running():
             raise HTTPException(status_code=409, detail="Server is not running.")
         if command.lstrip("/").lower() == "stop":
@@ -1713,7 +1739,9 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail="Server is not running.")
 
         action = action.lower()
-        player = str((payload or {}).get("player", "")).strip() if payload else ""
+        player = (payload or {}).get("player")
+        if action in {"op", "deop", "kick", "ban"}:
+            player = require_player(player)
         command_map = {
             "op": f"op {player}" if player else "op",
             "deop": f"deop {player}" if player else "deop",
@@ -1729,9 +1757,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=f"Unsupported action: {action}")
 
         command = command_map[action]
-        if action in {"op", "deop", "kick", "ban"} and not player:
-            raise HTTPException(status_code=400, detail="A player name is required for this action.")
-
         runtime.process.send(command)
         append_console_line(f"> {command}")
         return {"ok": True, "action": action, "command": command, "message": f"{action} command sent."}
