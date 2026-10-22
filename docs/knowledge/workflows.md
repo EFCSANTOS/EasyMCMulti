@@ -159,6 +159,10 @@ maps to MC commands (`time set day`, `weather clear`, `save-all`, …); sends + 
   master); the playit.gg website offered the owner no custom TCP tunnel. Hence §16 (Cloudflare).
 - Stop: cancels a pending setup, stops agent, state `"stopped"`.
 - Config: `GET /api/playit/config` → `{address, secret_present}` (secret never returned).
+  `PUT /api/playit/config` `{secret?, address?}` (Remote → PlayIt → "Edit config (JSON)"): blank secret
+  keeps the saved one; unknown keys → 400; no secret at all → 400; `connecting` → 409; cancels a
+  pending approval (setup → `idle`, no error); a changed secret stops the agent. A cancelled claim now
+  ends in `setup="idle"` instead of `"error"`.
 - Agent exit → `_playit_on_exit` sets state stopped + console line.
 
 Core details (`core/playit.py`):

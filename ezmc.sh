@@ -22,18 +22,42 @@ ensure_service_daemon() {
   # termux-services runs services under runsvdir, normally started when a Termux session opens.
   if ! pgrep -x runsvdir >/dev/null 2>&1; then
     . "$PREFIX/etc/profile.d/start-services.sh"
-    sleep 3
   fi
+  # runsvdir rescans every 5 s; a freshly installed service has no supervisor until then.
+  local i
+  for i in $(seq 1 15); do
+    [ -e "$SERVICE_DIR/supervise/ok" ] && return 0
+    sleep 1
+  done
+  echo "The background service did not start. Close Termux completely (exit), reopen it and run: ezmc"
+  exit 1
 }
 
-dashboard_url() {
-  local port=8000
+dashboard_port() {
+  local port=""
   if [ -f "$APP_DIR/.env" ]; then
     port="$(sed -n 's/^EZ_WEBAPP_PORT=//p' "$APP_DIR/.env" | tail -n 1)"
   fi
+  echo "${port:-8000}"
+}
+
+dashboard_url() {
   local ip
   ip="$(cd "$APP_DIR" && .venv/bin/python -c 'from core.netinfo import lan_ip; print(lan_ip())' 2>/dev/null || echo localhost)"
-  echo "http://$ip:${port:-8000}"
+  echo "http://$ip:$(dashboard_port)"
+}
+
+wait_for_dashboard() {
+  # The service reports "up" as soon as run.sh starts; wait until uvicorn actually listens.
+  local port i
+  port="$(dashboard_port)"
+  for i in $(seq 1 30); do
+    if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 require_service() {
@@ -49,6 +73,13 @@ case "${1:-start}" in
     if has_service; then
       ensure_service_daemon
       sv up ezmc
+      echo "Starting the dashboard..."
+      if ! wait_for_dashboard; then
+        echo "The dashboard is not answering. Last log lines:"
+        tail -n 30 "$LOG_FILE" 2>/dev/null || echo "(no log yet: $LOG_FILE)"
+        echo "Full log: ezmc logs    Try in this terminal: ezmc stop; ezmc run"
+        exit 1
+      fi
       echo "Dashboard running in the background: $(dashboard_url)"
       echo "Logs: ezmc logs    Stop: ezmc stop"
     else
@@ -66,6 +97,10 @@ case "${1:-start}" in
   restart)
     require_service
     sv restart ezmc
+    if ! wait_for_dashboard; then
+      echo "The dashboard is not answering. See: ezmc logs"
+      exit 1
+    fi
     echo "Dashboard restarted: $(dashboard_url)"
     ;;
   status)
