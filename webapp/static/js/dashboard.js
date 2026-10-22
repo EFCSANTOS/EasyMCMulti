@@ -156,7 +156,7 @@ function bindCopyButtons() {
     button.addEventListener('click', async () => {
       const source = button.parentElement.querySelector(`[data-field="${button.dataset.copyField}"]`);
       const text = source ? source.textContent.trim() : '';
-      if (!text || text === '—' || /unavailable|^not |^off$|^created when|^assigned on/i.test(text)) {
+      if (!text || text === '—' || /unavailable|^not |^off$|^waiting for|^assigned on/i.test(text)) {
         setStatus('Nothing to copy yet.', 'error');
         return;
       }
@@ -371,6 +371,7 @@ async function loadStatus() {
   }
   renderStatus(appState.status);
   if (document.getElementById('playit-status-panel')) await loadPlayitStatus();
+  if (document.getElementById('remote-dashboard-toggle')) await loadRemoteDashboard();
 }
 
 // ---------- Server actions ----------
@@ -559,11 +560,6 @@ function renderPlayit(info) {
   configure.textContent = info.configured ? 'Change account' : 'Configure';
   configure.dataset.configured = info.configured ? 'true' : '';
 
-  const toggle = document.getElementById('dashboard-tunnel-toggle');
-  if (toggle && document.activeElement !== toggle && !toggle.disabled) toggle.checked = Boolean(info.dashboard_enabled);
-  let dashboard = 'Off';
-  if (info.dashboard_enabled) dashboard = info.dashboard_address || 'Created when the tunnel starts';
-  setField('dashboard_address', dashboard);
 }
 
 async function loadPlayitStatus() {
@@ -595,25 +591,53 @@ async function configurePlayit(button) {
   });
 }
 
-async function toggleDashboardTunnel(toggle) {
+// ---------- Remote dashboard (Cloudflare) ----------
+const REMOTE_LABELS = { off: 'Off', starting: 'Starting…', running: 'Online', error: 'Problem' };
+
+function renderRemoteDashboard(info) {
+  const badge = document.getElementById('remote-dashboard-badge');
+  const state = info.enabled ? info.state : 'off';
+  badge.textContent = REMOTE_LABELS[state] || state;
+  badge.className = state === 'running' ? 'badge badge-live' : 'badge';
+
+  const toggle = document.getElementById('remote-dashboard-toggle');
+  if (document.activeElement !== toggle && !toggle.disabled) toggle.checked = Boolean(info.enabled);
+
+  const link = document.getElementById('remote-dashboard-link');
+  let text = 'Off';
+  if (info.enabled) text = info.url || 'Waiting for the link…';
+  setField('remote_dashboard_url', text);
+  link.href = info.url || '#';
+
+  const errorBox = document.getElementById('remote-dashboard-error');
+  errorBox.hidden = !(info.enabled && info.error);
+  errorBox.textContent = info.error || '';
+}
+
+async function loadRemoteDashboard() {
+  try {
+    renderRemoteDashboard(await fetchJson('/api/remote-dashboard'));
+  } catch (error) {
+    // the next status poll retries
+  }
+}
+
+async function toggleRemoteDashboard(toggle) {
   const enabled = toggle.checked;
   if (enabled && !window.confirm(
-    'Expose this dashboard to the internet over plain HTTP?\n\n'
-    + 'Your password will travel unencrypted and there is no lockout for wrong passwords. '
-    + 'Only continue if you use a long, unique password.',
+    'Share this dashboard on the internet?\n\n'
+    + 'The https link is encrypted, but anyone who gets it can try to sign in, and there is no '
+    + 'lockout for wrong passwords yet. Continue only with a long, unique password.',
   )) {
     toggle.checked = false;
     return;
   }
   toggle.disabled = true;
-  await runAction(null, enabled ? 'Creating dashboard tunnel…' : 'Removing dashboard tunnel…', async () => {
+  await runAction(null, null, async () => {
     try {
-      const response = await fetchJson('/api/playit/dashboard', 'POST', { enabled });
-      renderPlayit(response);
+      const response = await fetchJson('/api/remote-dashboard', 'POST', { enabled });
+      renderRemoteDashboard(response);
       return response.message;
-    } catch (error) {
-      toggle.checked = !enabled;
-      throw error;
     } finally {
       toggle.disabled = false;
     }
@@ -886,7 +910,7 @@ function bindEvents() {
   });
 
   on('playit-config-button', 'click', (event, button) => configurePlayit(button));
-  on('dashboard-tunnel-toggle', 'change', (event, toggle) => toggleDashboardTunnel(toggle));
+  on('remote-dashboard-toggle', 'change', (event, toggle) => toggleRemoteDashboard(toggle));
   on('playit-start-button', 'click', (event, button) => playitAction('/api/playit/start', 'Starting tunnel…')(button));
   on('playit-stop-button', 'click', (event, button) => playitAction('/api/playit/stop', 'Stopping tunnel…')(button));
 

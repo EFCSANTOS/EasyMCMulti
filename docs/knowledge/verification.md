@@ -1,22 +1,24 @@
 # Verification & Gaps
 
 ## Must fix (next commits)
-**Login is LAN-grade but can now be reached from the internet.** The optional PlayIt dashboard
-tunnel (`POST /api/playit/dashboard`, added 2026-10-22) exposes the app over **plain HTTP**:
-- the Basic-auth password is sent readable on every request (no TLS on a PlayIt TCP tunnel);
-- no lockout or rate limit on wrong passwords — anyone with the URL can brute-force;
-- the browser keeps the password in `sessionStorage`.
+**Login is LAN-grade but can now be reached from the internet.** The optional remote dashboard
+(`POST /api/remote-dashboard`, Cloudflare quick tunnel, 2026-10-22) is HTTPS, so the password is
+encrypted in transit, but:
+- no lockout or rate limit on wrong passwords — anyone with the link can brute-force;
+- Basic auth re-sends the password on every request, and the browser keeps it in `sessionStorage`;
+- Cloudflare sees traffic in clear at its edge (TLS terminates there).
 
-Owner decision 2026-10-22: ship the tunnel with the current login, fix in an upcoming commit.
-Required fix: server-side login sessions (HttpOnly, SameSite cookie, expiry), failed-login lockout /
-backoff per IP, minimum password length enforced at startup when the dashboard tunnel is enabled,
-and stop storing the password client-side. Mitigations shipped meanwhile: tunnel is off by default,
-a confirm dialog + warning callout on the Remote page, `termux-setup.sh` requires a 12+ character
-password. Marked in code at `webapp/auth.py` ("MUST FIX").
+Owner decision 2026-10-22: ship remote access with the current login, fix in an upcoming commit.
+Required fix: server-side login sessions (HttpOnly, Secure, SameSite cookie, expiry), failed-login
+lockout / backoff (per client IP from `CF-Connecting-IP` when behind the tunnel), minimum password
+length enforced at startup when remote access is enabled, and stop storing the password
+client-side. Mitigations shipped meanwhile: off by default, confirm dialog + callout on the Remote
+page, random unlisted link, `termux-setup.sh` requires a 12+ character password. Marked in code at
+`webapp/auth.py` ("MUST FIX").
 
 ## Fetch status
 Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/dashboard.js`, `templates/*.html`),
-`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 49 passed.
+`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 53 passed.
 UI redesign (2026-10-22) verified with headless Edge screenshots at 1440 px and 390 px.
 Same day: cleanup + English-only pass + GUI feature check (see "Fixed 2026-10-22").
 Not audited line-by-line: `webapp/static/css/dashboard.css` (presentation only).
@@ -37,7 +39,8 @@ Backups: `GET /api/server/backups`, `POST /api/server/backups/restore`, legacy `
 Mods: `GET /api/server/mods`, `POST /api/server/mods/upload`, legacy `GET /api/mods`.
 Admin: `POST /api/admin/{action}`.
 Modrinth: `GET /api/modrinth/search`, `POST /api/modrinth/install`.
-PlayIt: `GET /api/playit/status`, `POST /api/playit/{configure,start,stop,dashboard}`, `GET /api/playit/config`.
+PlayIt: `GET /api/playit/status`, `POST /api/playit/{configure,start,stop}`, `GET /api/playit/config`.
+Remote dashboard: `GET/POST /api/remote-dashboard`.
 WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 
 ## GUI feature status (dashboard ↔ API)
@@ -52,7 +55,8 @@ WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 | Backup / list / restore | Works |
 | Mod search / install (Modrinth), upload jars | Works; vanilla → 400 "does not support mods" |
 | PlayIt configure / start / stop / status | Works; configure runs in the background and the dashboard shows the approval link (open from any device); "Change account" resets |
-| Dashboard over PlayIt | Implemented, **unverified against the live API** (generic TCP tunnel, `tunnel_type` omitted); plain HTTP — see Must fix |
+| Remote dashboard (Cloudflare) | Works: live-checked on Windows 2026-10-22 (download, registration-gated link, request served through `trycloudflare.com`); login caveat — see Must fix |
+| ~~Dashboard over PlayIt~~ | Removed: PlayIt's `/tunnels/create` rejects untyped tunnels (`TunnelTypeRequiresDescription`); `/v1/tunnels/create` rejected every body that matches the published client ("failed to parse body"); the website did not let the owner add a custom TCP tunnel either |
 | System metrics charts | Works (overview only) |
 | Player count + names | Works — parsed from server join/leave console lines |
 | Always-on (autostart server/PlayIt, crash restart) | Works in tests and a live uvicorn boot; not yet run on a device |
@@ -98,8 +102,8 @@ Fixed 2026-10-22:
 Open / by design:
 - UI routes (`/`, `/login`, `/dashboard/*`, `/dashboard.{css,js}`, `/health`) are unauthenticated:
   static shells only; all data goes through authenticated `/api/*` (decisions.md).
-- Credentials live in browser `sessionStorage` and travel as Basic auth over plain HTTP (no TLS) —
-  acceptable for LAN only; **must fix** before relying on the dashboard tunnel (top of this file).
+- Credentials live in browser `sessionStorage` and travel as Basic auth (plain HTTP on the LAN,
+  HTTPS through the Cloudflare link); **must fix** before relying on remote access (top of this file).
 - `playit_config.json` stores the secret in plaintext on the host.
 
 ## Unverified / needs inspection
@@ -109,7 +113,8 @@ Open / by design:
   `pkg install openjdk-21`, the PlayIt Linux agent under `termux-chroot` (DNS workaround;
   `EZ_PLAYIT_CHROOT=0` disables it), and Forge/NeoForge `unix_args.txt` launch. Only the Python
   logic is covered by tests; scripts were syntax-checked with `bash -n`.
-- PlayIt generic TCP tunnel creation (no `tunnel_type`) for the dashboard.
+- `cloudflared` on Termux (`pkg install cloudflared`) and its auto-restart after an unexpected exit
+  on a real device.
 - Termux 24/7 mode: runit service + `svlogger` log, `ezmc` commands, Termux:Boot script sourcing
   `start-services.sh` after a reboot.
 - `run.bat` prompt flow not executed in this session (batch + PowerShell secure-string read).

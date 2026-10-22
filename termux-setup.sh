@@ -38,7 +38,9 @@ say "Installing system packages (Python, Java, build tools)..."
 # rust + binutils: pydantic-core (used by FastAPI) is compiled on the phone.
 # proot: provides termux-chroot, which lets the PlayIt agent resolve DNS on Android.
 # termux-services: runs the dashboard as a background service for 24/7 mode.
-apt-get "${APT_OPTS[@]}" install python git "$JAVA_PACKAGE" rust binutils proot termux-tools termux-services </dev/null
+# cloudflared: the optional https link to the dashboard (Remote access page).
+apt-get "${APT_OPTS[@]}" install python git "$JAVA_PACKAGE" rust binutils proot termux-tools termux-services \
+  cloudflared </dev/null
 
 say "Fetching the app into $APP_DIR..."
 if [ -d "$APP_DIR/.git" ]; then

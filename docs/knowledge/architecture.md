@@ -55,7 +55,10 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
 - `modrinth.py` — `search(query, loader, game_version, limit)` → `[{title,slug,description,downloads}]`;
   `install(project_ref, loader, game_version, dest_dir, log)` → filename (newest compatible version's
   primary file; `resolve_project_slug` accepts slug or ID).
-- `playit.py` — claim/tunnel API client + `PlayitAgent` daemon wrapper (workflows.md §14).
+- `playit.py` — claim/tunnel API client + `PlayitAgent` daemon wrapper (workflows.md §14);
+  Minecraft tunnel only.
+- `cloudflared.py` — `ensure_binary`, `find_url`, `QuickTunnel` (Cloudflare quick tunnel for the
+  web dashboard; workflows.md §16).
 - `netinfo.py` — `lan_ip()` (UDP "connect" to 8.8.8.8, fallback `127.0.0.1`), `public_ip()`
   (`api.ipify.org`, 10 s timeout, returns `"unavailable"` on error; successful lookups cached for
   `PUBLIC_IP_TTL_SEC` = 300 s because the dashboard polls `/api/status`).
@@ -97,7 +100,10 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
 
 ## External interfaces
 - LAN HTTP on `WEB_PORT` (`EZ_WEBAPP_PORT`, default 8000; `run.bat`/`run.sh` pass the same value to
-  uvicorn); optionally exposed over the internet by the PlayIt dashboard tunnel. MC port from config.
+  uvicorn); optionally exposed over the internet by a Cloudflare quick tunnel (`core/cloudflared.py`,
+  workflows.md §16). MC port from config, optionally exposed by the PlayIt tunnel.
+- `cloudflared` subprocess + Cloudflare edge (`*.trycloudflare.com`); binary from
+  `github.com/cloudflare/cloudflared` releases (`cloudflared.RELEASE_URL`).
 - Java subprocess (stdin/stdout piped, `CREATE_NO_WINDOW` on Windows).
 - PlayIt agent subprocess.
 - Modrinth HTTP API.

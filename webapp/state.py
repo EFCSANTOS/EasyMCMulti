@@ -29,6 +29,12 @@ class RuntimeState:
     playit_setup: str = "idle"
     playit_claim_url: str | None = None
     playit_error: str = ""
+    # Remote dashboard (Cloudflare quick tunnel): state "off" | "starting" | "running" | "error".
+    web_tunnel: Any = None
+    web_tunnel_url: str | None = None
+    web_tunnel_state: str = "off"
+    web_tunnel_error: str = ""
+    web_tunnel_wanted: bool = False
     playit_cancel: bool = False
     process: Any = None
     # True once a stop was asked for (button, restart, console "stop", shutdown); a non-zero exit

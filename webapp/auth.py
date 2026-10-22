@@ -27,11 +27,11 @@ def get_expected_credentials() -> tuple[str, str]:
     return username, password
 
 
-# MUST FIX (next commits): this Basic-auth scheme is LAN-grade only. With the PlayIt dashboard
-# tunnel (plain HTTP over the internet) the password is sent readable on every request, there is
-# no lockout/rate limit for wrong passwords, and the browser keeps it in sessionStorage.
-# Replace with login sessions (HttpOnly cookie) + failed-login lockout. See
-# docs/knowledge/verification.md "Must fix".
+# MUST FIX (next commits): this Basic-auth scheme is LAN-grade only. The remote dashboard
+# (Cloudflare https link) is encrypted in transit, but there is no lockout/rate limit for wrong
+# passwords (anyone with the link can brute-force), every request re-sends the password, and the
+# browser keeps it in sessionStorage. Replace with login sessions (HttpOnly cookie) + failed-login
+# lockout. See docs/knowledge/verification.md "Must fix".
 def _credentials_match(username: str, password: str) -> bool:
     """Constant-time comparison so response timing does not leak the expected credentials."""
     expected_username, expected_password = get_expected_credentials()

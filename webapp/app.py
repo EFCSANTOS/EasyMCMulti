@@ -19,7 +19,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from core import config_store, downloaders, java_manager, modrinth, netinfo, paths, playit
+from core import cloudflared, config_store, downloaders, java_manager, modrinth, netinfo, paths, playit
 from core.server_process import ServerProcess, accept_eula, update_properties
 from webapp.auth import validate_auth_settings, verify_basic_auth_header, verify_credentials
 from webapp.state import RuntimeState
@@ -32,8 +32,9 @@ SHUTDOWN_STOP_TIMEOUT_SEC = 45
 CRASH_RESTART_DELAY_SEC = 10
 CRASH_RESTART_LIMIT = 3
 CRASH_WINDOW_SEC = 600
-# Port uvicorn listens on; run.bat / run.sh pass the same value. Used for the PlayIt dashboard tunnel.
+# Port uvicorn listens on; run.bat / run.sh pass the same value. Used for the remote dashboard tunnel.
 WEB_PORT = int(os.getenv("EZ_WEBAPP_PORT", "8000"))
+WEB_TUNNEL_RETRY_SEC = 15
 FALLBACK_VERSIONS = {
     "vanilla": ["1.21.7", "1.21.6", "1.21.5", "1.21.4", "1.21.3", "1.21.2", "1.21.1", "1.20.4"],
     "paper": ["1.21.7", "1.21.6", "1.21.4", "1.21.1", "1.20.4"],
@@ -94,6 +95,8 @@ def _default_config() -> dict[str, Any]:
         "autostart_server": False,
         "autostart_playit": False,
         "auto_restart": True,
+        # Cloudflare link to the dashboard (Remote access page); restored on dashboard start.
+        "remote_dashboard": False,
     }
 
 
@@ -600,22 +603,26 @@ _SECTION_REMOTE = f"""
             <div class="card-header">
               <div>
                 <h2>Dashboard over the internet</h2>
-                <p class="card-sub">Manage the server from anywhere through a second PlayIt tunnel.</p>
+                <p class="card-sub">A private https:// link through Cloudflare, free and without an account.</p>
               </div>
+              <span id="remote-dashboard-badge" class="badge">Off</span>
             </div>
-            <label class="switch-row" for="dashboard-tunnel-toggle">
-              <span><span class="switch-label">Expose this dashboard</span>
-                <span class="hint">Takes effect when the PlayIt tunnel is running.</span></span>
-              <input id="dashboard-tunnel-toggle" type="checkbox" class="switch" />
+            <label class="switch-row" for="remote-dashboard-toggle">
+              <span><span class="switch-label">Share this dashboard</span>
+                <span class="hint">Stays on after reboots while this is enabled.</span></span>
+              <input id="remote-dashboard-toggle" type="checkbox" class="switch" />
             </label>
             <div class="address-row address-row-lg">
-              <span class="address-kind">URL</span>
-              <code data-field="dashboard_address">Off</code>{_copy_button("dashboard_address", "dashboard URL")}
+              <span class="address-kind">Link</span>
+              <a id="remote-dashboard-link" class="link" href="#" target="_blank" rel="noopener noreferrer"
+                 data-field="remote_dashboard_url">Off</a>{_copy_button("remote_dashboard_url", "dashboard link")}
             </div>
-            <div class="callout callout-warning">
-              <strong>Not encrypted.</strong> The link uses plain HTTP, so your dashboard password crosses
-              the internet readable by anyone on the path, and there is no lockout for wrong passwords.
-              Use a long, unique password and turn this off when you don't need it.
+            <p id="remote-dashboard-error" class="callout callout-error" hidden></p>
+            <div class="callout callout-info">
+              <strong>Encrypted, with limits.</strong> The link changes every time the tunnel restarts, so
+              copy it again after a reboot, and a new link can take up to a minute to open everywhere.
+              Anyone with the link can try to sign in, and there is no lockout for wrong passwords yet:
+              use a long, unique password.
             </div>
           </div>
           <div class="card">
@@ -1228,14 +1235,11 @@ def create_app() -> FastAPI:
             "setup": runtime.playit_setup,
             "claim_url": runtime.playit_claim_url or "",
             "error": runtime.playit_error,
-            "dashboard_enabled": bool(_effective_config().get("dashboard_tunnel")),
-            "dashboard_address": cfg.get("dashboard_address") or "",
-            "web_port": WEB_PORT,
             "message": message,
         }
 
     def start_agent_and_tunnels(secret: str) -> None:
-        """Start the agent if needed, ensure the Minecraft (and optional dashboard) tunnel, save addresses."""
+        """Start the agent if needed, ensure the Minecraft tunnel and save its address."""
         if not (runtime.playit_agent and runtime.playit_agent.is_running()):
             playit.ensure_agent(log=playit_log)
             runtime.playit_agent = playit.PlayitAgent(
@@ -1245,10 +1249,7 @@ def create_app() -> FastAPI:
             runtime.playit_agent.start(secret)
         config = _effective_config()
         address = playit.ensure_tunnel(secret, int(config.get("server_port", 25565)), playit_log)
-        dashboard = ""
-        if config.get("dashboard_tunnel"):
-            dashboard = playit.ensure_dashboard_tunnel(secret, WEB_PORT, playit_log)
-        playit.save_config(secret, address, dashboard_address=dashboard)
+        playit.save_config(secret, address)
         runtime.playit_state = "running"
         runtime.playit_address = address
 
@@ -1304,31 +1305,14 @@ def create_app() -> FastAPI:
         cfg = playit.load_config()
         if not cfg.get("secret"):
             return playit_info("PlayIt is not configured yet. Click Configure first.")
-        if runtime.playit_agent and runtime.playit_agent.is_running() and not _effective_config().get("dashboard_tunnel"):
+        if runtime.playit_agent and runtime.playit_agent.is_running():
             return playit_info("PlayIt tunnel is already running.")
-        start_agent_and_tunnels(cfg["secret"])
+        try:
+            start_agent_and_tunnels(cfg["secret"])
+        except Exception as exc:
+            playit_log(f"Start failed: {exc}")
+            raise HTTPException(status_code=502, detail=f"PlayIt start failed: {exc}") from exc
         return playit_info("PlayIt tunnel started.")
-
-    @app.post("/api/playit/dashboard")
-    def playit_dashboard(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
-        enabled = bool(payload.get("enabled"))
-        config = _effective_config()
-        config["dashboard_tunnel"] = enabled
-        config_store.save(config)
-        cfg = playit.load_config()
-        secret = cfg.get("secret")
-        if not secret:
-            return playit_info("Saved. Configure PlayIt to get a dashboard address.")
-        agent_running = bool(runtime.playit_agent and runtime.playit_agent.is_running())
-        if enabled:
-            if not agent_running:
-                return playit_info("Saved. The dashboard address is created when the tunnel starts.")
-            dashboard = playit.ensure_dashboard_tunnel(secret, WEB_PORT, playit_log)
-            playit.save_config(secret, cfg.get("address") or "", dashboard_address=dashboard)
-            return playit_info(f"Dashboard reachable at {dashboard}")
-        playit.delete_dashboard_tunnel(secret, playit_log)
-        playit.save_config(secret, cfg.get("address") or "", dashboard_address="")
-        return playit_info("Dashboard is no longer reachable through PlayIt.")
 
     @app.post("/api/playit/stop")
     def stop_playit(_: str = Depends(require_auth)) -> dict[str, Any]:
@@ -1347,6 +1331,97 @@ def create_app() -> FastAPI:
         # Never expose the secret key over HTTP; it stays in playit_config.json on the host.
         cfg = playit.load_config()
         return {"address": cfg.get("address") or "", "secret_present": bool(cfg.get("secret"))}
+
+    # ---------- Remote dashboard (Cloudflare quick tunnel) ----------
+    def web_log(line: str) -> None:
+        append_console_line(f"[cloudflare] {line}")
+
+    def remote_info(message: str = "") -> dict[str, Any]:
+        return {
+            "enabled": bool(_effective_config().get("remote_dashboard")),
+            "state": runtime.web_tunnel_state,
+            "url": runtime.web_tunnel_url or "",
+            "error": runtime.web_tunnel_error,
+            "message": message,
+        }
+
+    def start_web_tunnel() -> None:
+        if runtime.web_tunnel is not None and runtime.web_tunnel.is_running():
+            return
+        runtime.web_tunnel_wanted = True
+        runtime.web_tunnel_state = "starting"
+        runtime.web_tunnel_error = ""
+        runtime.web_tunnel_url = None
+        binary = cloudflared.ensure_binary(log=web_log)
+        tunnel: Any = None
+
+        def on_url(url: str) -> None:
+            runtime.web_tunnel_url = url
+            runtime.web_tunnel_state = "running"
+            web_log(f"Dashboard reachable at {url}")
+
+        def on_output(line: str) -> None:
+            if " ERR " in line or " WRN " in line:  # cloudflared is chatty; keep problems only
+                web_log(line)
+
+        def on_exit(code: int) -> None:
+            if runtime.web_tunnel is not tunnel:
+                return
+            runtime.web_tunnel = None
+            runtime.web_tunnel_url = None
+            if not runtime.web_tunnel_wanted:
+                runtime.web_tunnel_state = "off"
+                return
+            runtime.web_tunnel_state = "error"
+            runtime.web_tunnel_error = f"cloudflared exited (code {code}); retrying in {WEB_TUNNEL_RETRY_SEC} s"
+            web_log(runtime.web_tunnel_error)
+            timer = threading.Timer(WEB_TUNNEL_RETRY_SEC, retry_web_tunnel)
+            timer.daemon = True
+            timer.start()
+
+        tunnel = cloudflared.QuickTunnel(on_url=on_url, on_output=on_output, on_exit=on_exit)
+        runtime.web_tunnel = tunnel
+        tunnel.start(binary, WEB_PORT)
+
+    def start_web_tunnel_safely() -> None:
+        try:
+            start_web_tunnel()
+        except Exception as exc:
+            runtime.web_tunnel_state = "error"
+            runtime.web_tunnel_error = str(exc)
+            web_log(f"Start failed: {exc}")
+
+    def retry_web_tunnel() -> None:
+        if runtime.web_tunnel_wanted and _effective_config().get("remote_dashboard"):
+            start_web_tunnel_safely()
+
+    def stop_web_tunnel() -> None:
+        runtime.web_tunnel_wanted = False
+        tunnel = runtime.web_tunnel
+        runtime.web_tunnel = None
+        runtime.web_tunnel_url = None
+        runtime.web_tunnel_state = "off"
+        runtime.web_tunnel_error = ""
+        if tunnel is not None and tunnel.is_running():
+            tunnel.stop()
+
+    @app.get("/api/remote-dashboard")
+    def remote_dashboard_status(_: str = Depends(require_auth)) -> dict[str, Any]:
+        return remote_info()
+
+    @app.post("/api/remote-dashboard")
+    def remote_dashboard_toggle(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        enabled = bool(payload.get("enabled"))
+        config = _effective_config()
+        config["remote_dashboard"] = enabled
+        config_store.save(config)
+        if not enabled:
+            stop_web_tunnel()
+            return remote_info("The dashboard is no longer reachable from the internet.")
+        runtime.web_tunnel_state = "starting"
+        runtime.web_tunnel_error = ""
+        threading.Thread(target=start_web_tunnel_safely, name="cloudflared", daemon=True).start()
+        return remote_info("Starting the Cloudflare tunnel; the link appears in a few seconds.")
 
     def run_in_background(name: str, action: Any) -> None:
         def worker() -> None:
@@ -1369,6 +1444,9 @@ def create_app() -> FastAPI:
         if config.get("autostart_server"):
             append_console_line("[autostart] starting the Minecraft server")
             run_in_background("Minecraft server", launch_server)
+        if config.get("remote_dashboard"):
+            append_console_line("[autostart] starting the remote dashboard link")
+            run_in_background("remote dashboard", start_web_tunnel_safely)
 
     def shutdown() -> None:
         """Stop Minecraft and the PlayIt agent with the dashboard, so no orphan keeps the port or world lock."""
@@ -1381,6 +1459,7 @@ def create_app() -> FastAPI:
                 process.kill()
         if runtime.playit_agent is not None and runtime.playit_agent.is_running():
             runtime.playit_agent.stop()
+        stop_web_tunnel()
 
     app.state.autostart = autostart
     app.state.shutdown = shutdown

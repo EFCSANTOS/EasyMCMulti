@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-49 passed (~2.5 s, `.venv` Python 3.14.7). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
+53 passed (~2.5 s, `.venv` Python 3.14.7). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Data isolation
 Autouse fixture `isolated_data_dir` redirects `paths.DATA_DIR/JAVA_DIR/SERVERS_DIR`,
@@ -46,7 +46,11 @@ this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.j
 - Backup list + restore round trip; restore rejects zip-slip archives and paths outside the server dir.
 - `/api/playit/config` never returns the secret; wrong password → 401.
 - PlayIt (stubbed via `fake_playit` fixture + `DummyAgent`): start, async configure returning the
-  claim URL and finishing in the background, `reset` forgetting the account, dashboard tunnel on/off.
+  claim URL and finishing in the background, `reset` forgetting the account.
+- Remote dashboard (`fake_cloudflared` fixture + `FakeQuickTunnel`, `WEB_TUNNEL_RETRY_SEC` = 0):
+  toggle on/off, restart after unexpected exit, missing-binary error; `QuickTunnel._reader` announces
+  the URL only after registration; URL parsing and release asset names. A live check against a
+  throwaway local server lives outside the suite (needs internet).
 - Platform: system Java selection, Termux missing-Java hint, `unix_args.txt` vs `win_args.txt`,
   metrics with blocked CPU counters, `termux-chroot` agent wrapping.
 - Always-on (`fake_server` fixture + `RecordingProcess`, whose `exit(code)` fires `on_exit`;

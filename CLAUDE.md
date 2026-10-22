@@ -20,7 +20,7 @@ Tests use a temporary data dir (autouse fixture) — see `docs/knowledge/testing
 Linux / Termux: `bash run.sh` (reads `.env`). Android install: `termux-setup.sh`.
 
 ## Must fix
-Login hardening (sessions + lockout) before relying on the PlayIt dashboard tunnel — see
+Login hardening (sessions + lockout) before relying on the remote dashboard link — see
 `docs/knowledge/verification.md` "Must fix".
 
 ## Language

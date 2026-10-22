@@ -215,25 +215,13 @@ class DummyAgent:
 
 @pytest.fixture
 def fake_playit(monkeypatch):
-    """Stub the PlayIt network/agent calls and record dashboard tunnel operations."""
-    calls = {"dashboard": [], "deleted": 0}
+    """Stub the PlayIt network/agent calls."""
     monkeypatch.setattr(webapp_module.playit, "ensure_agent", lambda log=print: "agent")
     monkeypatch.setattr(webapp_module.playit, "PlayitAgent", DummyAgent)
     monkeypatch.setattr(webapp_module.playit, "ensure_tunnel", lambda secret, port, log, timeout_sec=120: "demo.example:25565")
-
-    def fake_dashboard(secret, port, log, timeout_sec=120):
-        calls["dashboard"].append(port)
-        return "http://dash.example:41234"
-
-    def fake_delete(secret, log):
-        calls["deleted"] += 1
-        return True
-
-    monkeypatch.setattr(webapp_module.playit, "ensure_dashboard_tunnel", fake_dashboard)
-    monkeypatch.setattr(webapp_module.playit, "delete_dashboard_tunnel", fake_delete)
     app.state.runtime.playit_agent = None
     app.state.runtime.playit_setup = "idle"
-    yield calls
+    yield
     app.state.runtime.playit_agent = None
     app.state.runtime.playit_setup = "idle"
 
@@ -245,7 +233,6 @@ def test_playit_start_route_starts_the_tunnel(fake_playit):
     payload = response.json()
     assert payload["state"] == "running"
     assert payload["address"] == "demo.example:25565"
-    assert fake_playit["dashboard"] == []
 
 
 def test_playit_configure_returns_approval_link_and_finishes_in_background(fake_playit, monkeypatch):
@@ -286,22 +273,124 @@ def test_playit_configure_reset_forgets_saved_account(fake_playit, monkeypatch):
     app.state.runtime.playit_cancel = True
 
 
-def test_dashboard_tunnel_toggle(fake_playit):
-    playit.save_config("demo-secret", "demo.example:25565")
-    client.post("/api/playit/start", auth=("admin", "s3cret-pass"))
+class FakeQuickTunnel:
+    """Stand-in for cloudflared.QuickTunnel; the test decides when the URL arrives or it exits."""
 
-    response = client.post("/api/playit/dashboard", auth=("admin", "s3cret-pass"), json={"enabled": True})
-    payload = response.json()
-    assert payload["dashboard_enabled"] is True
-    assert payload["dashboard_address"] == "http://dash.example:41234"
-    assert fake_playit["dashboard"] == [webapp_module.WEB_PORT]
+    instances: list["FakeQuickTunnel"] = []
 
-    response = client.post("/api/playit/dashboard", auth=("admin", "s3cret-pass"), json={"enabled": False})
+    def __init__(self, on_url, on_output, on_exit):
+        self.on_url = on_url
+        self.on_exit = on_exit
+        self.running = False
+        self.port = None
+        FakeQuickTunnel.instances.append(self)
+
+    def start(self, binary, local_port):
+        self.running = True
+        self.port = local_port
+        self.on_url(f"https://demo-{len(FakeQuickTunnel.instances)}.trycloudflare.com")
+
+    def is_running(self):
+        return self.running
+
+    def stop(self):
+        self.running = False
+        self.on_exit(0)
+
+    def crash(self):
+        self.running = False
+        self.on_exit(1)
+
+
+@pytest.fixture
+def fake_cloudflared(monkeypatch):
+    FakeQuickTunnel.instances = []
+    monkeypatch.setattr(webapp_module.cloudflared, "ensure_binary", lambda log=print: "cloudflared")
+    monkeypatch.setattr(webapp_module.cloudflared, "QuickTunnel", FakeQuickTunnel)
+    monkeypatch.setattr(webapp_module, "WEB_TUNNEL_RETRY_SEC", 0)
+    yield FakeQuickTunnel.instances
+    client.post("/api/remote-dashboard", auth=("admin", "s3cret-pass"), json={"enabled": False})
+
+
+def test_remote_dashboard_toggle(fake_cloudflared):
+    response = client.post("/api/remote-dashboard", auth=("admin", "s3cret-pass"), json={"enabled": True})
+    assert response.json()["enabled"] is True
+    assert _wait_until(lambda: client.get("/api/remote-dashboard", auth=("admin", "s3cret-pass")).json()["state"] == "running")
+    status = client.get("/api/remote-dashboard", auth=("admin", "s3cret-pass")).json()
+    assert status["url"] == "https://demo-1.trycloudflare.com"
+    assert fake_cloudflared[0].port == webapp_module.WEB_PORT
+
+    response = client.post("/api/remote-dashboard", auth=("admin", "s3cret-pass"), json={"enabled": False})
     payload = response.json()
-    assert payload["dashboard_enabled"] is False
-    assert payload["dashboard_address"] == ""
-    assert fake_playit["deleted"] == 1
-    assert playit.load_config()["secret"] == "demo-secret"
+    assert payload["enabled"] is False
+    assert payload["state"] == "off"
+    assert payload["url"] == ""
+    assert not fake_cloudflared[0].is_running()
+
+
+def test_remote_dashboard_restarts_after_unexpected_exit(fake_cloudflared):
+    client.post("/api/remote-dashboard", auth=("admin", "s3cret-pass"), json={"enabled": True})
+    assert _wait_until(lambda: len(fake_cloudflared) == 1 and fake_cloudflared[0].is_running())
+    fake_cloudflared[0].crash()
+    assert _wait_until(lambda: len(fake_cloudflared) == 2 and app.state.runtime.web_tunnel_state == "running")
+    assert app.state.runtime.web_tunnel_url == "https://demo-2.trycloudflare.com"
+
+
+def test_remote_dashboard_reports_missing_binary(monkeypatch):
+    def missing(log=print):
+        raise RuntimeError("cloudflared is not installed. Install it in Termux with: pkg install cloudflared")
+
+    monkeypatch.setattr(webapp_module.cloudflared, "ensure_binary", missing)
+    client.post("/api/remote-dashboard", auth=("admin", "s3cret-pass"), json={"enabled": True})
+    assert _wait_until(lambda: app.state.runtime.web_tunnel_state == "error")
+    status = client.get("/api/remote-dashboard", auth=("admin", "s3cret-pass")).json()
+    assert "pkg install cloudflared" in status["error"]
+    client.post("/api/remote-dashboard", auth=("admin", "s3cret-pass"), json={"enabled": False})
+
+
+def test_quick_tunnel_announces_url_only_after_registration():
+    from core import cloudflared
+
+    lines = [
+        "INF Requesting new quick Tunnel on trycloudflare.com...\n",
+        "INF |  https://quiet-river-boat-lamp.trycloudflare.com  |\n",
+        "INF Starting metrics server\n",
+        "INF Registered tunnel connection connIndex=0 location=lis01\n",
+    ]
+    events = []
+
+    class FakeProc:
+        stdout = iter(lines)
+
+        def wait(self):
+            return 0
+
+    tunnel = cloudflared.QuickTunnel(
+        on_url=lambda url: events.append(("url", url)),
+        on_output=lambda line: events.append(("line", line[:12])),
+        on_exit=lambda code: events.append(("exit", code)),
+    )
+    tunnel.proc = FakeProc()
+    tunnel._reader()
+    url_index = events.index(("url", "https://quiet-river-boat-lamp.trycloudflare.com"))
+    registered_index = events.index(("line", "INF Register"))
+    assert url_index < registered_index  # announced while handling the registration line
+    assert ("line", "INF Starting") in events[:url_index]  # not before registration
+    assert events[-1] == ("exit", 0)
+
+
+def test_cloudflared_url_parsing_and_assets(monkeypatch):
+    from core import cloudflared
+
+    line = "2026-10-22T01:00:00Z INF |  https://quiet-river-boat-lamp.trycloudflare.com  |"
+    assert cloudflared.find_url(line) == "https://quiet-river-boat-lamp.trycloudflare.com"
+    assert cloudflared.find_url("INF Starting tunnel") is None
+    monkeypatch.setattr(cloudflared.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(cloudflared.platform, "machine", lambda: "AMD64")
+    assert cloudflared._asset_name() == "cloudflared-windows-amd64.exe"
+    monkeypatch.setattr(cloudflared.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(cloudflared.platform, "machine", lambda: "aarch64")
+    assert cloudflared._asset_name() == "cloudflared-linux-arm64"
 
 
 def test_system_java_prefers_exact_then_oldest_newer(monkeypatch):

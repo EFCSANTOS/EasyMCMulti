@@ -173,7 +173,8 @@ The app exposes a browser interface with:
 - live console output
 - world backups and restore
 - mods/plugins: Modrinth search and install, `.jar` upload (not available for vanilla)
-- PlayIt tunnel setup, start, and stop
+- PlayIt tunnel setup, start, and stop (lets friends join without port forwarding)
+- optional https link to manage the dashboard from anywhere (Cloudflare quick tunnel)
 - LAN/public address display, online player list, and live CPU/RAM charts
 
 ---
@@ -235,11 +236,13 @@ This app is intended for local or LAN use.
 - Basic auth is enabled for the web app
 - credentials must be set through environment variables (`run.bat` prompts for them when unset)
 - the PlayIt secret key never leaves the host (`/api/playit/config` returns only the address)
-- **Dashboard over the internet (Remote access page) is unencrypted.** It uses a PlayIt TCP tunnel
-  with plain HTTP: your password crosses the internet readable, and there is no lockout for wrong
-  passwords. Hardening the login is a **must fix** scheduled for an upcoming release
-  (`docs/knowledge/verification.md`). Until then, use a long unique password and keep the toggle
-  off when you don't need it.
+- **Dashboard over the internet (Remote access page)** uses a free Cloudflare quick tunnel: an
+  `https://…trycloudflare.com` link, so the password is encrypted in transit. The link changes when
+  the tunnel restarts. There is **no lockout for wrong passwords yet**: anyone with the link can keep
+  guessing. Hardening the login is a **must fix** scheduled for an upcoming release
+  (`docs/knowledge/verification.md`). Until then, use a long unique password and keep sharing off
+  when you don't need it. (PlayIt is used only for the Minecraft connection: its API no longer
+  allows creating the plain TCP tunnel a dashboard would need.)
 - backup restore only accepts the current server's own backups and only extracts `world/`
 - the dashboard pages themselves are public shells; all data and actions require auth
 - avoid exposing the port to the public internet without a proper firewall and reverse-proxy setup

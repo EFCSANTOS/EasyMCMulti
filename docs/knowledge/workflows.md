@@ -137,8 +137,7 @@ maps to MC commands (`time set day`, `weather clear`, `save-all`, …); sends + 
 - Status: `configured` = secret present; state from `_playit_state` (`running` only when the agent
   process is alive — a saved address alone no longer reports `running`).
 - All PlayIt endpoints return `playit_info()`: `configured`, `state`, `address`, `setup`
-  (`idle`/`awaiting-approval`/`connecting`/`error`), `claim_url`, `error`, `dashboard_enabled`,
-  `dashboard_address`, `web_port`, `message`.
+  (`idle`/`awaiting-approval`/`connecting`/`error`), `claim_url`, `error`, `message`.
 - Configure (`POST /api/playit/configure`, optional `{reset: true}`): `reset` stops the agent and
   `forget_config()`s the saved account first. If a secret exists → "already configured". Else sets
   `setup="awaiting-approval"`, starts the `claim_and_connect` daemon thread and waits ≤5 s for the
@@ -146,13 +145,17 @@ maps to MC commands (`time set day`, `weather clear`, `save-all`, …); sends + 
   `runtime.playit_cancel`) → `setup="connecting"` → `start_agent_and_tunnels` → `setup="idle"`;
   any exception → `setup="error"` + `error`. The Remote page polls status every 5 s to show progress.
 - `start_agent_and_tunnels(secret)`: start agent if not running → `ensure_tunnel(server_port)` →
-  if config `dashboard_tunnel` → `ensure_dashboard_tunnel(WEB_PORT)` → `save_config(secret, address,
-  dashboard_address=…)`.
-- Start: requires secret; runs `start_agent_and_tunnels` (skipped when already running and no
-  dashboard tunnel is wanted).
-- Dashboard (`POST /api/playit/dashboard {enabled}`): saves config key `dashboard_tunnel`; enabled +
-  agent running → create tunnel now (else on next start); disabled → `delete_dashboard_tunnel` and
-  clear `dashboard_address`. Plain HTTP — see verification.md "Must fix".
+  `save_config(secret, address)`.
+- Start: requires secret; runs `start_agent_and_tunnels` (skipped when the agent already runs);
+  failure → console `[playit] Start failed: …` + 502.
+- Field notes (2026-10-22, owner's Windows test + API probe with owner's consent): Minecraft tunnel
+  creation/allocation works (account: 4 TCP ports allowed). The agent's IPv6 `NetworkUnreachable`
+  ping errors are harmless (falls back to IPv4); on Windows `terminate()` makes the agent report
+  exit code 1. **PlayIt cannot host the dashboard**: `/tunnels/create` without `tunnel_type` →
+  `TunnelTypeRequiresDescription` (not in the published client's error enum; adding `description`
+  doesn't help); `/v1/tunnels/create` returned "failed to parse body" for every body matching the
+  published `ReqTunnelsCreateV1` (the server is ahead of github.com/playit-cloud/playit-agent
+  master); the playit.gg website offered the owner no custom TCP tunnel. Hence §16 (Cloudflare).
 - Stop: cancels a pending setup, stops agent, state `"stopped"`.
 - Config: `GET /api/playit/config` → `{address, secret_present}` (secret never returned).
 - Agent exit → `_playit_on_exit` sets state stopped + console line.
@@ -161,12 +164,10 @@ Core details (`core/playit.py`):
 - `claim_interactive(log, should_cancel, timeout_sec=300, on_url=None)`: random 10-hex claim code →
   `on_url(claim URL)` (no browser is opened; the user opens the link from any device) → polls
   `/claim/setup` every 1.5 s until `UserAccepted` → `/claim/exchange` for `secret_key`.
-- `ensure_dashboard_tunnel` / `delete_dashboard_tunnel`: generic TCP tunnel named `EZ Dashboard`
-  (`DASHBOARD_TUNNEL_NAME`, `tunnel_type` omitted) to `WEB_PORT`; returns `http://domain:port`.
-  Both tunnel kinds share `_ensure_tunnel(..., matches, name, tunnel_type, label)`.
+- `ensure_tunnel` → `_ensure_tunnel(..., matches, name, tunnel_type, label)`; `tunnel_type` is always
+  sent (untyped tunnels are rejected).
 - `agent_command(secret)`: on Termux, prefixes `termux-chroot` (package `proot`) so the agent finds
   `/etc/resolv.conf`; `EZ_PLAYIT_CHROOT=0` disables. Unverified on a device.
-- `save_config(secret, address, **extra)` merges extra keys (e.g. `dashboard_address`) into the file.
 - `ensure_agent`: reuse existing binary, else download matching asset from GitHub latest release;
   `chmod 755` on non-Windows.
 - `ensure_tunnel(secret, local_port, log, timeout_sec=120)`: reuses the account's `minecraft-java`
@@ -176,6 +177,24 @@ Core details (`core/playit.py`):
 - `_api` reads the JSON body before the HTTP status (API returns 400 with useful `data`); auth header
   `Authorization: Agent-Key <secret>`.
 - `PlayitAgent.start(secret)` runs `agent_command(secret)`; `stop()` = `terminate()`.
+
+## 16. Remote dashboard (Cloudflare quick tunnel)
+- `GET /api/remote-dashboard` → `remote_info()`: `enabled` (config `remote_dashboard`), `state`
+  (`off`/`starting`/`running`/`error`), `url`, `error`, `message`.
+- `POST /api/remote-dashboard {enabled}`: saves the config key; enabled → `start_web_tunnel_safely`
+  on a thread (returns immediately, state `starting`); disabled → `stop_web_tunnel`.
+- `start_web_tunnel`: `cloudflared.ensure_binary` (PATH, else download
+  `cloudflared-<os>-<arch>[.exe]` from GitHub latest release into `DATA_DIR`; on Termux it never
+  downloads and asks for `pkg install cloudflared`) → `QuickTunnel.start(binary, WEB_PORT)` runs
+  `cloudflared tunnel --no-autoupdate --url http://127.0.0.1:<port>`.
+- `QuickTunnel` announces the URL (`on_url`) only after both the `https://….trycloudflare.com` line
+  **and** "Registered tunnel connection" were seen: announcing earlier lets browsers cache NXDOMAIN
+  for minutes (observed in the live check). Public DNS may still lag a few seconds after that.
+- Only cloudflared `ERR`/`WRN` lines reach the console (`[cloudflare] …`), plus the final link.
+- Unexpected exit while wanted (`runtime.web_tunnel_wanted`) → state `error` + retry after
+  `WEB_TUNNEL_RETRY_SEC` (15 s), indefinitely; the new link differs.
+- Autostart restores it when `remote_dashboard` is on; shutdown stops it (config stays on).
+- The link is HTTPS but login is still Basic auth without lockout → verification.md "Must fix".
 
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash

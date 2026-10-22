@@ -11,7 +11,8 @@ AUTOMATED through the official API (api.playit.gg):
   4. create a "Minecraft Java" tunnel -> localhost:25565 automatically (/tunnels/create)
   5. fetch the allocated public address (/tunnels/list)
   6. run the daemon: playit --secret <KEY>
-Optionally a second, generic TCP tunnel exposes the web dashboard (ensure_dashboard_tunnel).
+The web dashboard is NOT tunnelled through playit: the API no longer creates generic TCP tunnels
+("TunnelTypeRequiresDescription", 2026-10-22). It uses a Cloudflare quick tunnel instead (cloudflared.py).
 
 Secret + address are stored LOCALLY (EZ_Server_Data/playit_config.json), never committed.
 
@@ -37,7 +38,6 @@ CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 API_BASE = "https://api.playit.gg"
 CLAIM_PAGE = "https://playit.gg/claim/{}"
 MINECRAFT_TUNNEL_NAME = "EZ Minecraft"
-DASHBOARD_TUNNEL_NAME = "EZ Dashboard"
 
 _CONFIG_FILE = os.path.join(paths.DATA_DIR, "playit_config.json")
 
@@ -86,14 +86,10 @@ def load_config():
         return {}
 
 
-def save_config(secret, address="", **extra):
-    """Write the config; extra keys (e.g. dashboard_address) are merged with the saved ones."""
+def save_config(secret, address=""):
     paths.ensure_dirs()
-    data = load_config()
-    data.update(extra)
-    data.update({"secret": secret, "address": address})
     with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        json.dump({"secret": secret, "address": address}, f, indent=2)
 
 
 def forget_config():
@@ -176,10 +172,6 @@ def _is_mc_tunnel(t):
     return t.get("tunnel_type") == "minecraft-java"
 
 
-def _is_dashboard_tunnel(t):
-    return t.get("name") == DASHBOARD_TUNNEL_NAME
-
-
 def _tunnel_address(t):
     """Public address to give to players, or None if not allocated yet."""
     alloc = t.get("alloc", {})
@@ -258,6 +250,7 @@ def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_t
         log(f"Creating {label} tunnel -> localhost:{local_port}...")
         body = {
             "name": name,
+            "tunnel_type": tunnel_type,  # required: untyped tunnels are rejected by the API
             "port_type": "tcp",
             "port_count": 1,
             "origin": {"type": "agent", "data": {
@@ -265,8 +258,6 @@ def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_t
                 "local_port": local_port}},
             "enabled": True,
         }
-        if tunnel_type:
-            body["tunnel_type"] = tunnel_type  # omitted = generic TCP tunnel
         while True:
             try:
                 _api("/tunnels/create", body, secret=secret)
@@ -294,27 +285,6 @@ def ensure_tunnel(secret, local_port, log, timeout_sec=120):
     """Ensure the Minecraft Java tunnel -> localhost:local_port; return the address for players."""
     return _ensure_tunnel(secret, local_port, log, timeout_sec, _is_mc_tunnel,
                           MINECRAFT_TUNNEL_NAME, "minecraft-java", "Minecraft Java")
-
-
-def ensure_dashboard_tunnel(secret, local_port, log, timeout_sec=120):
-    """Ensure a generic TCP tunnel to the web dashboard; return its http:// URL.
-
-    WARNING: the dashboard is served over plain HTTP, so credentials cross the internet
-    unencrypted through this tunnel (see docs/knowledge/verification.md, must-fix item).
-    """
-    address = _ensure_tunnel(secret, local_port, log, timeout_sec, _is_dashboard_tunnel,
-                             DASHBOARD_TUNNEL_NAME, None, "dashboard")
-    return f"http://{address}"
-
-
-def delete_dashboard_tunnel(secret, log):
-    """Remove the dashboard tunnel if it exists. Returns True when one was deleted."""
-    t = _find_tunnel(secret, _is_dashboard_tunnel)
-    if t is None:
-        return False
-    _api("/tunnels/delete", {"tunnel_id": t["id"]}, secret=secret)
-    log("Dashboard tunnel removed.")
-    return True
 
 
 # ---------- Agent (daemon) download ----------

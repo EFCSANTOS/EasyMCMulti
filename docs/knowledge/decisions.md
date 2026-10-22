@@ -26,9 +26,12 @@
 19. GUI console uses REST polling, not the WS, because browsers cannot send Basic auth on a WebSocket.
 20. Android support via Termux (2026-10-22): installed Java instead of downloads, `termux-chroot`
     for the PlayIt agent, psutil skipped (metrics fall back to `/proc/meminfo`).
-21. Remote dashboard access through a second PlayIt **TCP** tunnel (owner's choice over Cloudflare
-    Tunnel / Tailscale, 2026-10-22). Plain HTTP; shipped with the existing Basic auth by owner
-    decision, with hardening tracked as **must fix** (verification.md).
+21. Remote dashboard access through a **Cloudflare quick tunnel** (2026-10-22). First built on a
+    second PlayIt TCP tunnel (owner's initial choice), but PlayIt's API rejects untyped tunnels
+    and the website offered no custom TCP tunnel, so the owner switched to Cloudflare: HTTPS, no
+    account, automatic. Trade-offs: random link that changes on restart; quick tunnels have no
+    uptime guarantee. Shipped with the existing Basic auth by owner decision; lockout/sessions
+    tracked as **must fix** (verification.md).
 23. 24/7 operation (2026-10-22): crash auto-restart on by default but rate-limited (3 per 10 min)
     so a broken server can't loop; deliberate stops never count as crashes; the dashboard stops
     Minecraft on shutdown so service restarts don't orphan Java. On Termux, supervision is
