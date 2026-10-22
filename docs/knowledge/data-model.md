@@ -59,10 +59,19 @@ dashboard tunnel may remain in old configs; it is ignored.
 `.env` (repo root, git-ignored, mode 600, written by `termux-setup.sh`): `EZ_WEBAPP_USERNAME`,
 `EZ_WEBAPP_PASSWORD`, `EZ_WEBAPP_PORT`, shell-quoted; loaded by `run.sh`.
 
-`_effective_config()` = defaults ∪ stored dict. `PUT /api/config` merges payload and saves.
-The dashboard's `CONFIG_FIELDS` table (`dashboard.js`) maps inputs to exactly these keys.
-No schema validation: any payload key is persisted; unknown keys are ignored by
-`_server_properties_from_config`. `config_store.save` raises `OSError` (disk full, …);
+`_effective_config()` = defaults ∪ stored dict, where stored values that fail validation (old or
+hand-edited files) are replaced by the default and logged once as
+`[config] Ignoring invalid saved value <key>=…` (`validation.clean_stored_config`); unknown stored
+keys pass through. `PUT /api/config` (and the create/start payloads) go through
+`validation.validate_config_update`: Pydantic `ConfigUpdate`, every `_default_config` key optional,
+unknown keys refused. Ranges: `loader` one of the five; `version` `^[0-9A-Za-z][0-9A-Za-z._+-]{0,31}$`
+(it is part of the server folder name); `ram_mb` 512–host RAM; `server_port` 1024–65535;
+`max_players` 1–100; `view_distance`/`simulation_distance` 2–32; `gamemode`/`difficulty`/
+`level_type` as listed in the form; `motd` ≤ 59 chars, one line; `level_seed` ≤ 64, one line;
+`level_name` a world folder name. Errors → 422 in FastAPI's format
+(`detail=[{loc:["body",<key>], msg:"<key>: …"}]`); nothing is saved. The dashboard's
+`CONFIG_FIELDS` table (`dashboard.js`) maps inputs to exactly these keys; `markInvalidFields`
+outlines rejected inputs. New config keys must be added to `_default_config` **and** `ConfigUpdate`. `config_store.save` raises `OSError` (disk full, …);
 `PUT /api/config` turns it into 500 "Could not save settings (disk full?)".
 
 ## `server.properties`

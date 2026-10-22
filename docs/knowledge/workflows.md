@@ -113,7 +113,9 @@ the Cloudflare link drops requests after ~100 s).
 - Restart: **202**, job `restart_job` = `stop_and_wait()` (`request_stop` →
   `_wait_for_exit(process, RESTART_STOP_TIMEOUT_SEC=60)` → on timeout console line +
   `process.kill()` + wait 10 s) → `launch_server()`.
-- Command: empty → 400; not running → 409; else `process.send(cmd)` + console `"> cmd"`.
+- Command: `validation.require_command` → 400 if empty, longer than 256 or containing a line break /
+  control character (one stdin line, always); not running → 409; else `process.send(cmd)` + console
+  `"> cmd"`.
 
 ## 7. Console
 `GET /api/console` → `{lines: list(history)}`. WS replays last 500, then streams via queue.
@@ -161,8 +163,9 @@ Aliases `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/me
   `{ok, filename, message}`. The GUI sends the search result's `slug`.
 
 ## 13. Admin
-`POST /api/admin/{action}`: not running → 409; unknown → 400; player required for op/deop/kick/ban
-(checked by action name);
+`POST /api/admin/{action}`: not running → 409; op/deop/kick/ban need a valid player
+(`validation.require_player`: `^[A-Za-z0-9_]{3,16}$`, optionally prefixed with `.` for Floodgate
+Bedrock names) → else 400; unknown action → 400;
 maps to MC commands (`time set day`, `weather clear`, `save-all`, …); sends + logs `"> cmd"`.
 
 ## 14. PlayIt
