@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 
+from core import mod_updates, paths
 from webapp import common
 from webapp.services import Services
 
@@ -83,12 +84,22 @@ def register(app: FastAPI, s: Services) -> None:
         s.notify_friends("status", f"Server stopped: nobody was online for {minutes} minutes. "
                                    "Ask the owner, or start it from the dashboard.")
 
+    def old_mods_tick(now: datetime.datetime, config: dict[str, Any]) -> None:
+        """Delete the jars kept by a mod update once the updated server has run fine for a while."""
+        if not s.server_running() or now.timestamp() - runtime.last_start_at < common.OLD_MODS_KEEP_SEC:
+            return
+        folder = paths.content_folder(str(config.get("loader", "vanilla")), common._server_dir_for_config(config))
+        if folder and mod_updates.old_jars(folder):
+            removed = mod_updates.forget_old(folder)
+            append_console_line(f"[mods] the updated mods work; removed {removed} old jar(s)")
+
     def scheduler_tick(now: datetime.datetime | None = None) -> None:
         now = now or datetime.datetime.now()
         config = common._effective_config()
         s.backup_tick(now.timestamp())
         daily_restart_tick(now, config)
         idle_tick(now, config)
+        old_mods_tick(now, config)
 
     def scheduler_loop() -> None:
         while not runtime.shutting_down:

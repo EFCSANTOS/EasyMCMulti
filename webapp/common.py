@@ -35,6 +35,8 @@ LOADER_LABELS = {"vanilla": "Vanilla", "paper": "Paper", "fabric": "Fabric", "fo
 # How often the scheduler (backups, daily restart, idle stop) checks; how long a backup waits for
 # the server to confirm "save-all flush" before zipping anyway.
 SCHEDULER_TICK_SEC = 60
+# Mod updates (FEAT-07) keep the old jars until the updated server has run this long.
+OLD_MODS_KEEP_SEC = 300
 BACKUP_SAVE_TIMEOUT_SEC = 30
 # Friends Discord channel: joins/leaves within this window are sent as one message.
 FRIENDS_BATCH_SEC = 30

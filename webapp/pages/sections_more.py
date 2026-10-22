@@ -63,6 +63,24 @@ _SECTION_MODS = f"""
             <div id="mod-installed-list" class="item-list"></div>
             <p class="hint">Restart the server after installing or removing mods. Removing needs the server stopped.</p>
           </div>
+          <div id="mod-updates-card" class="card">
+            <div class="card-header">
+              <div>
+                <h2>Updates</h2>
+                <p id="mod-updates-sub" class="card-sub">Newer versions of your mods and plugins for this Minecraft version.
+                  Checked once a day; updating needs the server stopped and makes a backup first.</p>
+              </div>
+              <div class="card-tools">
+                <button id="mod-updates-check" class="btn btn-ghost btn-sm" type="button">Check for updates</button>
+                <button id="mod-updates-all" class="btn btn-primary btn-sm" type="button" hidden>Update all</button>
+              </div>
+            </div>
+            <div id="mod-updates-list" class="item-list"></div>
+            <div id="mod-updates-undo" class="form-actions" hidden>
+              <p class="hint">Something broke after the update? Put the previous versions back.</p>
+              <button id="mod-updates-rollback" class="btn btn-ghost btn-sm" type="button">Undo last update</button>
+            </div>
+          </div>
         </section>
 
         <dialog id="mod-details" class="dialog" aria-labelledby="mod-details-title">

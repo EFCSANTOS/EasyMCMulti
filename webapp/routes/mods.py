@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from typing import Any
 
 import requests
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from core import modpack, modrinth, paths
+from core import mod_updates, modpack, modrinth, paths
 from webapp import common
 from webapp.services import Services, require_auth
 
@@ -184,3 +185,94 @@ def register(app: FastAPI, s: Services) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return FileResponse(path, media_type="application/x-modrinth-modpack+zip", filename=summary["filename"])
+
+    # ---------- Mod updates (FEAT-07) ----------
+    def content_dir() -> tuple[str, str, str]:
+        """(loader, game version, mods/plugins folder); 400 for vanilla."""
+        config = common._effective_config()
+        loader = str(config.get("loader", "vanilla"))
+        folder = paths.content_folder(loader, common._server_dir_for_config(config))
+        if not folder:
+            raise HTTPException(status_code=400, detail="Vanilla servers have no mods to update.")
+        return loader, str(config.get("version", "")), folder
+
+    def public_update(item: dict[str, Any]) -> dict[str, Any]:
+        return {key: item[key] for key in ("file", "title", "current", "latest", "changelog", "new_file")}
+
+    def updates_payload(message: str = "", **extra: Any) -> dict[str, Any]:
+        try:
+            old = mod_updates.old_jars(content_dir()[2])
+        except HTTPException:
+            old = []
+        return {"updates": [public_update(item) for item in runtime.mod_updates], "checked_at": runtime.mod_updates_at,
+                "rollback_available": bool(old), "message": message, **extra}
+
+    def check_mod_updates() -> list[dict[str, Any]]:
+        loader, version, folder = content_dir()
+        runtime.mod_updates = mod_updates.check(folder, loader, version)
+        runtime.mod_updates_at = time.time()
+        return runtime.mod_updates
+
+    s.check_mod_updates = check_mod_updates
+
+    @app.get("/api/mods/updates")
+    def mod_update_status(_: str = Depends(require_auth)) -> dict[str, Any]:
+        return updates_payload()
+
+    @app.post("/api/mods/updates/check")
+    def check_updates(_: str = Depends(require_auth)) -> dict[str, Any]:
+        try:
+            found = check_mod_updates()
+        except requests.RequestException as exc:
+            raise upstream_error(exc) from exc
+        return updates_payload(f"{len(found)} update(s) available." if found else "Everything is up to date.")
+
+    def stopped_and_locked() -> None:
+        if s.server_running():
+            raise HTTPException(status_code=409, detail="Stop the server first: its mods are in use while it runs.")
+        if not runtime.lifecycle.acquire(blocking=False):
+            raise s.busy_error()
+
+    @app.post("/api/mods/updates/apply")
+    def apply_updates(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        loader, version, folder = content_dir()
+        if s.server_running():
+            raise HTTPException(status_code=409, detail="Stop the server first: its mods are in use while it runs.")
+        wanted = set(payload.get("files") or [item["file"] for item in runtime.mod_updates])
+        chosen = [item for item in runtime.mod_updates if item["file"] in wanted]
+        if not chosen:
+            raise HTTPException(status_code=400, detail="Check for updates first.")
+        # Before taking the lifecycle lock: the backup takes it itself while the server is stopped.
+        s.safety_backup("mod-update")
+        stopped_and_locked()
+        updated, failed = [], []
+        try:
+            for item in chosen:
+                try:
+                    mod_updates.update(folder, item, loader, version,
+                                       log=lambda line: append_console_line(f"[mods] {line}"))
+                    updated.append(item["title"])
+                    runtime.mod_updates = [u for u in runtime.mod_updates if u["file"] != item["file"]]
+                except (OSError, RuntimeError, requests.RequestException) as exc:
+                    failed.append(f"{item['title']}: {exc}")
+                    append_console_line(f"[mods] update of {item['title']} failed: {exc}")
+        finally:
+            runtime.lifecycle.release()
+        message = f"Updated {len(updated)} mod(s)." if updated else "Nothing was updated."
+        if failed:
+            message += f" Failed: {'; '.join(failed)}"
+        pack_note = bool(updated) and modpack.supported(loader)
+        if pack_note:
+            message += " Friends using the mod pack should download it again."
+        return updates_payload(message, updated=updated, failed=failed, pack_changed=pack_note)
+
+    @app.post("/api/mods/updates/rollback")
+    def rollback_updates(_: str = Depends(require_auth)) -> dict[str, Any]:
+        _loader, _version, folder = content_dir()
+        stopped_and_locked()
+        try:
+            restored = mod_updates.rollback(folder)
+        finally:
+            runtime.lifecycle.release()
+        append_console_line(f"[mods] rolled back to: {', '.join(restored) or 'nothing'}")
+        return updates_payload(f"Restored {len(restored)} previous mod version(s)." if restored else "Nothing to undo.")
