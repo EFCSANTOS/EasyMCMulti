@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import json
+import shlex
 import threading
 import time
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 
-from core import activity, config_store, diagnose, downloaders, java_manager, players
+from core import activity, config_store, diagnose, downloaders, hostenv, java_manager, players
 from webapp import common
 from webapp.services import Services, require_auth
 from webapp.validation import require_chat, require_command, require_player, validate_config_update
@@ -231,7 +232,10 @@ def register(app: FastAPI, s: Services) -> None:
 
         java_exe = java_manager.ensure_java(java_manager.required_java(version),
                                             log=lambda message: append_console_line(f"[java] {message}"))
-        args = downloaders.launch_args(loader, java_exe, target_dir, int(config.get("ram_mb", 2048)))
+        ram_mb = int(config.get("ram_mb", 2048))
+        flags = downloaders.jvm_flags(ram_mb, hostenv.is_termux()) if config.get("jvm_preset_flags", True) else []
+        flags += shlex.split(str(config.get("jvm_extra_args") or ""))
+        args = downloaders.launch_args(loader, java_exe, target_dir, ram_mb, flags)
         process = common.ServerProcess(
             args,
             cwd=target_dir,

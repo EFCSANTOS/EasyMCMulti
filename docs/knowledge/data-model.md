@@ -31,6 +31,7 @@ and log `[config] <file> was damaged; restored the previous copy.` to the consol
 Config keys (FEAT-01): `backup_interval_hours` (6, 0–168, 0 = off), `backup_keep_recent` (8, 1–100),
 `backup_keep_daily` (7, 0–60), `backup_prune_manual` (False).
 
+Performance keys (FEAT-13): `jvm_preset_flags` (True), `jvm_extra_args` ("").
 Schedule keys (FEAT-06): `restart_daily_time` ("" or "HH:MM"), `idle_stop_minutes` (0, 0–1440),
 `quiet_hours_start` / `quiet_hours_end` ("" or "HH:MM").
 
