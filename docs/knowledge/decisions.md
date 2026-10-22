@@ -3,7 +3,7 @@
 ## Verified
 1. Two layers: `webapp/` HTTP, `core/` runtime (imports in `app.py`).
 2. Factory `create_app()`; module-level `app = create_app()` for uvicorn.
-3. Env-var Basic auth with fail-fast startup.
+3. Env-var credentials with fail-fast startup; one owner account (friend accounts: FEAT-10).
 4. `RuntimeState` + RLock + `snapshot()` for thread-safe reads.
 5. WS fan-out via per-client `asyncio.Queue` + `call_soon_threadsafe` (publisher is a thread).
 6. Bounded buffers: history 2000, queue 250, replay 500.
@@ -18,20 +18,24 @@
 13. Backups are zip archives with pre-restore rename of `world/`.
 14. Mods go to `mods/` for forge/fabric/neoforge, `plugins/` for paper; vanilla rejects mods
     (`paths.content_folder` is the single source).
-15. Stateless client-side auth: creds kept in browser `sessionStorage`, re-sent as Basic on each call.
+15. Login sessions in memory (FIX-01, 2026-10-22): HttpOnly cookie, no session file, so a dashboard
+    restart signs everyone out — acceptable for a friends server, and nothing to leak from disk.
+    Basic auth kept for scripts behind the same lockout. Lockout is time-based (15 min), never
+    permanent, so nobody can lock the owner out for good.
 16. All runtime data under one portable `EZ_Server_Data/` dir (PyInstaller-aware `paths.base_dir`);
     `.gitignore` also ignores `build/`, `dist/`, `*.spec`.
 17. Portable JRE per Java major downloaded on demand (no system Java required).
 18. English-only UI and code text; no localization layer (conventions.md).
-19. GUI console uses REST polling, not the WS, because browsers cannot send Basic auth on a WebSocket.
+19. GUI console uses REST polling, not the WS (historically: browsers can't send Basic auth on a
+    WebSocket). The WS accepts the session cookie since FIX-01; FEAT-11 moves the GUI to it.
 20. Android support via Termux (2026-10-22): installed Java instead of downloads, `termux-chroot`
     for the PlayIt agent, psutil skipped (metrics fall back to `/proc/meminfo`).
 21. Remote dashboard access through a **Cloudflare quick tunnel** (2026-10-22). First built on a
     second PlayIt TCP tunnel (owner's initial choice), but PlayIt's API rejects untyped tunnels
     and the website offered no custom TCP tunnel, so the owner switched to Cloudflare: HTTPS, no
     account, automatic. Trade-offs: random link that changes on restart; quick tunnels have no
-    uptime guarantee. Shipped with the existing Basic auth by owner decision; lockout/sessions
-    tracked as **must fix** (verification.md).
+    uptime guarantee. Shipped with the existing Basic auth by owner decision; sessions +
+    lockout followed in FIX-01.
 26. Worlds via `level-name` (2026-10-22): switching is a config change, not a copy, so worlds
     never move and switching is instant; display names are metadata so renames are safe while the
     server runs. Mod installs resolve required dependencies and hide client-only projects because
@@ -56,8 +60,8 @@
 - `crash_reporter`, `mailer`, `sysinfo`, `templates/dashboard.html`: desktop-launcher leftovers → deleted.
 - Player count: implemented from console join/leave lines (data-model.md).
 - Security findings from the audit fixed (verification.md "Security").
-- UI page routes stay unauthenticated by design: they are static shells (no data); login is
-  client-side and every `/api/*` call carries Basic auth.
+- UI page routes stay unauthenticated by design: they are static shells (no data); every `/api/*`
+  call needs the session cookie (or Basic auth).
 - Restart race → restart now waits for exit (workflows.md §6).
 - French text in `core/` → translated to English.
 

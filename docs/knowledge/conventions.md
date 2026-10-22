@@ -39,10 +39,12 @@
 - ctypes `GlobalMemoryStatusEx` fallback when `psutil` missing.
 
 ## Security posture
-- Basic auth, env-var credentials (constant-time compare), LAN-only.
+- Env-var credentials (constant-time compare); the browser uses the `ezmc_session` cookie, scripts
+  may use Basic auth; both share the lockout. New routes take `Depends(require_auth)`.
 - Never return secrets over HTTP; accept file names, not paths, from clients and resolve them inside
   the server dir; validate archive members before extracting.
-- No CSRF, rate limiting, TLS in inspected code.
+- CSRF: cookie-authenticated writes must be JSON or multipart and same-origin, so `fetchJson`
+  always sends a JSON body on non-GET. No TLS of its own (the Cloudflare link provides HTTPS).
 - `core/` error style: raise `RuntimeError` with an English message; `load_*` helpers return `{}` on
   `OSError`/`ValueError`.
 

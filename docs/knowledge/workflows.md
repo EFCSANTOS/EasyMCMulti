@@ -2,9 +2,16 @@
 
 ## 1. Authentication
 `create_app()` → `validate_auth_settings()` raises `RuntimeError` if env vars missing.
-REST: `require_auth` → `verify_credentials`. WS: `verify_basic_auth_header`; failure → `close(1008)`.
-Browser: `/login` form → `GET /api/status` probe → creds in `sessionStorage` → every request sends
-Basic header. Sign out clears `sessionStorage` only (no server session exists).
+REST and WS: `auth.authenticate` accepts the `ezmc_session` cookie or HTTP Basic; WS failure →
+`close(1008)`.
+Browser: `/login` form → `POST /api/login {username, password}` → `Set-Cookie: ezmc_session`
+(HttpOnly, SameSite=Strict, Secure when `X-Forwarded-Proto: https` / `CF-Connecting-IP`, 7 days,
+sliding) → the browser sends it on every request. Sign out → `POST /api/logout` deletes the session.
+Lockout: a wrong password (login or Basic) counts per client IP (`CF-Connecting-IP` only when the
+peer is loopback, i.e. cloudflared); 5 in 15 min → 429 + `Retry-After` for 15 min; 30 across all IPs
+→ everyone locked for 15 min. First lockout → `[auth]` console line + `security` alert. A live
+session keeps working during a lockout. Startup logs a warning when the link is on and the password
+is under 12 characters; `GET /api/remote-dashboard` returns `weak_password` for the Remote page banner.
 
 ## 2. Dashboard
 - `/` → `_render_dashboard_page("overview")`
@@ -89,7 +96,7 @@ Install runs synchronously inside the HTTP request (can take minutes).
 `GET /api/console` → `{lines: list(history)}`. WS replays last 500, then streams via queue.
 `publish` trims, appends history, drops oldest when queue full, thread-safe.
 Browser: `refreshConsole` polls `GET /api/console` every 2 s (keeps scroll pinned to bottom); the
-GUI does not use the WS because browsers cannot send Basic auth on a WebSocket.
+GUI does not use the WS yet (it accepts the session cookie since FIX-01; FEAT-11 switches over).
 
 ## 8. Versions
 `GET /api/versions/{loader}`: unknown loader → 400; `downloaders.list_versions(loader, include_snapshots=False)`;
@@ -218,7 +225,7 @@ Core details (`core/playit.py`):
 - Autostart restores it when `remote_dashboard` is on — **default True** since 2026-10-22 (owner
   decision), so it comes up on every boot unless switched off; shutdown stops it (config stays on).
   Each new link is emailed when alerts are configured (§17).
-- The link is HTTPS but login is still Basic auth without lockout → verification.md "Must fix".
+- Login through the link uses sessions + lockout (§1).
 
 ## 17. Alerts (email + heartbeat)
 - Settings: `core/notifier.py`, file `EZ_Server_Data/notify_config.json` (keys `notifier.DEFAULTS` +
@@ -227,7 +234,7 @@ Core details (`core/playit.py`):
   set from the API); `POST /api/notifications/test` sends a test email and/or pings the heartbeat
   (400 if neither is configured, 502 with the reason on failure). Server setup → Alerts card.
 - `notify(category, subject, body, throttle=True)` (inside `create_app`): only when
-  `email_ready()` and `notify_<category>` is on (`server` / `link` / `tunnels`); same subject at most
+  `email_ready()` and `notify_<category>` is on (`server` / `link` / `tunnels` / `updates` / `security`); same subject at most
   once per `ALERT_REPEAT_SEC` (600 s); sends on a daemon thread via SMTP (STARTTLS on 587, SSL on
   465); logs `[notify] email sent|failed`. Body adds host name, time, current dashboard link.
 - Hooks: crash (`Minecraft server crashed`), limit reached (`… DOWN (auto-restart paused)`), restart
