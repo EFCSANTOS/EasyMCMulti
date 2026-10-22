@@ -19,6 +19,7 @@ const STATE_LABELS = {
   stopping: 'Stopping…',
   installing: 'Installing…',
   ready: 'Ready',
+  crashed: 'Crashed',
   error: 'Unreachable',
 };
 const BUSY_STATES = new Set(['starting', 'stopping', 'installing']);
@@ -228,6 +229,9 @@ const CONFIG_FIELDS = [
   ['nether-mode', 'allow_nether', 'checkbox'],
   ['whitelist-mode', 'white_list', 'checkbox'],
   ['command-blocks', 'enable_command_block', 'checkbox'],
+  ['autostart-server', 'autostart_server', 'checkbox'],
+  ['auto-restart', 'auto_restart', 'checkbox'],
+  ['autostart-playit', 'autostart_playit', 'checkbox'],
 ];
 
 function collectConfigFromPage() {
@@ -867,6 +871,7 @@ function bindEvents() {
     saveConfigFromForm(event.submitter);
   });
   on('advanced-save-button', 'click', (event, button) => saveConfigFromForm(button));
+  on('always-on-save-button', 'click', (event, button) => saveConfigFromForm(button));
   on('loader-select', 'change', () => onLoaderChange());
   on('create-button', 'click', (event, button) => createServer(button));
 

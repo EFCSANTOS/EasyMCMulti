@@ -37,6 +37,8 @@ Switching loader/version in config switches to a different server dir (and world
 | white_list | bool | False |
 | enable_command_block | bool | True |
 
+Always-on keys (in `_default_config`, edited on Server setup → Always-on): `autostart_server`
+(False), `autostart_playit` (False), `auto_restart` (True).
 Extra key outside the defaults: `dashboard_tunnel` (bool, set by `POST /api/playit/dashboard`).
 
 `.env` (repo root, git-ignored, mode 600, written by `termux-setup.sh`): `EZ_WEBAPP_USERNAME`,
@@ -86,5 +88,6 @@ so chat lines cannot spoof it). The set is cleared on start and on exit. Console
 `WebSocketManager.history` (the unused `RuntimeState.console_history` was removed).
 
 `state` values set by `app.py`: `stopped`, `ready` (briefly, create), `installing`, `starting`,
-`running`, `stopping`. `operation`: `idle`, `creating`, `installing`, `starting`, `stopping`.
+`running`, `stopping`, `crashed` (crash-restart limit reached). Also `stop_requested` (bool) and
+`crash_times` (monotonic timestamps) drive crash detection (workflows.md §5a). `operation`: `idle`, `creating`, `installing`, `starting`, `stopping`.
 `install_status`: `ready`, `installing`, `failed`.

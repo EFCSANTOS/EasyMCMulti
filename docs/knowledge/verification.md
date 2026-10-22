@@ -16,7 +16,7 @@ password. Marked in code at `webapp/auth.py` ("MUST FIX").
 
 ## Fetch status
 Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/dashboard.js`, `templates/*.html`),
-`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 41 passed.
+`tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 49 passed.
 UI redesign (2026-10-22) verified with headless Edge screenshots at 1440 px and 390 px.
 Same day: cleanup + English-only pass + GUI feature check (see "Fixed 2026-10-22").
 Not audited line-by-line: `webapp/static/css/dashboard.css` (presentation only).
@@ -55,6 +55,7 @@ WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 | Dashboard over PlayIt | Implemented, **unverified against the live API** (generic TCP tunnel, `tunnel_type` omitted); plain HTTP — see Must fix |
 | System metrics charts | Works (overview only) |
 | Player count + names | Works — parsed from server join/leave console lines |
+| Always-on (autostart server/PlayIt, crash restart) | Works in tests and a live uvicorn boot; not yet run on a device |
 
 ## Fixed 2026-10-22
 - Mod upload posted to non-existent `/api/mods/upload` → now `/api/server/mods/upload`.
@@ -109,4 +110,6 @@ Open / by design:
   `EZ_PLAYIT_CHROOT=0` disables it), and Forge/NeoForge `unix_args.txt` launch. Only the Python
   logic is covered by tests; scripts were syntax-checked with `bash -n`.
 - PlayIt generic TCP tunnel creation (no `tunnel_type`) for the dashboard.
+- Termux 24/7 mode: runit service + `svlogger` log, `ezmc` commands, Termux:Boot script sourcing
+  `start-services.sh` after a reboot.
 - `run.bat` prompt flow not executed in this session (batch + PowerShell secure-string read).

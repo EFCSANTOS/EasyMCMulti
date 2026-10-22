@@ -37,7 +37,8 @@ apt-get "${APT_OPTS[@]}" full-upgrade </dev/null
 say "Installing system packages (Python, Java, build tools)..."
 # rust + binutils: pydantic-core (used by FastAPI) is compiled on the phone.
 # proot: provides termux-chroot, which lets the PlayIt agent resolve DNS on Android.
-apt-get "${APT_OPTS[@]}" install python git "$JAVA_PACKAGE" rust binutils proot termux-tools </dev/null
+# termux-services: runs the dashboard as a background service for 24/7 mode.
+apt-get "${APT_OPTS[@]}" install python git "$JAVA_PACKAGE" rust binutils proot termux-tools termux-services </dev/null
 
 say "Fetching the app into $APP_DIR..."
 if [ -d "$APP_DIR/.git" ]; then
@@ -76,24 +77,76 @@ else
   say "Keeping the existing login in $APP_DIR/.env"
 fi
 
-chmod +x run.sh
+chmod +x run.sh ezmc.sh
 cat > "$PREFIX/bin/ezmc" <<EOF
 #!/usr/bin/env bash
-exec bash "$APP_DIR/run.sh" "\$@"
+exec bash "$APP_DIR/ezmc.sh" "\$@"
 EOF
 chmod +x "$PREFIX/bin/ezmc"
 
+install_service() {
+  # runit service (termux-services): restarts the dashboard whenever it exits.
+  local service_dir="$PREFIX/var/service/ezmc"
+  mkdir -p "$service_dir/log" "$PREFIX/var/log/sv/ezmc"
+  cat > "$service_dir/run" <<EOF
+#!$PREFIX/bin/sh
+# Started by termux-services; Termux:Boot starts termux-services after a reboot.
+export PREFIX="$PREFIX" HOME="$HOME"
+export PATH="$PREFIX/bin:\$PATH"
+exec 2>&1
+exec bash "$APP_DIR/run.sh"
+EOF
+  chmod +x "$service_dir/run"
+  ln -sf "$PREFIX/share/termux-services/svlogger" "$service_dir/log/run"
+  rm -f "$service_dir/down"
+
+  # Termux:Boot runs every script in ~/.termux/boot/ after the phone starts.
+  mkdir -p "$HOME/.termux/boot"
+  cat > "$HOME/.termux/boot/ezmc-boot" <<EOF
+#!$PREFIX/bin/sh
+termux-wake-lock
+. "$PREFIX/etc/profile.d/start-services.sh"
+EOF
+  chmod +x "$HOME/.termux/boot/ezmc-boot"
+}
+
+say "Run 24/7?"
+echo "The dashboard can run as a background service that restarts itself if it stops and"
+echo "starts again after the phone reboots (needs the free Termux:Boot app, see below)."
+always_on=no
+if read -rp "Install 24/7 mode? [Y/n] " answer </dev/tty && [[ ! "$answer" =~ ^[Nn] ]]; then
+  install_service
+  always_on=yes
+fi
+
 say "Done!"
-cat <<'EOF'
+if [ "$always_on" = yes ]; then
+  cat <<'EOF'
+24/7 mode is installed. Commands:
+  ezmc          start in the background      ezmc logs     follow the log
+  ezmc stop     stop everything              ezmc status   is it running?
+
+To start automatically after a reboot:
+  1. Install "Termux:Boot" from the same place you got Termux (F-Droid or GitHub).
+  2. Open Termux:Boot once, then close it. That's all.
+In the dashboard, open Server setup > Always-on to also start Minecraft and PlayIt by themselves.
+EOF
+else
+  cat <<'EOF'
 Start the dashboard any time with:   ezmc
 Then open the address it prints from a browser on the same Wi-Fi.
+EOF
+fi
+cat <<'EOF'
 
 Tips:
-  * Keep Termux open in the background; ezmc holds a wake lock so Android doesn't pause it.
-  * Exclude Termux from battery optimization in Android settings for long sessions.
+  * Exclude Termux from battery optimization in Android settings.
+  * Android 12+ may kill the server ("signal 9"): see "Android notes" in the README.
   * Phones need ~3 GB free RAM for a small server; set Memory to 1536-2048 MB in Server setup.
 EOF
 
-if read -rp $'\nStart it now? [Y/n] ' answer </dev/tty && [[ ! "$answer" =~ ^[Nn] ]]; then
+if [ "$always_on" = yes ]; then
+  bash ezmc.sh start
+elif read -rp $'\nStart it now? [Y/n] ' answer </dev/tty && [[ ! "$answer" =~ ^[Nn] ]]; then
   exec bash run.sh
 fi

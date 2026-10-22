@@ -78,6 +78,29 @@ packages (10–20 minutes the first time), asks for a dashboard username and pas
 ezmc
 ```
 
+### Run 24/7
+
+During setup, answer **yes** to "Install 24/7 mode?". The dashboard then runs as a background
+service (`termux-services`) that restarts itself if it stops. Control it with:
+
+| Command | Does |
+|---|---|
+| `ezmc` / `ezmc start` | start in the background and print the dashboard address |
+| `ezmc stop` | stop the dashboard, Minecraft and the PlayIt tunnel |
+| `ezmc restart` / `ezmc status` | restart / check the background dashboard |
+| `ezmc logs` | follow the log (Ctrl+C to leave) |
+| `ezmc run` | run in the current terminal instead |
+
+To start after a reboot, install **Termux:Boot** from the same place as Termux, open it once, and
+close it. In the dashboard, open **Server setup → Always-on** and turn on:
+
+- **Start Minecraft with the dashboard**
+- **Restart after a crash** (on by default: waits 10 s, pauses after 3 crashes in 10 minutes)
+- **Start the PlayIt tunnel with the dashboard**
+
+On Windows, the same Always-on switches work; to start the dashboard at logon, add `run.bat` to
+Task Scheduler with `EZ_WEBAPP_USERNAME`/`EZ_WEBAPP_PASSWORD` set as user environment variables.
+
 Notes for phones:
 
 - Minecraft 1.17 – 1.21.x is supported (Java 17/21 from Termux). 1.16 and older need Java 8, which Termux does not provide.

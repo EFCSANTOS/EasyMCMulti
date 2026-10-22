@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import glob
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 import os
 import threading
 import time
@@ -25,6 +27,11 @@ from webapp.websocket_manager import WebSocketManager
 
 KNOWN_LOADERS = ("vanilla", "paper", "fabric", "forge", "neoforge")
 RESTART_STOP_TIMEOUT_SEC = 60
+SHUTDOWN_STOP_TIMEOUT_SEC = 45
+# Crash auto-restart: wait CRASH_RESTART_DELAY_SEC, at most CRASH_RESTART_LIMIT times per CRASH_WINDOW_SEC.
+CRASH_RESTART_DELAY_SEC = 10
+CRASH_RESTART_LIMIT = 3
+CRASH_WINDOW_SEC = 600
 # Port uvicorn listens on; run.bat / run.sh pass the same value. Used for the PlayIt dashboard tunnel.
 WEB_PORT = int(os.getenv("EZ_WEBAPP_PORT", "8000"))
 FALLBACK_VERSIONS = {
@@ -83,6 +90,10 @@ def _default_config() -> dict[str, Any]:
         "allow_nether": True,
         "white_list": False,
         "enable_command_block": True,
+        # Always-on behaviour (Server setup page).
+        "autostart_server": False,
+        "autostart_playit": False,
+        "auto_restart": True,
     }
 
 
@@ -496,6 +507,26 @@ _SECTION_ADVANCED = f"""
         </section>
 """
 
+_SECTION_ALWAYS_ON = f"""
+        <section id="always-on" class="card">
+          <div class="card-header">
+            <div>
+              <h2>Always-on</h2>
+              <p class="card-sub">For a 24/7 server: what happens when the dashboard starts or the server crashes.</p>
+            </div>
+          </div>
+          <div class="switch-list">
+            {_switch("autostart-server", "Start Minecraft with the dashboard", "Starts the server automatically after a reboot or dashboard restart.", False)}
+            {_switch("auto-restart", "Restart after a crash", "Waits 10 seconds, then restarts. Pauses after 3 crashes in 10 minutes.", True)}
+            {_switch("autostart-playit", "Start the PlayIt tunnel with the dashboard", "Friends can reconnect after a reboot without you doing anything.", False)}
+          </div>
+          <div class="form-actions">
+            <p class="hint">To start the dashboard itself on boot, see "Run 24/7" in the README.</p>
+            <button id="always-on-save-button" class="btn btn-primary" type="button">Save</button>
+          </div>
+        </section>
+"""
+
 _SECTION_MODS = f"""
         <section id="mods" class="two-col">
           <div class="card">
@@ -653,7 +684,7 @@ _SECTION_CONSOLE_FULL = f"""
 
 _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
     "overview": (_SECTION_OVERVIEW_TILES, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
-    "setup": (_SECTION_SETUP,),
+    "setup": (_SECTION_SETUP, _SECTION_ALWAYS_ON),
     "advanced": (_SECTION_ADVANCED,),
     "mods": (_SECTION_MODS,),
     "remote": (_SECTION_REMOTE,),
@@ -741,9 +772,17 @@ def _render_dashboard_page(section: str) -> HTMLResponse:
 _APP_START_TIME = time.time()
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # autostart/shutdown are set at the end of create_app.
+    app.state.autostart()
+    yield
+    await asyncio.to_thread(app.state.shutdown)
+
+
 def create_app() -> FastAPI:
     validate_auth_settings()
-    app = FastAPI(title="EZ Minecraft Server Launcher", version="0.1.0")
+    app = FastAPI(title="EZ Minecraft Server Launcher", version="0.1.0", lifespan=_lifespan)
     runtime = RuntimeState()
     app.state.runtime = runtime
     app.state.console_manager = WebSocketManager()
@@ -901,11 +940,39 @@ def create_app() -> FastAPI:
         runtime.state = "stopped"
         return {"state": runtime.state, "operation": runtime.operation, "loader": loader, "version": version, "server_dir": target_dir}
 
-    @app.post("/api/server/start")
-    def start_server(payload: dict[str, Any] | None = None, _: str = Depends(require_auth)) -> dict[str, Any]:
-        if runtime.process is not None and runtime.process.is_running():
-            return {"state": runtime.state, "operation": runtime.operation, "message": "Server already running."}
+    def handle_crash(code: int) -> None:
+        """Schedule an automatic restart, unless the server keeps crashing."""
+        now = time.monotonic()
+        runtime.crash_times = [t for t in runtime.crash_times if now - t < CRASH_WINDOW_SEC]
+        runtime.crash_times.append(now)
+        attempt = len(runtime.crash_times)
+        if attempt > CRASH_RESTART_LIMIT:
+            runtime.state = "crashed"
+            append_console_line(
+                f"[server] crashed {attempt} times in {CRASH_WINDOW_SEC // 60} minutes; automatic restart paused. "
+                "Check the log above, fix the problem and press Start."
+            )
+            return
+        append_console_line(
+            f"[server] crashed (exit code {code}); restarting in {CRASH_RESTART_DELAY_SEC} s "
+            f"(attempt {attempt} of {CRASH_RESTART_LIMIT})"
+        )
+        timer = threading.Timer(CRASH_RESTART_DELAY_SEC, restart_after_crash)
+        timer.daemon = True
+        timer.start()
 
+    def restart_after_crash() -> None:
+        if runtime.stop_requested or (runtime.process is not None and runtime.process.is_running()):
+            return  # the user stopped or started the server in the meantime
+        try:
+            launch_server()
+        except Exception as exc:
+            runtime.state = "stopped"
+            runtime.operation = "idle"
+            append_console_line(f"[server] automatic restart failed: {exc}")
+
+    def launch_server(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Install if needed and start the Minecraft server (used by the API, crash restart and autostart)."""
         config = _effective_config()
         if payload:
             config.update(payload)
@@ -916,6 +983,7 @@ def create_app() -> FastAPI:
         runtime.version = version
         runtime.state = "starting"
         runtime.operation = "starting"
+        runtime.stop_requested = False
 
         process: Any = None
 
@@ -927,6 +995,8 @@ def create_app() -> FastAPI:
             runtime.operation = "idle"
             runtime.process = None
             runtime.clear_players()
+            if code != 0 and not runtime.stop_requested and _effective_config().get("auto_restart"):
+                handle_crash(code)
 
         def on_output(line: str) -> None:
             runtime.track_player_event(line)
@@ -951,8 +1021,16 @@ def create_app() -> FastAPI:
         append_console_line(f"[server] started with {loader} {version}")
         return {"state": runtime.state, "operation": runtime.operation, "message": "Server started."}
 
+    @app.post("/api/server/start")
+    def start_server(payload: dict[str, Any] | None = None, _: str = Depends(require_auth)) -> dict[str, Any]:
+        if runtime.process is not None and runtime.process.is_running():
+            return {"state": runtime.state, "operation": runtime.operation, "message": "Server already running."}
+        runtime.crash_times = []  # a manual start re-arms automatic crash restarts
+        return launch_server(payload)
+
     @app.post("/api/server/stop")
     def stop_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+        runtime.stop_requested = True  # also cancels a pending crash restart
         if runtime.process is None or not runtime.process.is_running():
             runtime.state = "stopped"
             runtime.operation = "idle"
@@ -980,6 +1058,8 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="A command is required.")
         if runtime.process is None or not runtime.process.is_running():
             raise HTTPException(status_code=409, detail="Server is not running.")
+        if command.lstrip("/").lower() == "stop":
+            runtime.stop_requested = True  # a console "stop" is deliberate, not a crash
         runtime.process.send(command)
         append_console_line(f"> {command}")
         return {"ok": True, "command": command}
@@ -1267,6 +1347,43 @@ def create_app() -> FastAPI:
         # Never expose the secret key over HTTP; it stays in playit_config.json on the host.
         cfg = playit.load_config()
         return {"address": cfg.get("address") or "", "secret_present": bool(cfg.get("secret"))}
+
+    def run_in_background(name: str, action: Any) -> None:
+        def worker() -> None:
+            try:
+                action()
+            except Exception as exc:
+                append_console_line(f"[autostart] {name} failed: {exc}")
+
+        threading.Thread(target=worker, name=f"autostart-{name}", daemon=True).start()
+
+    def autostart() -> None:
+        """Bring up what the Always-on settings ask for. EZ_NO_AUTOSTART=1 skips it (debugging)."""
+        if os.getenv("EZ_NO_AUTOSTART") == "1":
+            return
+        config = _effective_config()
+        secret = playit.load_config().get("secret")
+        if config.get("autostart_playit") and secret:
+            append_console_line("[autostart] starting the PlayIt tunnel")
+            run_in_background("PlayIt tunnel", lambda: start_agent_and_tunnels(secret))
+        if config.get("autostart_server"):
+            append_console_line("[autostart] starting the Minecraft server")
+            run_in_background("Minecraft server", launch_server)
+
+    def shutdown() -> None:
+        """Stop Minecraft and the PlayIt agent with the dashboard, so no orphan keeps the port or world lock."""
+        runtime.stop_requested = True
+        process = runtime.process
+        if process is not None and process.is_running():
+            append_console_line("[server] dashboard shutting down; stopping the server")
+            process.stop()
+            if not _wait_for_exit(process, SHUTDOWN_STOP_TIMEOUT_SEC):
+                process.kill()
+        if runtime.playit_agent is not None and runtime.playit_agent.is_running():
+            runtime.playit_agent.stop()
+
+    app.state.autostart = autostart
+    app.state.shutdown = shutdown
 
     @app.websocket("/ws/console")
     async def console_websocket(websocket: WebSocket) -> None:

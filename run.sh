@@ -17,12 +17,13 @@ export EZ_WEBAPP_PORT="${EZ_WEBAPP_PORT:-8000}"
 PY=.venv/bin/python
 [ -x "$PY" ] || PY=python3
 
-# Keep Android from suspending Termux while the server runs.
+# Keep Android from suspending Termux while the server runs (`ezmc stop` releases it).
 if command -v termux-wake-lock >/dev/null 2>&1; then
   termux-wake-lock
-  trap 'termux-wake-unlock' EXIT
 fi
 
 lan_ip="$("$PY" -c 'from core.netinfo import lan_ip; print(lan_ip())' 2>/dev/null || echo localhost)"
 printf '\nDashboard: http://%s:%s  (press Ctrl+C to stop)\n\n' "$lan_ip" "$EZ_WEBAPP_PORT"
-"$PY" -m uvicorn webapp.app:app --host 0.0.0.0 --port "$EZ_WEBAPP_PORT"
+# exec: signals from Ctrl+C or the background service reach uvicorn directly, so the app can
+# stop Minecraft cleanly instead of leaving it running without the dashboard.
+exec "$PY" -m uvicorn webapp.app:app --host 0.0.0.0 --port "$EZ_WEBAPP_PORT"

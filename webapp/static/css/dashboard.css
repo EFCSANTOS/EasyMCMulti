@@ -262,12 +262,14 @@ p {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
-.state-pill[data-state="error"] {
+.state-pill[data-state="error"],
+.state-pill[data-state="crashed"] {
   color: var(--critical);
   border-color: rgba(230, 103, 103, 0.35);
 }
 
-.state-pill[data-state="error"] .state-dot {
+.state-pill[data-state="error"] .state-dot,
+.state-pill[data-state="crashed"] .state-dot {
   background: var(--critical);
 }
 

@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-41 passed (~1.5 s, `.venv` Python 3.14.7). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
+49 passed (~2.5 s, `.venv` Python 3.14.7). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Data isolation
 Autouse fixture `isolated_data_dir` redirects `paths.DATA_DIR/JAVA_DIR/SERVERS_DIR`,
@@ -49,7 +49,12 @@ this fixture. (Before 2026-10-22 the suite overwrote the real `launcher_config.j
   claim URL and finishing in the background, `reset` forgetting the account, dashboard tunnel on/off.
 - Platform: system Java selection, Termux missing-Java hint, `unix_args.txt` vs `win_args.txt`,
   metrics with blocked CPU counters, `termux-chroot` agent wrapping.
-- Not covered: `termux-setup.sh` / `run.sh` (only `bash -n`), real PlayIt API, real Android device.
+- Always-on (`fake_server` fixture + `RecordingProcess`, whose `exit(code)` fires `on_exit`;
+  `CRASH_RESTART_DELAY_SEC` patched to 0): crash → restart, limit → `crashed`, Stop / console
+  `stop` are not crashes, `auto_restart` off, autostart server + PlayIt, `EZ_NO_AUTOSTART`, shutdown
+  stops server and agent, Always-on switches render.
+- Not covered: `termux-setup.sh` / `run.sh` / `ezmc.sh` (only `bash -n`), runit/Termux:Boot,
+  real PlayIt API, real Android device.
 
 ## Gaps
 - No direct tests for `auth.py` helpers, `websocket_manager.py` edge cases, `state.snapshot` locking.

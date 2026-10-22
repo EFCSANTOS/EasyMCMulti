@@ -61,8 +61,25 @@ Install runs synchronously inside the HTTP request (can take minutes).
 - `ServerProcess(args, cwd, on_output=append_console_line, on_exit=on_exit).start()`.
 - `state="running"`, `operation="idle"`, console `"[server] started with {loader} {version}"`.
 
+## 5a. Always-on (config keys `autostart_server`, `autostart_playit`, `auto_restart`)
+- `launch_server(payload=None)` holds the start logic; `POST /api/server/start` clears
+  `runtime.crash_times` (re-arms crash restarts) and calls it.
+- Crash = exit code ≠ 0 while `runtime.stop_requested` is False (set by Stop, Restart, a console
+  `stop`/`/stop`, and shutdown; cleared by `launch_server`). With `auto_restart` (default True),
+  `handle_crash` schedules `restart_after_crash` after `CRASH_RESTART_DELAY_SEC` (10 s) on a daemon
+  `threading.Timer`; more than `CRASH_RESTART_LIMIT` (3) crashes within `CRASH_WINDOW_SEC` (600 s)
+  → `state="crashed"` and a console message instead. The timer re-checks `stop_requested` and
+  whether a server is already running before launching.
+- FastAPI `lifespan` (`_lifespan`): startup calls `app.state.autostart()` — background threads for
+  `start_agent_and_tunnels` (if `autostart_playit` and a secret exists) and `launch_server` (if
+  `autostart_server`); failures go to the console as `[autostart] …`. `EZ_NO_AUTOSTART=1` skips it.
+  Shutdown runs `app.state.shutdown()` in a thread: `stop_requested=True`, graceful stop with
+  `SHUTDOWN_STOP_TIMEOUT_SEC` (45 s) then kill, and stops the PlayIt agent, so no orphan Java keeps
+  the port or world lock across dashboard restarts. (TestClient without `with` runs neither.)
+
 ## 6. Stop / restart / command
-- Stop: if not running → message; else `state/operation="stopping"`, `process.stop()` (sends `"stop"`).
+- Stop: sets `stop_requested`; if not running → message; else `state/operation="stopping"`,
+  `process.stop()` (sends `"stop"`).
 - Restart: `stop_server(_)` → `_wait_for_exit(process, RESTART_STOP_TIMEOUT_SEC=60)` → on timeout
   console line + `process.kill()` + wait 10 s → `start_server(None, _)`. Blocks the request while the
   world saves.
@@ -169,6 +186,14 @@ also works). All package/git/pip commands run non-interactively with stdin from 
 binutils proot termux-tools` → clone/pull into `~/EasyMCMulti` (`EZ_REPO_URL`, `EZ_BRANCH` default `main`,
 `EZ_APP_DIR`, `EZ_JAVA_PACKAGE`) → `.venv` → `pip install` requirements minus `psutil` with
 `ANDROID_API_LEVEL` set (pydantic-core compiles via Rust/maturin, 10–20 min) → prompts for login
-(12+ char password) into `.env` (mode 600, `%q`-quoted) → installs `$PREFIX/bin/ezmc` → offers to
-start. `run.sh` loads `.env`, takes `termux-wake-lock`, prints the LAN URL, runs uvicorn on
-`EZ_WEBAPP_PORT`. Re-running the setup updates code/deps and keeps `.env`.
+(12+ char password) into `.env` (mode 600, `%q`-quoted) → installs `$PREFIX/bin/ezmc` (→ `ezmc.sh`)
+→ asks "Install 24/7 mode?". Yes → runit service `$PREFIX/var/service/ezmc/run` (exports PREFIX/
+HOME/PATH, `exec bash run.sh`; log via `termux-services` svlogger to `$PREFIX/var/log/sv/ezmc/`)
+and Termux:Boot script `~/.termux/boot/ezmc-boot` (`termux-wake-lock` + source
+`$PREFIX/etc/profile.d/start-services.sh`), then `ezmc start`. No → offers to run in the foreground.
+`run.sh` loads `.env`, takes `termux-wake-lock`, prints the LAN URL and **`exec`s** uvicorn on
+`EZ_WEBAPP_PORT` (so runit/Ctrl+C signals reach the app's shutdown). `ezmc.sh`: `start` (service
+`sv up`, or foreground without a service), `stop` (`sv down` + `termux-wake-unlock`), `restart`,
+`status`, `logs` (`tail -F`), `run`; starts runsvdir via start-services.sh if not running.
+Re-running the setup updates code/deps and keeps `.env`. Termux:Boot itself must be installed and
+opened once by the user (separate APK).

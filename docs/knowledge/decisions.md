@@ -29,6 +29,10 @@
 21. Remote dashboard access through a second PlayIt **TCP** tunnel (owner's choice over Cloudflare
     Tunnel / Tailscale, 2026-10-22). Plain HTTP; shipped with the existing Basic auth by owner
     decision, with hardening tracked as **must fix** (verification.md).
+23. 24/7 operation (2026-10-22): crash auto-restart on by default but rate-limited (3 per 10 min)
+    so a broken server can't loop; deliberate stops never count as crashes; the dashboard stops
+    Minecraft on shutdown so service restarts don't orphan Java. On Termux, supervision is
+    `termux-services` (runit) + Termux:Boot rather than a custom watchdog.
 22. PlayIt setup is asynchronous and shows the approval link in the dashboard instead of opening a
     browser on the host, so it works headless (phone) and from any device.
 

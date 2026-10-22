@@ -533,6 +533,140 @@ def test_restart_waits_for_previous_process_to_exit(monkeypatch):
     assert app.state.runtime.process is not previous
 
 
+class RecordingProcess:
+    """Stand-in for ServerProcess that the test can make exit with any code."""
+
+    instances: list["RecordingProcess"] = []
+
+    def __init__(self, args, cwd, on_output, on_exit):
+        self.on_exit = on_exit
+        self.running = False
+        self.sent: list[str] = []
+        RecordingProcess.instances.append(self)
+
+    def start(self):
+        self.running = True
+
+    def is_running(self):
+        return self.running
+
+    def send(self, command):
+        self.sent.append(command)
+
+    def stop(self):
+        self.running = False
+
+    def kill(self):
+        self.running = False
+
+    def exit(self, code):
+        self.running = False
+        self.on_exit(code)
+
+
+@pytest.fixture
+def fake_server(monkeypatch):
+    RecordingProcess.instances = []
+    monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: True)
+    monkeypatch.setattr(webapp_module.java_manager, "ensure_java", lambda required: "java")
+    monkeypatch.setattr(webapp_module.downloaders, "launch_args", lambda *args, **kwargs: ["java"])
+    monkeypatch.setattr(webapp_module, "update_properties", lambda server_dir, **kwargs: None)
+    monkeypatch.setattr(webapp_module, "ServerProcess", RecordingProcess)
+    monkeypatch.setattr(webapp_module, "CRASH_RESTART_DELAY_SEC", 0)
+    runtime = app.state.runtime
+    runtime.process = None
+    runtime.crash_times = []
+    yield RecordingProcess.instances
+    runtime.process = None
+    runtime.crash_times = []
+
+
+def _wait_until(condition, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while not condition() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    return condition()
+
+
+def test_crash_triggers_automatic_restart(fake_server):
+    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    fake_server[0].exit(1)
+    assert _wait_until(lambda: len(fake_server) == 2)
+    assert app.state.runtime.process is fake_server[1]
+    assert app.state.runtime.state == "running"
+
+
+def test_crash_restart_pauses_after_limit(fake_server):
+    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    now = time.monotonic()
+    app.state.runtime.crash_times = [now] * webapp_module.CRASH_RESTART_LIMIT
+    fake_server[0].exit(1)
+    time.sleep(0.2)
+    assert len(fake_server) == 1
+    assert app.state.runtime.state == "crashed"
+    history = client.get("/api/console", auth=("admin", "s3cret-pass")).json()["lines"]
+    assert any("automatic restart paused" in line for line in history)
+
+
+def test_deliberate_stops_are_not_crashes(fake_server):
+    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    client.post("/api/server/stop", auth=("admin", "s3cret-pass"))
+    fake_server[0].exit(1)
+
+    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    client.post("/api/server/command", auth=("admin", "s3cret-pass"), json={"command": "/stop"})
+    fake_server[1].exit(143)
+    time.sleep(0.2)
+    assert len(fake_server) == 2
+    assert app.state.runtime.state == "stopped"
+
+
+def test_auto_restart_can_be_disabled(fake_server, monkeypatch):
+    original = webapp_module._effective_config
+    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {**original(), "auto_restart": False})
+    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    fake_server[0].exit(1)
+    time.sleep(0.2)
+    assert len(fake_server) == 1
+
+
+def test_autostart_launches_server_and_playit(fake_server, fake_playit, monkeypatch):
+    original = webapp_module._effective_config
+    monkeypatch.setattr(webapp_module, "_effective_config",
+                        lambda: {**original(), "autostart_server": True, "autostart_playit": True})
+    monkeypatch.delenv("EZ_NO_AUTOSTART", raising=False)
+    playit.save_config("demo-secret", "")
+    app.state.autostart()
+    assert _wait_until(lambda: len(fake_server) == 1 and app.state.runtime.playit_agent is not None)
+    assert _wait_until(lambda: playit.load_config().get("address") == "demo.example:25565")
+
+
+def test_autostart_respects_kill_switch(fake_server, monkeypatch):
+    original = webapp_module._effective_config
+    monkeypatch.setattr(webapp_module, "_effective_config", lambda: {**original(), "autostart_server": True})
+    monkeypatch.setenv("EZ_NO_AUTOSTART", "1")
+    app.state.autostart()
+    time.sleep(0.2)
+    assert fake_server == []
+
+
+def test_shutdown_stops_server_and_tunnel(fake_server, fake_playit):
+    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    agent = DummyAgent()
+    agent.start("s")
+    app.state.runtime.playit_agent = agent
+    app.state.shutdown()
+    assert not fake_server[0].is_running()
+    assert not agent.is_running()
+    assert app.state.runtime.stop_requested is True
+
+
+def test_always_on_settings_render_on_setup_page():
+    text = client.get("/dashboard/setup").text
+    for element_id in ("autostart-server", "auto-restart", "autostart-playit", "always-on-save-button"):
+        assert f'id="{element_id}"' in text
+
+
 def test_mod_upload_rejected_for_vanilla(monkeypatch):
     monkeypatch.setattr(webapp_module, "_effective_config", lambda: {"loader": "vanilla", "version": "1.21.7"})
     response = client.post(
