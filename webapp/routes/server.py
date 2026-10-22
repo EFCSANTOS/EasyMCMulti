@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 
-from core import config_store, diagnose, downloaders, java_manager, players
+from core import activity, config_store, diagnose, downloaders, java_manager, players
 from webapp import common
 from webapp.services import Services, require_auth
 from webapp.validation import require_chat, require_command, require_player, validate_config_update
@@ -198,6 +198,7 @@ def register(app: FastAPI, s: Services) -> None:
             append_console_line(f"[server] exited with code {code}")
             if runtime.process is not process:
                 return  # a newer process already replaced this one (e.g. after a restart)
+            activity.record("server_stop", server_dir=target_dir)  # closes everyone's open session
             runtime.set_state("stopped", "idle")
             runtime.process = None
             runtime.clear_players()
@@ -218,6 +219,7 @@ def register(app: FastAPI, s: Services) -> None:
             event = runtime.track_player_event(line)
             if event:
                 s.player_event(*event)
+                activity.record("join" if event[1] == "joined" else "leave", event[0], target_dir)
             refused = players.rejected_name(line)
             if refused:
                 runtime.note_player(refused, rejected=True)
