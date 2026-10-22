@@ -58,6 +58,23 @@ def write_text_atomic(path, text):
     _write(path, text, keep_backup=True)
 
 
+def write_bytes_atomic(path, data):
+    """Replace `path` with `data` (binary, e.g. an image) atomically; no .bak copy."""
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        _replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_json_atomic(path, data, ensure_ascii=True):
     write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=ensure_ascii))
 

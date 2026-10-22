@@ -1,6 +1,7 @@
 """Page sections: overview, setup, settings, alerts, updates."""
 from __future__ import annotations
 
+from webapp.pages.sections_identity import MOTD_TOOLS
 from webapp.pages.widgets import _copy_button, _icon, _switch
 
 _SECTION_OVERVIEW_TILES = f"""
@@ -147,7 +148,8 @@ _SECTION_ADVANCED = f"""
             <div class="form-grid">
               <div class="field field-wide">
                 <label for="motd-input">Server name (MOTD)</label>
-                <input id="motd-input" maxlength="59" value="EZ Minecraft Server" />
+                <input id="motd-input" maxlength="150" value="EZ Minecraft Server" />
+                {MOTD_TOOLS}
               </div>
               <div class="field">
                 <label for="gamemode-input">Game mode</label>

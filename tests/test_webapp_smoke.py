@@ -2892,3 +2892,60 @@ def test_host_info_and_performance_card():
     text = client.get("/dashboard/setup").text
     for marker in ('data-preset="phone"', 'id="jvm-preset-flags"', 'id="ram-advice"', 'id="paper-pregen-hint"'):
         assert marker in text
+
+
+# ---------- Server icon, MOTD and all properties (FEAT-14) ----------
+import struct  # noqa: E402
+
+from webapp import properties_meta  # noqa: E402
+
+
+def _png(width, height, padding=0):
+    ihdr = struct.pack(">II", width, height) + bytes([8, 6, 0, 0, 0])
+    return b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + ihdr + b"\0" * (4 + padding)
+
+
+def test_server_icon_upload_is_validated():
+    assert client.get("/api/server/icon", auth=AUTH).status_code == 404
+    upload = lambda data: client.post("/api/server/icon", auth=AUTH, files={"file": ("i.png", data, "image/png")})  # noqa: E731
+    assert upload(_png(32, 32)).status_code == 400
+    assert upload(b"GIF89a....").status_code == 400
+    assert upload(_png(64, 64, padding=70_000)).status_code == 400
+    assert upload(_png(64, 64)).status_code == 200
+    assert client.get("/api/server/icon", auth=AUTH).content == _png(64, 64)
+    assert client.delete("/api/server/icon", auth=AUTH).status_code == 200
+    assert client.get("/api/server/icon", auth=AUTH).status_code == 404
+
+
+def test_extra_properties_round_trip_and_managed_keys_are_refused():
+    response = client.put("/api/server/properties", auth=AUTH, json={"spawn-protection": "0", "hardcore": True})
+    assert response.status_code == 200
+    rows = {row["key"]: row for row in response.json()["properties"]}
+    assert rows["spawn-protection"]["value"] == "0" and rows["spawn-protection"]["custom"]
+    assert rows["hardcore"]["value"] == "true" and rows["hardcore"]["type"] == "bool"
+    assert rows["server-port"]["managed"] and rows["motd"]["managed"]
+    props = common_module._server_properties_from_config(common_module._effective_config())
+    assert props["spawn-protection"] == "0" and props["hardcore"] == "true"
+    for bad in ({"server-port": "1"}, {"motd": "x"}, {"level-name": "../x"}, {"bad=key": "1"}, {"pvp": "false"},
+                {"resource-pack": "line\nbreak"}):
+        assert client.put("/api/server/properties", auth=AUTH, json=bad).status_code == 422, bad
+    removed = client.put("/api/server/properties", auth=AUTH, json={"spawn-protection": None}).json()
+    assert not {row["key"]: row for row in removed["properties"]}["spawn-protection"]["custom"]
+
+
+def test_motd_colours_are_written_as_unicode_escapes():
+    # The owner types "\n" (backslash + n) for the second line; it must reach the file unchanged.
+    config_store.save({"motd": r"§aOur §lServer\n§7Come play"})
+    props = common_module._server_properties_from_config(common_module._effective_config())
+    assert props["motd"] == r"\u00a7aOur \u00a7lServer\n\u00a77Come play"
+    assert client.put("/api/config", auth=AUTH, json={"motd": "§" * 120}).status_code == 200
+    assert client.put("/api/config", auth=AUTH, json={"motd": "x" * 151}).status_code == 422
+
+
+def test_managed_property_list_matches_the_settings_form():
+    config = common_module._effective_config()
+    config["extra_properties"] = {}
+    assert set(common_module._server_properties_from_config(config)) == properties_meta.MANAGED
+    text = client.get("/dashboard/advanced").text
+    for element_id in ("server-icon-input", "motd-preview", "properties-list", "properties-save-button"):
+        assert f'id="{element_id}"' in text

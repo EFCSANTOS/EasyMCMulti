@@ -1,4 +1,4 @@
-// EZ Minecraft dashboard, part 3 of 7: Backups, mods (Modrinth browser) and worlds.
+// EZ Minecraft dashboard, part 3 of 8: Backups, mods (Modrinth browser) and worlds.
 // Plain scripts that share one global scope, loaded in order by webapp/pages/layout.py::SCRIPTS.
 
 // ---------- Backups ----------

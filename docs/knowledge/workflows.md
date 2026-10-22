@@ -543,6 +543,25 @@ Core details (`core/playit.py`):
   `PUT /api/config`; RAM advice under the memory input ("Recommended: min–max", red above the max;
   modded loaders recommend ≥ 3 GB); the flags switch; extra options; a Chunky tip on Paper.
 
+## 29. Server icon, MOTD editor, all properties (FEAT-14)
+- Icon: the browser crops any picture to a centred square and draws it on a 64×64 `<canvas>`
+  (`identity.js::iconBlob`), then `POST /api/server/icon` (multipart). The server checks the PNG
+  signature, `IHDR` = 64×64 and size < 64 KB (else 400) and writes `server-icon.png` atomically
+  (`fsutil.write_bytes_atomic`); `GET` serves it (404 if none), `DELETE` removes it. No imaging
+  library on the server.
+- MOTD (Settings page): colour swatches and Bold/Italic/Reset insert `§` codes, "New line" inserts
+  the two characters `\n`; a preview styled like the multiplayer list renders them; the length line
+  counts visible characters. `motd` may be 150 chars. Non-ASCII characters (the `§`) are written to
+  server.properties as `\uXXXX` escapes (`properties_meta.escape_value`), which Java's properties
+  loader reads whatever the file encoding; the owner's `\n` stays a properties escape.
+- All properties (Settings page): `GET /api/server/properties` → one row per key in the file, in
+  `properties_meta.KNOWN` (type, description, options for ~45 common keys), in `extra_properties` or
+  managed; managed keys (`properties_meta.MANAGED`, written by the Settings form on every start) and
+  `LOCKED` keys (port, level-name, white-list, RCON) are read-only. `PUT {key: value|null}` merges
+  into config `extra_properties` (validated: key pattern, not managed/locked, one line ≤ 500 chars;
+  null removes) → `_server_properties_from_config` writes them on the next start, managed keys
+  winning.
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

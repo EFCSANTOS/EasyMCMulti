@@ -29,7 +29,7 @@
   `/health`), `system` (metrics, status, console history, config, versions), `server` (install +
   lifecycle jobs — `start_lifecycle_job`, `busy_error`, `launch_server`, `launch_when_free`,
   `install_server`, `request_stop`, `stop_and_wait`, `restart_job`, `server_running` — commands,
-  admin), `backups`, `mods` (+ Modrinth), `worlds`, `diagnosis` (crash diagnosis + log viewer), `players` (whitelist/ops/bans), `public` (invite + `/s/<token>` status page), `remote` (PlayIt + Cloudflare), `updates`
+  admin), `backups`, `mods` (+ Modrinth), `worlds`, `diagnosis` (crash diagnosis + log viewer), `players` (whitelist/ops/bans), `identity` (icon + all properties), `public` (invite + `/s/<token>` status page), `remote` (PlayIt + Cloudflare), `updates`
   (self-update + alert settings).
 - `background.py` — `run_in_background`, `autostart` (also starts `heartbeat_loop` and
   `scheduler_loop`), `shutdown`.
@@ -50,6 +50,10 @@
 `password_is_weak`, `SessionStore` (in-memory tokens, sliding expiry), `LoginLimiter` (per-IP and
 global failure windows), `client_ip`, `check_login` (429 / 401 + count), `authenticate` (cookie or
 Basic, works on HTTP and WebSocket; cookie writes pass the same-origin/JSON CSRF check).
+
+### `webapp/properties_meta.py`
+`KNOWN` (type/description/options per common server.properties key), `MANAGED`, `LOCKED`,
+`KEY_PATTERN`, `describe(key)`, `escape_value(value)` (non-ASCII → `\uXXXX`).
 
 ### `webapp/validation.py`
 `require_player`, `require_command` (400s), `ConfigUpdate` (Pydantic, `extra="forbid"`; `ram_mb`

@@ -1,4 +1,4 @@
-// EZ Minecraft dashboard, part 6 of 7: Console output and the CPU/RAM charts.
+// EZ Minecraft dashboard, part 6 of 8: Console output and the CPU/RAM charts.
 // Plain scripts that share one global scope, loaded in order by webapp/pages/layout.py::SCRIPTS.
 
 // ---------- Crash diagnosis ----------
