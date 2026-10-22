@@ -44,9 +44,12 @@ apt-get "${APT_OPTS[@]}" install python git "$JAVA_PACKAGE" rust binutils proot 
 
 say "Fetching the app into $APP_DIR..."
 if [ -d "$APP_DIR/.git" ]; then
+  # Older versions ran `chmod +x` on the scripts; ignore permission bits so that isn't a local edit.
+  git -C "$APP_DIR" config core.fileMode false
   git -C "$APP_DIR" pull --ff-only </dev/null
 else
   git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$APP_DIR" </dev/null
+  git -C "$APP_DIR" config core.fileMode false
 fi
 cd "$APP_DIR"
 
@@ -92,7 +95,6 @@ else
   say "Keeping the existing login in $APP_DIR/.env"
 fi
 
-chmod +x run.sh ezmc.sh
 cat > "$PREFIX/bin/ezmc" <<EOF
 #!/usr/bin/env bash
 exec bash "$APP_DIR/ezmc.sh" "\$@"

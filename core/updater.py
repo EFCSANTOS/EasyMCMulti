@@ -19,8 +19,10 @@ CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
 def _git(*args, timeout=60, strip=True):
+    # core.fileMode=false: older termux-setup.sh ran `chmod +x` on run.sh/ezmc.sh, and a
+    # permission-only change must not count as a local edit that blocks updating.
     result = subprocess.run(
-        ["git", "-C", REPO_DIR, *args], capture_output=True, text=True,
+        ["git", "-C", REPO_DIR, "-c", "core.fileMode=false", *args], capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=timeout, creationflags=CREATE_NO_WINDOW)
     if result.returncode != 0:
         raise RuntimeError(f"git {args[0]} failed: {(result.stderr or result.stdout).strip()}")
