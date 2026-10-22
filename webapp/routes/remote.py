@@ -279,7 +279,9 @@ def register(app: FastAPI, s: Services) -> None:
                 body = f"Your dashboard is now at:\n\n{url}\n\n"
                 config = common._effective_config()
                 if config.get("status_page_enabled") and config.get("status_page_token"):
-                    body += f"Status page for friends:\n\n{url}/s/{config['status_page_token']}\n\n"
+                    status_url = f"{url}/s/{config['status_page_token']}"
+                    body += f"Status page for friends:\n\n{status_url}\n\n"
+                    s.notify_friends("link", f"Server status page (new link): {status_url}")
                 notify("link", "New dashboard link",
                        body + "The old link no longer works. New links can take up to a minute to open.", throttle=False)
 

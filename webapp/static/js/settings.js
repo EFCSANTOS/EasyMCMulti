@@ -114,6 +114,14 @@ const ALERT_FIELDS = [
   ['alerts-notify-updates', 'notify_updates', 'checkbox'],
   ['alerts-notify-security', 'notify_security', 'checkbox'],
   ['alerts-heartbeat-url', 'heartbeat_url', 'text'],
+  ['alerts-friends-status', 'friends_notify_status', 'checkbox'],
+  ['alerts-friends-players', 'friends_notify_players', 'checkbox'],
+  ['alerts-friends-link', 'friends_notify_link', 'checkbox'],
+];
+// Write-only secrets: [input id, notify_config key, "<key>_set" flag from the server].
+const ALERT_SECRETS = [
+  ['alerts-discord-owner', 'discord_owner_url', 'discord_owner_set'],
+  ['alerts-discord-friends', 'discord_friends_url', 'discord_friends_set'],
 ];
 
 function renderAlerts(settings) {
@@ -125,6 +133,19 @@ function renderAlerts(settings) {
   const password = document.getElementById('alerts-smtp-password');
   password.value = '';
   password.placeholder = settings.password_set ? 'Saved (leave empty to keep it)' : '16-character app password';
+  ALERT_SECRETS.forEach(([id, , flag]) => {
+    const input = document.getElementById(id);
+    input.value = '';
+    input.placeholder = settings[flag] ? 'Saved (paste a new URL to replace it)' : 'https://discord.com/api/webhooks/…';
+    document.getElementById(`${id}-remove`).hidden = !settings[flag];
+  });
+}
+
+async function removeWebhook(key, button) {
+  await runAction(button, null, async () => {
+    renderAlerts(await fetchJson('/api/notifications', 'PUT', { [key]: null }));
+    return 'Webhook removed.';
+  });
 }
 
 async function loadAlerts() {
@@ -146,6 +167,10 @@ function collectAlerts() {
   });
   const password = document.getElementById('alerts-smtp-password').value.replace(/\s+/g, '');
   if (password) payload.smtp_password = password; // Gmail shows app passwords with spaces
+  ALERT_SECRETS.forEach(([id, key]) => {
+    const value = document.getElementById(id).value.trim();
+    if (value) payload[key] = value; // empty keeps the saved webhook
+  });
   return payload;
 }
 

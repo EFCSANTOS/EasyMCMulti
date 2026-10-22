@@ -235,7 +235,8 @@ _SECTION_ALERTS = f"""
           <div class="card-header">
             <div>
               <h2>Alerts</h2>
-              <p class="card-sub">Get an email when the server crashes, the dashboard link changes or a tunnel has a problem.</p>
+              <p class="card-sub">Get an email or a Discord message when the server crashes, the dashboard link changes
+                or a tunnel has a problem, and let your friends' Discord know when the server is up.</p>
             </div>
           </div>
           <form id="alerts-form" autocomplete="off">
@@ -278,6 +279,26 @@ _SECTION_ALERTS = f"""
               {_switch("alerts-notify-tunnels", "Tunnel problems", "PlayIt or the dashboard link stopped unexpectedly.", True)}
               {_switch("alerts-notify-updates", "Updates", "A new version is available, or an update failed.", True)}
               {_switch("alerts-notify-security", "Sign-in lockouts", "Someone entered a wrong dashboard password too many times.", True)}
+            </div>
+            <h3 class="subhead">Discord</h3>
+            <p class="hint">In your Discord server: channel settings → Integrations → Webhooks → New Webhook → Copy
+              Webhook URL. Use a private channel for yourself: it gets the dashboard link.</p>
+            <div class="form-grid alerts-grid">
+              <div class="field">
+                <label for="alerts-discord-owner">Your channel (same alerts as email)</label>
+                <input id="alerts-discord-owner" type="password" autocomplete="off" placeholder="https://discord.com/api/webhooks/…" />
+                <button id="alerts-discord-owner-remove" class="btn btn-ghost btn-sm" type="button" hidden>Remove</button>
+              </div>
+              <div class="field">
+                <label for="alerts-discord-friends">Friends' channel</label>
+                <input id="alerts-discord-friends" type="password" autocomplete="off" placeholder="https://discord.com/api/webhooks/…" />
+                <button id="alerts-discord-friends-remove" class="btn btn-ghost btn-sm" type="button" hidden>Remove</button>
+              </div>
+            </div>
+            <div class="switch-list alerts-events">
+              {_switch("alerts-friends-status", "Friends: server online / offline", "Posted when the server starts, stops or crashes.", True)}
+              {_switch("alerts-friends-players", "Friends: who joins and leaves", "Grouped every 30 seconds.", True)}
+              {_switch("alerts-friends-link", "Friends: new status page link", "Only the public status page link, never the dashboard.", True)}
             </div>
             <div class="field heartbeat-field">
               <label for="alerts-heartbeat-url">Heartbeat URL (optional, for when the whole phone goes down)</label>

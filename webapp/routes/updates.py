@@ -143,7 +143,10 @@ def register(app: FastAPI, s: Services) -> None:
     @app.put("/api/notifications")
     def save_notifications(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
         payload.pop("last_link", None)
-        notifier.save_config(payload)
+        try:
+            notifier.save_config(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return notifier.public_config()
 
     @app.post("/api/notifications/test")
@@ -158,12 +161,23 @@ def register(app: FastAPI, s: Services) -> None:
                 results.append("Test email sent.")
             except Exception as exc:
                 raise HTTPException(status_code=502, detail=f"Email failed: {exc}") from exc
+        for key, label, text in (
+            ("discord_owner_url", "owner", "Alerts are working: crashes, outages and new dashboard links will be posted here."),
+            ("discord_friends_url", "friends", "Hello from the Minecraft server! You'll see when it goes online or "
+                                               "offline and who joins."),
+        ):
+            if config.get(key):
+                try:
+                    notifier.send_discord(config[key], text)
+                except Exception as exc:
+                    raise HTTPException(status_code=502, detail=f"Discord ({label} channel) failed: {exc}") from exc
+                results.append(f"Discord {label} channel OK.")
         if config.get("heartbeat_url"):
             if not notifier.ping_heartbeat(config["heartbeat_url"]):
                 raise HTTPException(status_code=502, detail="Heartbeat URL did not answer.")
             results.append("Heartbeat ping OK.")
         if not results:
-            raise HTTPException(status_code=400, detail="Fill in the email settings or a heartbeat URL first.")
+            raise HTTPException(status_code=400, detail="Fill in the email settings, a Discord webhook or a heartbeat URL first.")
         return {"ok": True, "message": " ".join(results)}
 
 

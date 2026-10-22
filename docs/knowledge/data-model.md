@@ -9,7 +9,8 @@ EZ_Server_Data/
   launcher_config.json     config profile (config_store._FILE)
   playit_config.json       {"secret", "address"} (playit._CONFIG_FILE) — plaintext secret
   cloudflared-<os>-<arch>  Cloudflare tunnel binary, downloaded on Windows/Linux (cloudflared.ensure_binary)
-  notify_config.json       alert settings (notifier._CONFIG_FILE) — plaintext SMTP app password; last_link
+  notify_config.json       alert settings (notifier._CONFIG_FILE) — plaintext SMTP app password and Discord
+                           webhook URLs; last_link
   resume_after_update.json {server, playit} written before an update restart, deleted on next start
   update-requirements.txt  temp requirements file used by updater.install_requirements
   playit-<os>-<arch>[.exe] PlayIt agent binary (playit._agent_path)
