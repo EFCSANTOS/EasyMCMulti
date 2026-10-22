@@ -24,7 +24,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from starlette.background import BackgroundTask
 
 from core import (
-    cloudflared, config_store, downloaders, java_manager, modrinth, netinfo, notifier, paths, playit, updater, worlds,
+    cloudflared, config_store, downloaders, fsutil, java_manager, modrinth, netinfo, notifier, paths, playit, updater,
+    worlds,
 )
 from core.server_process import ServerProcess, accept_eula, update_properties
 from webapp.auth import (
@@ -1027,6 +1028,8 @@ def create_app() -> FastAPI:
     def append_console_line(line: str) -> None:
         app.state.console_manager.publish(line)
 
+    fsutil.set_logger(lambda message: append_console_line(f"[config] {message}"))
+
     # ---------- Alerts (email + heartbeat) ----------
     last_alert_at: dict[str, float] = {}
 
@@ -1201,7 +1204,10 @@ def create_app() -> FastAPI:
     def save_config(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
         config = _effective_config()
         config.update(payload)
-        config_store.save(config)
+        try:
+            config_store.save(config)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Could not save settings (disk full?): {exc}") from exc
         if "loader" in config:
             runtime.loader = str(config["loader"])
         if "version" in config:

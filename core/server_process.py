@@ -4,6 +4,8 @@ import subprocess
 import sys
 import threading
 
+from . import fsutil
+
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 
@@ -38,9 +40,8 @@ def update_properties(server_dir, **kwargs):
         if isinstance(v, bool):
             v = "true" if v else "false"
         props[key] = str(v)
-    with open(os.path.join(server_dir, "server.properties"), "w", encoding="utf-8") as f:
-        for k, v in props.items():
-            f.write(f"{k}={v}\n")
+    text = "".join(f"{k}={v}\n" for k, v in props.items())
+    fsutil.write_text_atomic(os.path.join(server_dir, "server.properties"), text)
 
 
 class ServerProcess:

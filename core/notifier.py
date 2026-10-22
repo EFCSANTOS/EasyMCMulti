@@ -8,7 +8,6 @@ emails the user.
 Settings live in EZ_Server_Data/notify_config.json. The SMTP password is stored there in plain
 text (like the PlayIt secret) and is never returned by the API.
 """
-import json
 import os
 import smtplib
 import ssl
@@ -16,7 +15,7 @@ from email.message import EmailMessage
 
 import requests
 
-from . import paths
+from . import fsutil, paths
 
 _CONFIG_FILE = os.path.join(paths.DATA_DIR, "notify_config.json")
 
@@ -40,13 +39,9 @@ PUBLIC_KEYS = [key for key in DEFAULTS if key != "smtp_password"]
 
 def load_config():
     config = dict(DEFAULTS)
-    try:
-        with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
-            stored = json.load(f)
-        if isinstance(stored, dict):
-            config.update(stored)
-    except (OSError, ValueError):
-        pass
+    stored = fsutil.read_json(_CONFIG_FILE, {})
+    if isinstance(stored, dict):
+        config.update(stored)
     return config
 
 
@@ -61,8 +56,7 @@ def save_config(update):
         config[key] = value
     config["smtp_port"] = int(config.get("smtp_port") or 587)
     paths.ensure_dirs()
-    with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
+    fsutil.write_json_atomic(_CONFIG_FILE, config)
     return config
 
 

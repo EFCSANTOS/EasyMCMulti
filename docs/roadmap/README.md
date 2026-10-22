@@ -23,7 +23,6 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 ## Fixes (correctness, security, robustness)
 | ID | Title | Priority | Effort | Depends on |
 |---|---|---|---|---|
-| [FIX-03](fixes/FIX-03-atomic-json-writes.md) | Atomic writes for config and metadata files | P0 | S | — |
 | [FIX-05](fixes/FIX-05-input-validation.md) | Validate player names, commands and config values | P1 | S | — |
 | [FIX-06](fixes/FIX-06-status-endpoint-side-effects.md) | Make `GET /api/status` a pure read | P2 | S | — |
 
@@ -56,8 +55,8 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 | [QUAL-02](quality/QUAL-02-test-suite-and-ci.md) | Test suite structure, `core/` unit tests and CI | P2 | M | — |
 
 ## Suggested order
-1. **Make installs reliable** — FIX-03 (FIX-01 login sessions + lockout, FIX-02 background
-   installs and FIX-04 lifecycle lock have shipped).
+1. **Make remote access safe and installs reliable** — done: FIX-01 (login sessions + lockout),
+   FIX-02 (background installs), FIX-03 (atomic writes), FIX-04 (lifecycle lock).
 2. **Friends can join without the owner** — FEAT-02, FEAT-03, FEAT-04, FEAT-05, FIX-05.
 3. **Hands-off running** — FEAT-01, FEAT-06, FEAT-08, FEAT-07.
 4. **Polish** — everything else, picking by what the group actually asks for.
