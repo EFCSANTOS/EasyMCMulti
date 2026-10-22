@@ -229,7 +229,8 @@ Core details (`core/playit.py`):
 - `core/updater.py` works on `REPO_DIR` (= `paths.base_dir()`, the git clone the app runs from).
   `status(fetch)` → `available`/`reason` (no git or not a clone), `branch`, `upstream` (`@{u}` or
   `origin/<branch>`), `current` {hash, subject, when}, `latest_hash`, `behind`, `ahead`, `commits`
-  (≤20 incoming), `local_changes` (tracked files only; porcelain parsed without stripping).
+  (≤20 incoming), `local_changes` (tracked files only; porcelain parsed without stripping). Every `_git` call passes
+  `-c core.fileMode=false`, so permission-only changes (old setup's `chmod +x run.sh ezmc.sh`) don't block.
 - `apply(log)`: refuses on local changes or unpushed commits; else `git merge --ff-only <upstream>`
   (after the fetch in `status`); if `requirements.txt` changed → `install_requirements` (running
   interpreter's pip; Termux drops psutil and sets `ANDROID_API_LEVEL`) and on failure
