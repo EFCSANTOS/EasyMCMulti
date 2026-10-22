@@ -47,7 +47,5 @@ descriptions name the roadmap ID and summarize the test results.
   in passing. Releasing to `main` is the owner's call.
 - Never force-push `development`, `release` or `main`.
 
-## Tooling (this Windows machine)
-- `git` is not on `PATH`; GitHub Desktop's copy works:
-  `$env:LOCALAPPDATA\GitHubDesktop\app-<version>\resources\app\git\cmd\git.exe`.
-- GitHub CLI: `C:\Program Files\GitHub CLI\gh.exe` (log in once with `gh auth login`).
+## Tooling
+PRs and merges use the GitHub CLI (`gh`); log in once with `gh auth login` and `gh auth setup-git`.
