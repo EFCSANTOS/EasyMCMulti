@@ -19,11 +19,12 @@ from webapp.pages.sections_more import _SECTION_CONSOLE_FULL  # noqa: F401
 from webapp.pages.sections_more import _SECTION_MODS  # noqa: F401
 from webapp.pages.sections_more import _SECTION_REMOTE  # noqa: F401
 from webapp.pages.sections_more import _SECTION_WORLDS  # noqa: F401
+from webapp.pages.sections_players import _SECTION_PLAYERS
 from webapp.pages.widgets import _icon
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 # Dashboard scripts in load order: plain scripts sharing one global scope (no build step).
-SCRIPTS = ("api.js", "server.js", "content.js", "settings.js", "console.js", "main.js")
+SCRIPTS = ("api.js", "server.js", "content.js", "players.js", "settings.js", "console.js", "main.js")
 # Changes whenever the CSS/JS change (e.g. after an update) so browsers don't keep stale copies.
 ASSET_VERSION = str(int(max(
     [os.path.getmtime(os.path.join(STATIC_DIR, "css", "dashboard.css"))]
@@ -36,6 +37,7 @@ _DASHBOARD_NAVIGATION = (
     ("setup", "Server", "Server setup", "Choose the loader, version and resources, then create the server."),
     ("advanced", "Settings", "World settings", "Gameplay and world options written to server.properties."),
     ("worlds", "Worlds", "Worlds", "Upload, switch between and manage your worlds."),
+    ("players", "Players", "Players", "Choose who can join: whitelist, operators and bans."),
     ("mods", "Mods", "Mods & plugins", "Find mods on Modrinth or upload your own .jar files."),
     ("remote", "Remote access", "Remote access", "Let friends outside your network join."),
     ("backups", "Backups", "Backups", "Snapshot the world and roll back when needed."),
@@ -72,6 +74,7 @@ _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
     "setup": (_SECTION_SETUP, _SECTION_ALWAYS_ON, _SECTION_ALERTS, _SECTION_UPDATES),
     "advanced": (_SECTION_ADVANCED,),
     "worlds": (_SECTION_WORLDS,),
+    "players": (_SECTION_PLAYERS,),
     "mods": (_SECTION_MODS,),
     "remote": (_SECTION_REMOTE,),
     "backups": (_SECTION_BACKUPS,),

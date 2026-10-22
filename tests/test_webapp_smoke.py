@@ -1877,3 +1877,113 @@ def test_stored_garbage_falls_back_to_defaults(fake_server):
 def test_dashboard_highlights_rejected_fields():
     source = _dashboard_js()
     assert "markInvalidFields" in source and "aria-invalid" in source
+
+
+# ---------- Players page: whitelist, operators, bans (FEAT-02) ----------
+players_route = importlib.import_module("webapp.routes.players")
+AUTH = ("admin", "s3cret-pass")
+
+
+def _server_file(name):
+    return os.path.join(common_module._server_dir_for_config(common_module._effective_config()), name)
+
+
+def test_stopped_server_whitelist_edits_json_with_offline_uuid():
+    config_store.save({"online_mode": False})
+    response = client.post("/api/players/whitelist", auth=AUTH, json={"action": "add", "name": "Notch"})
+    assert response.status_code == 200 and response.json()["whitelist"] == [{"name": "Notch"}]
+    entries = json.load(open(_server_file("whitelist.json"), encoding="utf-8"))
+    assert entries == [{"uuid": "b50ad385-829d-3141-a216-7e7d7539ba7f", "name": "Notch"}]
+    assert client.post("/api/players/whitelist", auth=AUTH, json={"action": "remove", "name": "notch"}).json()["whitelist"] == []
+    assert client.post("/api/players/whitelist", auth=AUTH, json={"action": "remove", "name": "Notch"}).status_code == 404
+
+
+def test_stopped_server_online_mode_resolves_uuid_from_mojang(monkeypatch):
+    from core import players
+
+    class FakeResponse:
+        def __init__(self, status, data=None):
+            self.status_code, self.ok, self._data = status, status == 200, data
+
+        def json(self):
+            return self._data
+
+    def fake_get(url, timeout):
+        if url.endswith("/steve"):
+            return FakeResponse(200, {"id": "8667ba71b85a4004af54457a9734eed7", "name": "Steve"})
+        return FakeResponse(404)
+
+    monkeypatch.setattr(players.requests, "get", fake_get)
+    result = client.post("/api/players/ops", auth=AUTH, json={"action": "add", "name": "steve", "level": 2}).json()
+    assert result["ops"] == [{"name": "Steve", "level": 2}]
+    entry = json.load(open(_server_file("ops.json"), encoding="utf-8"))[0]
+    assert entry["uuid"] == "8667ba71-b85a-4004-af54-457a9734eed7" and entry["level"] == 2
+    response = client.post("/api/players/whitelist", auth=AUTH, json={"action": "add", "name": "NoSuchGuy"})
+    assert response.status_code == 400 and "no Minecraft account" in response.json()["detail"]
+
+
+def test_running_server_changes_lists_with_commands(fake_server, monkeypatch):
+    monkeypatch.setattr(players_route, "SYNC_WAIT_SEC", 0.05)
+    _start()
+    for kind, body in (("whitelist", {"action": "add", "name": "Steve"}), ("ops", {"action": "add", "name": "Alex"}),
+                       ("bans", {"action": "add", "name": "Griefer", "reason": "broke the base"}),
+                       ("bans", {"action": "remove", "name": "Griefer"}), ("ips", {"action": "remove", "ip": "10.0.0.7"}),
+                       ("whitelist", {"action": "enable"})):
+        assert client.post(f"/api/players/{kind}", auth=AUTH, json=body).status_code == 200, (kind, body)
+    assert fake_server[0].sent == ["whitelist add Steve", "op Alex", "ban Griefer broke the base", "pardon Griefer",
+                                   "pardon-ip 10.0.0.7", "whitelist on"]
+    assert common_module._effective_config()["white_list"] is True
+
+
+def test_player_list_input_is_validated():
+    cases = [("whitelist", {"action": "add", "name": "x\nop me"}), ("whitelist", {"action": "add", "name": "ab"}),
+             ("ops", {"action": "add", "name": "Steve", "level": 7}), ("ips", {"action": "remove", "ip": "999.1.1.1"}),
+             ("bans", {"action": "add", "name": "Steve", "reason": "line\nbreak"}), ("whitelist", {"action": "nuke"})]
+    for kind, body in cases:
+        assert client.post(f"/api/players/{kind}", auth=AUTH, json=body).status_code == 400, body
+    assert client.post("/api/players/admins", auth=AUTH, json={"action": "add", "name": "Steve"}).status_code == 404
+
+
+def test_player_lists_wait_for_running_lifecycle_job():
+    config_store.save({"online_mode": False})
+    lock = app.state.runtime.lifecycle
+    lock.acquire()
+    try:
+        response = client.post("/api/players/whitelist", auth=AUTH, json={"action": "add", "name": "Steve"})
+        assert response.status_code == 409
+    finally:
+        lock.release()
+
+
+def test_refused_players_show_up_as_recently_seen():
+    runtime = app.state.runtime
+    runtime.recent_players.clear()
+    runtime.note_player("Stranger", rejected=True)
+    runtime.track_player_event("[12:00:00] [Server thread/INFO]: Steve joined the game")
+    recent = client.get("/api/players/lists", auth=AUTH).json()["recent"]
+    assert [(p["name"], p["rejected"], p["whitelisted"]) for p in recent] == [("Steve", False, False),
+                                                                              ("Stranger", True, False)]
+
+
+def test_server_output_records_whitelist_refusals(fake_server, monkeypatch):
+    captured = {}
+    original = RecordingProcess.__init__
+
+    def capture(self, args, cwd, on_output, on_exit):
+        captured["on_output"] = on_output
+        original(self, args, cwd, on_output, on_exit)
+
+    monkeypatch.setattr(RecordingProcess, "__init__", capture)
+    app.state.runtime.recent_players.clear()
+    _start()
+    captured["on_output"]("[12:00:00] [Server thread/INFO]: Disconnecting Bob_1 (/10.0.0.9:5000): "
+                          "You are not white-listed on this server!")
+    assert app.state.runtime.recent()[0]["name"] == "Bob_1" and app.state.runtime.recent()[0]["rejected"] is True
+
+
+def test_players_page_renders():
+    text = client.get("/dashboard/players").text
+    for element_id in ("whitelist-add-form", "whitelist-list", "ops-add-form", "bans-list", "recent-players-list",
+                       "players-whitelist-enabled"):
+        assert f'id="{element_id}"' in text
+    assert 'href="/dashboard/players"' in client.get("/dashboard/overview").text
