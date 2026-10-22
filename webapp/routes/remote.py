@@ -276,8 +276,12 @@ def register(app: FastAPI, s: Services) -> None:
             web_log(f"Dashboard reachable at {url}")
             if url != notifier.load_config().get("last_link"):
                 notifier.save_config({"last_link": url})
-                notify("link", "New dashboard link", f"Your dashboard is now at:\n\n{url}\n\n"
-                       "The old link no longer works. New links can take up to a minute to open.", throttle=False)
+                body = f"Your dashboard is now at:\n\n{url}\n\n"
+                config = common._effective_config()
+                if config.get("status_page_enabled") and config.get("status_page_token"):
+                    body += f"Status page for friends:\n\n{url}/s/{config['status_page_token']}\n\n"
+                notify("link", "New dashboard link",
+                       body + "The old link no longer works. New links can take up to a minute to open.", throttle=False)
 
         def on_output(line: str) -> None:
             if " ERR " in line or " WRN " in line:  # cloudflared is chatty; keep problems only

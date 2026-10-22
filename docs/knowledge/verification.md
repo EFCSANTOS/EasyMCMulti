@@ -45,6 +45,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
 | Mod browser (browse/category/sort/details, install + dependencies, remove), upload jars | Works; live read-only check against Modrinth; vanilla → 400 with explanation |
+| Invite friends + public status page | Works in tests and headless Edge (invite text, enable/regenerate/disable, signed-out public page at desktop and phone width); copy uses a textarea fallback when the Clipboard API is denied |
 | Players (whitelist on/off, add/remove, operators with level, unban, recently seen) | Works in tests (commands while running, JSON + offline/Mojang UUIDs while stopped) and in headless Edge (stopped server, desktop + phone width); not yet tried against a real running server |
 | Worlds (upload, switch, rename, download, delete, new) | Works in tests (incl. real zip handling); not yet tried with a large real world over the Cloudflare link (~100 MB upload limit) |
 | PlayIt configure / start / stop / status | Works; configure runs in the background and the dashboard shows the approval link (open from any device); "Change account" resets |
@@ -103,8 +104,12 @@ Fixed 2026-10-22:
   chars) with the link on → startup warning + Remote page banner.
 
 Open / by design:
-- UI routes (`/`, `/login`, `/dashboard/*`, `/dashboard.{css,js}`, `/health`) are unauthenticated:
+- UI routes (`/`, `/login`, `/dashboard/*`, `/dashboard.css`, `/js/*`, `/health`) are unauthenticated:
   static shells only; all data goes through authenticated `/api/*` (decisions.md).
+- Public status page `/s/<token>` (opt-in, off by default): anyone with the link sees the server
+  name, state, player count (and names unless hidden) and join address. Without PlayIt the address
+  is the owner's **public IP**; the switch hint says so. Tests assert no secrets, emails, the LAN IP
+  (unless "show LAN" is on) or the token itself appear in the page or JSON.
 - On the LAN the dashboard is plain HTTP, so the password crosses the network in clear once per
   login (HTTPS through the Cloudflare link). Sessions live in memory: a dashboard restart signs
   everyone out.

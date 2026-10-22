@@ -19,6 +19,7 @@ from webapp.pages.sections_more import _SECTION_CONSOLE_FULL  # noqa: F401
 from webapp.pages.sections_more import _SECTION_MODS  # noqa: F401
 from webapp.pages.sections_more import _SECTION_REMOTE  # noqa: F401
 from webapp.pages.sections_more import _SECTION_WORLDS  # noqa: F401
+from webapp.pages.sections_invite import _SECTION_INVITE
 from webapp.pages.sections_players import _SECTION_PLAYERS
 from webapp.pages.widgets import _icon
 
@@ -70,13 +71,13 @@ _TOPBAR_CONTROLS = f"""
 
 
 _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
-    "overview": (_SECTION_OVERVIEW_TILES, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
+    "overview": (_SECTION_OVERVIEW_TILES, _SECTION_INVITE, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
     "setup": (_SECTION_SETUP, _SECTION_ALWAYS_ON, _SECTION_ALERTS, _SECTION_UPDATES),
     "advanced": (_SECTION_ADVANCED,),
     "worlds": (_SECTION_WORLDS,),
     "players": (_SECTION_PLAYERS,),
     "mods": (_SECTION_MODS,),
-    "remote": (_SECTION_REMOTE,),
+    "remote": (_SECTION_REMOTE, _SECTION_INVITE),
     "backups": (_SECTION_BACKUPS,),
     "console": (_SECTION_CONSOLE_FULL,),
 }

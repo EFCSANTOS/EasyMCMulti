@@ -1987,3 +1987,94 @@ def test_players_page_renders():
                        "players-whitelist-enabled"):
         assert f'id="{element_id}"' in text
     assert 'href="/dashboard/players"' in client.get("/dashboard/overview").text
+
+
+# ---------- Friend invite and public status page (FEAT-03) ----------
+@pytest.fixture
+def offline_network(monkeypatch):
+    from core import netinfo
+    monkeypatch.setattr(netinfo, "public_ip", lambda: "203.0.113.9")
+    monkeypatch.setattr(netinfo, "lan_ip", lambda: "192.168.1.50")
+
+
+def _enable_status_page():
+    info = client.post("/api/status-page", auth=AUTH, json={"action": "enable"}).json()
+    return info, info["url"].rsplit("/s/", 1)[1]
+
+
+def test_status_page_is_off_by_default(offline_network):
+    assert client.get("/api/status-page", auth=AUTH).json()["enabled"] is False
+    assert client.get("/s/anything").status_code == 404
+    assert client.get("/s/anything/status.json").status_code == 404
+    assert client.get("/api/status-page").status_code == 401
+
+
+def test_status_page_shows_only_public_fields(offline_network, monkeypatch):
+    playit.save_config("very-secret-playit-key", "friends.joinmc.link")
+    notifier.save_config({"smtp_password": "smtp-secret-pass", "email_to": "owner@example.com"})
+    config_store.save({"motd": "Our World", "max_players": 8, "server_port": 25570})
+    info, token = _enable_status_page()
+    assert info["enabled"] and info["url_is_lan_only"] and info["url"].startswith("http://192.168.1.50:")
+    page = client.get(f"/s/{token}")
+    assert page.status_code == 200 and "noindex" in page.headers["x-robots-tag"]
+    data = client.get(f"/s/{token}/status.json").json()
+    assert data["name"] == "Our World" and data["online"] is False and data["players_max"] == 8
+    assert data["address"] == "friends.joinmc.link" and "lan_address" not in data
+    everything = page.text + json.dumps(data)
+    for secret in ("very-secret-playit-key", "smtp-secret-pass", "owner@example.com", token, "192.168.1.50", "s3cret-pass"):
+        assert secret not in everything, secret
+    client.post("/api/status-page", auth=AUTH, json={"action": "settings", "show_lan": True, "show_names": False})
+    data = client.get(f"/s/{token}/status.json").json()
+    assert data["lan_address"] == "192.168.1.50:25570" and "player_names" not in data
+
+
+def test_status_page_falls_back_to_public_ip(offline_network):
+    config_store.save({"server_port": 25565})
+    _, token = _enable_status_page()
+    assert client.get(f"/s/{token}/status.json").json()["address"] == "203.0.113.9"
+
+
+def test_regenerating_or_disabling_kills_the_old_link(offline_network):
+    _, token = _enable_status_page()
+    new_token = client.post("/api/status-page", auth=AUTH, json={"action": "regenerate"}).json()["url"].rsplit("/s/", 1)[1]
+    assert new_token != token
+    assert client.get(f"/s/{token}").status_code == 404
+    assert client.get(f"/s/{new_token}").status_code == 200
+    client.post("/api/status-page", auth=AUTH, json={"action": "disable"})
+    assert client.get(f"/s/{new_token}").status_code == 404
+    assert client.get(f"/s/{new_token}/status.json").status_code == 404
+
+
+def test_status_page_token_cannot_be_set_through_config():
+    response = client.put("/api/config", auth=AUTH, json={"status_page_token": "chosen-by-attacker"})
+    assert response.status_code == 422
+
+
+def test_invite_text_has_address_version_and_mods(offline_network):
+    playit.save_config("k", "friends.joinmc.link")
+    config_store.save({"loader": "fabric", "version": "1.21.1"})
+    mods_dir = os.path.join(common_module._server_dir_for_config(common_module._effective_config()), "mods")
+    os.makedirs(mods_dir, exist_ok=True)
+    open(os.path.join(mods_dir, "sodium.jar"), "wb").close()
+    info, token = _enable_status_page()
+    invite = info["invite"]
+    assert "Address: friends.joinmc.link" in invite
+    assert "Version: Fabric 1.21.1 (mods required" in invite
+    assert f"Status page: {info['url']}" in invite
+    assert client.get(f"/s/{token}/status.json").json()["mods_required"] is True
+
+
+def test_invite_card_is_on_overview_and_remote():
+    for section in ("overview", "remote"):
+        text = client.get(f"/dashboard/{section}").text
+        for element_id in ("invite-copy-button", "invite-text", "status-page-enabled", "status-page-regenerate"):
+            assert f'id="{element_id}"' in text, (section, element_id)
+
+
+def test_new_link_email_includes_status_page_link(fake_cloudflared, sent_emails, offline_network):
+    _, token = _enable_status_page()
+    client.post("/api/remote-dashboard", auth=AUTH, json={"enabled": True})
+    assert _wait_until(lambda: any("New dashboard link" in s for s, _ in sent_emails))
+    link_mail = next(body for subject, body in sent_emails if "New dashboard link" in subject)
+    assert f"https://demo-1.trycloudflare.com/s/{token}" in link_mail
+    assert client.get("/api/status-page", auth=AUTH).json()["url"] == f"https://demo-1.trycloudflare.com/s/{token}"

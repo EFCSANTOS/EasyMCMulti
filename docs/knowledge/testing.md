@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-124 passed (~25 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+132 passed (~25 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Patching
@@ -56,6 +56,11 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Status page (FEAT-03, `offline_network` fixture fakes `netinfo.public_ip`/`lan_ip`): off by
+  default (404, owner API needs auth); only public fields and no secrets/emails/LAN IP/token in page
+  or JSON; show-LAN/show-names switches; PlayIt address preferred, public IP fallback; regenerate and
+  disable kill the old link; token refused by `PUT /api/config`; invite text with mods required;
+  new-link email carries the status link.
 - Players (FEAT-02): stopped-server whitelist edit writes the offline UUID (Notch →
   `b50ad385-…`); online mode resolves through a faked Mojang API (unknown → 400); running server
   sends the right commands (`SYNC_WAIT_SEC` patched small); bad names/levels/IPs/reasons → 400;
