@@ -41,7 +41,7 @@ Backups: `GET /api/server/backups`, `POST /api/server/backups/restore`, legacy `
 Mods: `GET /api/server/mods`, `POST /api/server/mods/upload`, legacy `GET /api/mods`.
 Admin: `POST /api/admin/{action}`.
 Modrinth: `GET /api/modrinth/search`, `POST /api/modrinth/install`.
-PlayIt: `GET /api/playit/status`, `POST /api/playit/{configure,start,stop}`, `GET /api/playit/config`.
+PlayIt: `GET /api/playit/status`, `POST /api/playit/{configure,start,stop}`, `GET`/`PUT /api/playit/config`.
 Remote dashboard: `GET/POST /api/remote-dashboard`.
 WS: `/ws/console` (auth via `Authorization: Basic`; close 1008 on failure).
 
