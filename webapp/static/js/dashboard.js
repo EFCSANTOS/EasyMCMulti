@@ -9,6 +9,8 @@ const appState = {
 // The console is polled over REST (the /ws/console socket also accepts the session cookie).
 const CONSOLE_POLL_MS = 2000;
 const STATUS_POLL_MS = 5000;
+// While a server operation runs in the background (install, start, restart), poll faster.
+const STATUS_BUSY_POLL_MS = 1000;
 const METRICS_POLL_MS = 2000;
 const SERIES_COLOR = '#3987e5';
 
@@ -327,7 +329,7 @@ function currentState() {
 
 function renderServerControls() {
   const state = currentState();
-  const busy = BUSY_STATES.has(state) || appState.busy;
+  const busy = BUSY_STATES.has(state) || appState.busy || operationRunning(appState.status);
   const running = state === 'running';
   const toggle = (id, enabled) => {
     const button = document.getElementById(id);
@@ -376,15 +378,46 @@ function renderStatus(status) {
   }
 }
 
+function operationRunning(status) {
+  return Boolean(status && status.operation && status.operation !== 'idle');
+}
+
+// Lifecycle requests return at once (202) and finish in the background; remember that one is
+// running so the status poll can report how it ended.
+function trackOperation(response) {
+  if (response && response.operation) appState.status = { ...appState.status, operation: response.operation };
+  scheduleStatusPoll();
+}
+
+function reportFinishedOperation(previous, status) {
+  if (!operationRunning(previous) || operationRunning(status)) return;
+  if (status.operation_error) setStatus(status.operation_error, 'error');
+  else if (status.operation_message) setStatus(status.operation_message);
+}
+
 async function loadStatus() {
+  const previous = appState.status;
   try {
     appState.status = await fetchJson('/api/status');
   } catch (error) {
     appState.status = { state: 'error' };
   }
   renderStatus(appState.status);
+  reportFinishedOperation(previous, appState.status);
   if (document.getElementById('playit-status-panel')) await loadPlayitStatus();
   if (document.getElementById('remote-dashboard-toggle')) await loadRemoteDashboard();
+}
+
+let statusTimer = null;
+
+// One status poll chain: every STATUS_POLL_MS, or every STATUS_BUSY_POLL_MS while busy.
+function scheduleStatusPoll() {
+  clearTimeout(statusTimer);
+  const busy = operationRunning(appState.status) || appState.status.install_status === 'installing';
+  statusTimer = setTimeout(async () => {
+    await loadStatus();
+    scheduleStatusPoll();
+  }, busy ? STATUS_BUSY_POLL_MS : STATUS_POLL_MS);
 }
 
 // ---------- Server actions ----------
@@ -393,20 +426,21 @@ function serverAction(path, pendingMessage) {
     appState.busy = true;
     try {
       const response = await fetchJson(path, 'POST');
+      trackOperation(response);
       return response.message || 'Done.';
     } finally {
       appState.busy = false;
-      await loadStatus();
+      renderServerControls();
     }
   });
 }
 
 async function createServer(button) {
-  await runAction(button, 'Creating server — downloads can take a few minutes…', async () => {
+  await runAction(button, null, async () => {
     const response = await fetchJson('/api/server/create', 'POST', collectConfigFromPage());
+    trackOperation(response);
     await loadConfig();
-    await loadStatus();
-    return `Server ${response.loader} ${response.version} is ready.`;
+    return response.message;
   });
 }
 
@@ -744,7 +778,8 @@ async function activateWorld(world, running, button) {
   await runAction(button, running ? 'Switching world and restarting…' : null, async () => {
     const result = await fetchJson(`/api/worlds/${encodeURIComponent(world.folder)}/activate`, 'POST');
     renderWorlds(result);
-    await loadStatus();
+    if (running) trackOperation({ operation: 'switching world' });
+    else await loadStatus();
     return result.message;
   });
 }
@@ -1523,7 +1558,7 @@ async function boot() {
   initModBrowser(); // after loadInstalledMods so cards can show "Installed"
 
   if (document.getElementById('console-output')) setInterval(refreshConsole, CONSOLE_POLL_MS);
-  setInterval(loadStatus, STATUS_POLL_MS);
+  scheduleStatusPoll();
 }
 
 document.addEventListener('DOMContentLoaded', boot);

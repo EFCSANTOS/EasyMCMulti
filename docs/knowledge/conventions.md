@@ -23,9 +23,15 @@
 - `WebSocketManager.publish` catches `RuntimeError`/`QueueFull`.
 
 ## Concurrency
-- `RuntimeState.lock` RLock is taken only by `snapshot()`; `app.py` mutates fields without it.
-- Sync routes run in FastAPI's threadpool; long work (install, PlayIt claim/tunnel) blocks that
-  worker for the request's duration. No guard against concurrent start/create.
+- `RuntimeState.lock` RLock is taken by `snapshot()` and `set_state()`; change `state` and
+  `operation` together through `set_state`.
+- Sync routes run in FastAPI's threadpool. Anything slow must not run in the request: server
+  lifecycle work goes through `start_lifecycle_job` (202 + background thread), PlayIt setup through
+  its own background thread.
+- Anything that changes the server process takes `runtime.lifecycle` — routes with
+  `acquire(blocking=False)` → 409 `busy_error()`, background callers with a timeout
+  (`launch_when_free`). It is not reentrant: inner helpers (`launch_server`, `stop_and_wait`,
+  `request_stop`) assume the caller holds it.
 - `publish` callable from reader thread via `call_soon_threadsafe`.
 - Server output on daemon thread; no asyncio in `core/`.
 

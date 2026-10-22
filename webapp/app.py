@@ -41,6 +41,9 @@ SHUTDOWN_STOP_TIMEOUT_SEC = 45
 CRASH_RESTART_DELAY_SEC = 10
 CRASH_RESTART_LIMIT = 3
 CRASH_WINDOW_SEC = 600
+# Background lifecycle callers (crash restart, autostart) wait at most this long for a running
+# install/start/restart to finish; routes never wait (409 "Busy").
+LIFECYCLE_WAIT_SEC = 600
 # Port uvicorn listens on; run.bat / run.sh pass the same value. Used for the remote dashboard tunnel.
 WEB_PORT = int(os.getenv("EZ_WEBAPP_PORT", "8000"))
 WEB_TUNNEL_RETRY_SEC = 15
@@ -331,7 +334,8 @@ _DASHBOARD_NAVIGATION = (
     ("console", "Console", "Console", "Live server output, commands and admin shortcuts."),
 )
 
-_SECTION_OVERVIEW_TILES = f"""
+# Shown on every page while an install runs (installs continue in the background).
+_INSTALL_BANNER = """
         <div id="install-banner" class="card install-banner" hidden>
           <div class="install-head">
             <strong>Installing server</strong>
@@ -339,7 +343,9 @@ _SECTION_OVERVIEW_TILES = f"""
           </div>
           <div class="progress"><div id="install-progress-bar" class="progress-bar"></div></div>
         </div>
+"""
 
+_SECTION_OVERVIEW_TILES = f"""
         <section id="overview" class="tiles">
           <article class="card tile">
             <div class="tile-label">{_icon("setup")} Server</div>
@@ -987,6 +993,7 @@ def _render_dashboard_page(section: str) -> HTMLResponse:
           {_TOPBAR_CONTROLS}
         </header>
         <main class="content">
+          {_INSTALL_BANNER}
           {body_html}
         </main>
       </div>
@@ -1216,29 +1223,72 @@ def create_app() -> FastAPI:
 
         return {"loader": loader, "versions": versions}
 
-    @app.post("/api/server/create")
-    def create_server(payload: dict[str, Any] | None = None, _: str = Depends(require_auth)) -> dict[str, Any]:
+    # ---------- Server lifecycle ----------
+    # One operation that changes the server process (install, start, stop-and-wait, restart, world
+    # switch, restore) runs at a time, under runtime.lifecycle. Routes never wait for it: they get 409
+    # "Busy". Slow work runs on a thread so requests return at once (Cloudflare drops requests after
+    # ~100 s); the dashboard follows progress through /api/status.
+    def busy_error() -> HTTPException:
+        label = runtime.operation if runtime.operation != "idle" else "another server operation"
+        return HTTPException(status_code=409, detail=f"Busy: {label} in progress. Try again when it finishes.")
+
+    def start_lifecycle_job(operation: str, job: Any, failure: str, state: str | None = None) -> None:
+        """Run `job` (returns a completion message) on a thread while holding the lifecycle lock.
+
+        Raises 409 when another lifecycle operation is running. A failure is recorded in
+        runtime.operation_error and the console instead of being lost with the request.
+        """
+        if not runtime.lifecycle.acquire(blocking=False):
+            raise busy_error()
+        runtime.set_state(state or runtime.state, operation)
+        runtime.operation_error = ""
+        runtime.operation_message = ""
+
+        def worker() -> None:
+            try:
+                runtime.operation_message = job()
+            except Exception as exc:
+                runtime.set_state("running" if server_running() else "stopped", "idle")
+                runtime.operation_error = f"{failure}: {exc}"
+                append_console_line(f"[server] {runtime.operation_error}")
+            finally:
+                runtime.lifecycle.release()
+
+        threading.Thread(target=worker, name=f"lifecycle-{operation}", daemon=True).start()
+
+    def accepted(response: Response, message: str, **extra: Any) -> dict[str, Any]:
+        response.status_code = 202
+        return {"state": runtime.state, "operation": runtime.operation, "message": message, **extra}
+
+    def save_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
         config = _effective_config()
         if payload:
             config.update(payload)
             config_store.save(config)
+        return config
+
+    def install_server(config: dict[str, Any]) -> str:
         loader = str(config.get("loader", "vanilla"))
         version = str(config.get("version", "1.21.7"))
         runtime.loader = loader
         runtime.version = version
-        runtime.operation = "creating"
-        runtime.state = "ready"
-        try:
-            target_dir = ensure_server_installed(config)
-            update_properties(target_dir, **_server_properties_from_config(config))
-        except Exception as exc:
-            runtime.operation = "idle"
-            runtime.state = "stopped"
-            raise HTTPException(status_code=500, detail=f"Server creation failed: {exc}") from exc
+        runtime.set_state("ready", "creating")
+        target_dir = ensure_server_installed(config)
+        update_properties(target_dir, **_server_properties_from_config(config))
+        runtime.set_state("stopped", "idle")
+        return f"Server {loader} {version} is ready."
 
-        runtime.operation = "idle"
-        runtime.state = "stopped"
-        return {"state": runtime.state, "operation": runtime.operation, "loader": loader, "version": version, "server_dir": target_dir}
+    @app.post("/api/server/create")
+    def create_server(response: Response, payload: dict[str, Any] | None = None,
+                      _: str = Depends(require_auth)) -> dict[str, Any]:
+        if server_running():
+            raise HTTPException(status_code=409, detail="Stop the server before creating it again.")
+        config = save_payload(payload)
+        loader = str(config.get("loader", "vanilla"))
+        version = str(config.get("version", "1.21.7"))
+        start_lifecycle_job("creating", lambda: install_server(config), "Server creation failed")
+        return accepted(response, f"Creating {loader} {version}; downloads can take a few minutes.",
+                        loader=loader, version=version)
 
     def handle_crash(code: int) -> None:
         """Schedule an automatic restart, unless the server keeps crashing."""
@@ -1265,31 +1315,40 @@ def create_app() -> FastAPI:
         timer.daemon = True
         timer.start()
 
-    def restart_after_crash() -> None:
-        if runtime.stop_requested or (runtime.process is not None and runtime.process.is_running()):
-            return  # the user stopped or started the server in the meantime
+    def launch_when_free(reason: str) -> bool:
+        """For background callers (crash timer, autostart): wait for the lifecycle lock, then start
+        the server unless a stop was requested or something else already started it."""
+        if not runtime.lifecycle.acquire(timeout=LIFECYCLE_WAIT_SEC):
+            raise RuntimeError(f"another server operation is still running; {reason} skipped")
         try:
+            if runtime.stop_requested and reason == "crash restart":
+                return False  # the user stopped the server in the meantime
+            if server_running():
+                return False
             launch_server()
+            return True
+        finally:
+            runtime.lifecycle.release()
+
+    def restart_after_crash() -> None:
+        try:
+            restarted = launch_when_free("crash restart")
         except Exception as exc:
-            runtime.state = "stopped"
-            runtime.operation = "idle"
+            runtime.set_state("stopped", "idle")
             append_console_line(f"[server] automatic restart failed: {exc}")
             notify("server", "Minecraft server is DOWN (restart failed)", f"Automatic restart failed: {exc}")
             return
-        notify("server", "Minecraft server is back online", "The server was restarted automatically after a crash.")
+        if restarted:
+            notify("server", "Minecraft server is back online", "The server was restarted automatically after a crash.")
 
-    def launch_server(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Install if needed and start the Minecraft server (used by the API, crash restart and autostart)."""
-        config = _effective_config()
-        if payload:
-            config.update(payload)
-            config_store.save(config)
+    def launch_server(payload: dict[str, Any] | None = None) -> str:
+        """Install if needed and start the Minecraft server. Caller holds runtime.lifecycle."""
+        config = save_payload(payload)
         loader = str(config.get("loader", runtime.loader))
         version = str(config.get("version", runtime.version))
         runtime.loader = loader
         runtime.version = version
-        runtime.state = "starting"
-        runtime.operation = "starting"
+        runtime.set_state("starting", "starting")
         runtime.stop_requested = False
 
         process: Any = None
@@ -1298,8 +1357,7 @@ def create_app() -> FastAPI:
             append_console_line(f"[server] exited with code {code}")
             if runtime.process is not process:
                 return  # a newer process already replaced this one (e.g. after a restart)
-            runtime.state = "stopped"
-            runtime.operation = "idle"
+            runtime.set_state("stopped", "idle")
             runtime.process = None
             runtime.clear_players()
             if code == 0 or runtime.stop_requested:
@@ -1315,6 +1373,7 @@ def create_app() -> FastAPI:
             append_console_line(line)
 
         target_dir = ensure_server_installed(config)
+        runtime.set_state("starting", "starting")
         update_properties(target_dir, **_server_properties_from_config(config))
 
         java_exe = java_manager.ensure_java(java_manager.required_java(version),
@@ -1329,40 +1388,56 @@ def create_app() -> FastAPI:
         runtime.clear_players()
         runtime.process = process
         process.start()
-        runtime.state = "running"
-        runtime.operation = "idle"
+        runtime.set_state("running", "idle")
         append_console_line(f"[server] started with {loader} {version}")
-        return {"state": runtime.state, "operation": runtime.operation, "message": "Server started."}
+        return "Server started."
 
-    @app.post("/api/server/start")
-    def start_server(payload: dict[str, Any] | None = None, _: str = Depends(require_auth)) -> dict[str, Any]:
-        if runtime.process is not None and runtime.process.is_running():
-            return {"state": runtime.state, "operation": runtime.operation, "message": "Server already running."}
-        runtime.crash_times = []  # a manual start re-arms automatic crash restarts
-        return launch_server(payload)
-
-    @app.post("/api/server/stop")
-    def stop_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+    def request_stop() -> str:
         runtime.stop_requested = True  # also cancels a pending crash restart
         if runtime.process is None or not runtime.process.is_running():
-            runtime.state = "stopped"
-            runtime.operation = "idle"
-            return {"state": runtime.state, "operation": runtime.operation, "message": "Server is already stopped."}
-
-        runtime.state = "stopping"
-        runtime.operation = "stopping"
+            runtime.set_state("stopped", "idle")
+            return "Server is already stopped."
+        runtime.set_state("stopping", "stopping")
         runtime.process.stop()
-        return {"state": runtime.state, "operation": runtime.operation, "message": "Stop requested."}
+        return "Stop requested."
 
-    @app.post("/api/server/restart")
-    def restart_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+    def stop_and_wait() -> None:
+        """Stop the server and wait for the process to exit (kill it if it hangs). Caller holds the lock."""
         process = runtime.process
-        stop_server(_)
+        request_stop()
         if process is not None and not _wait_for_exit(process, RESTART_STOP_TIMEOUT_SEC):
             append_console_line("[server] did not stop in time; killing the process")
             process.kill()
             _wait_for_exit(process, 10)
-        return start_server(None, _)
+
+    @app.post("/api/server/start")
+    def start_server(response: Response, payload: dict[str, Any] | None = None,
+                     _: str = Depends(require_auth)) -> dict[str, Any]:
+        if server_running():
+            return {"state": runtime.state, "operation": runtime.operation, "message": "Server already running."}
+        save_payload(payload)
+        runtime.crash_times = []  # a manual start re-arms automatic crash restarts
+        start_lifecycle_job("starting", launch_server, "Server start failed", state="starting")
+        return accepted(response, "Starting the server…")
+
+    @app.post("/api/server/stop")
+    def stop_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+        if not runtime.lifecycle.acquire(blocking=False):
+            raise busy_error()
+        try:
+            message = request_stop()
+        finally:
+            runtime.lifecycle.release()
+        return {"state": runtime.state, "operation": runtime.operation, "message": message}
+
+    def restart_job() -> str:
+        stop_and_wait()
+        return launch_server()
+
+    @app.post("/api/server/restart")
+    def restart_server(response: Response, _: str = Depends(require_auth)) -> dict[str, Any]:
+        start_lifecycle_job("restarting", restart_job, "Server restart failed")
+        return accepted(response, "Restarting the server…")
 
     @app.post("/api/server/command")
     def send_command(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
@@ -1405,6 +1480,14 @@ def create_app() -> FastAPI:
 
     @app.post("/api/server/backups/restore")
     def restore_backup(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        if not runtime.lifecycle.acquire(blocking=False):
+            raise busy_error()
+        try:
+            return restore_backup_locked(payload)
+        finally:
+            runtime.lifecycle.release()
+
+    def restore_backup_locked(payload: dict[str, Any]) -> dict[str, Any]:
         if runtime.process is not None and runtime.process.is_running():
             raise HTTPException(status_code=409, detail="Stop the server before restoring a backup.")
         # Only this server's own backups are accepted; a full path from the list is reduced to its name.
@@ -1552,29 +1635,38 @@ def create_app() -> FastAPI:
         return worlds_payload(f"Imported '{display_name}'.") | {"folder": folder}
 
     @app.post("/api/worlds/{folder}/activate")
-    def activate_world(folder: str, _: str = Depends(require_auth)) -> dict[str, Any]:
+    def activate_world(folder: str, response: Response, _: str = Depends(require_auth)) -> dict[str, Any]:
         sdir = checked_world(folder)
         known = {w["folder"]: w for w in worlds.list_worlds(sdir, _active_world(_effective_config()))}
         if folder not in known:
             raise HTTPException(status_code=404, detail="World not found.")
         if known[folder]["active"]:
             return worlds_payload("That world is already active.")
-        was_running = server_running()
-        if was_running:
-            process = runtime.process
-            stop_server(_)
-            if not _wait_for_exit(process, RESTART_STOP_TIMEOUT_SEC):
-                process.kill()
-                _wait_for_exit(process, 10)
-        config = _effective_config()
-        config["level_name"] = folder
-        if not known[folder]["exists"]:
-            config["level_seed"] = known[folder].get("seed", "")  # only used when the world is generated
-        config_store.save(config)
         name = known[folder]["name"]
-        if was_running:
-            launch_server()
-            return worlds_payload(f"Switched to '{name}' and restarted the server.")
+
+        def select_world() -> None:
+            config = _effective_config()
+            config["level_name"] = folder
+            if not known[folder]["exists"]:
+                config["level_seed"] = known[folder].get("seed", "")  # only used when the world is generated
+            config_store.save(config)
+
+        if server_running():
+            def switch_and_restart() -> str:
+                stop_and_wait()
+                select_world()
+                launch_server()
+                return f"Switched to '{name}' and restarted the server."
+
+            start_lifecycle_job("switching world", switch_and_restart, "World switch failed", state="stopping")
+            response.status_code = 202
+            return worlds_payload(f"Switching to '{name}'; the server restarts in the background.")
+        if not runtime.lifecycle.acquire(blocking=False):
+            raise busy_error()
+        try:
+            select_world()
+        finally:
+            runtime.lifecycle.release()
         return worlds_payload(f"Switched to '{name}'. It loads the next time the server starts.")
 
     @app.post("/api/worlds/{folder}/rename")
@@ -2056,7 +2148,7 @@ def create_app() -> FastAPI:
             run_in_background("PlayIt tunnel", lambda: start_agent_and_tunnels(secret))
         if config.get("autostart_server") or resume.get("server"):
             append_console_line("[autostart] starting the Minecraft server")
-            run_in_background("Minecraft server", launch_server)
+            run_in_background("Minecraft server", lambda: launch_when_free("autostart"))
         if config.get("remote_dashboard"):
             append_console_line("[autostart] starting the remote dashboard link")
             run_in_background("remote dashboard", start_web_tunnel_safely)
@@ -2223,6 +2315,7 @@ def create_app() -> FastAPI:
 
     app.state.autostart = autostart
     app.state.shutdown = shutdown
+    app.state.restart_after_crash = restart_after_crash
     app.state.notify = notify
 
     @app.websocket("/ws/console")
