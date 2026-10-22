@@ -1,6 +1,93 @@
 // EZ Minecraft dashboard, part 6 of 7: Console output and the CPU/RAM charts.
 // Plain scripts that share one global scope, loaded in order by webapp/pages/layout.py::SCRIPTS.
 
+// ---------- Crash diagnosis ----------
+async function runDiagnosisAction(item, button) {
+  const action = item.action;
+  if (action.kind === 'open_setting') {
+    window.location.href = `/dashboard/${action.page}#${action.field}`;
+    return;
+  }
+  if (action.kind === 'kill_process' && !window.confirm(
+    `Stop the program that is using port ${action.port}? Only a leftover Minecraft (Java) server is stopped.`)) return;
+  await runAction(button, null, async () => {
+    let message;
+    if (action.kind === 'install_mod') {
+      message = (await fetchJson('/api/modrinth/install', 'POST', { slug: action.slug })).message;
+    } else if (action.kind === 'remove_mod') {
+      message = (await fetchJson(`/api/server/mods/${encodeURIComponent(action.file)}`, 'DELETE')).message
+        || `Removed ${action.file}.`;
+    } else {
+      message = (await fetchJson('/api/server/diagnosis/fix', 'POST', action)).message;
+    }
+    await loadDiagnosis();
+    return message;
+  });
+}
+
+const DIAGNOSIS_BUTTONS = {
+  install_mod: (action) => `Install ${action.slug}`,
+  remove_mod: (action) => `Remove ${action.file}`,
+  open_setting: () => 'Open setting',
+  accept_eula: () => 'Accept EULA',
+  kill_process: () => 'Stop the old server',
+};
+
+function renderDiagnosis(items) {
+  const card = document.getElementById('diagnosis');
+  if (!card) return;
+  card.hidden = !items.length;
+  renderItems(document.getElementById('diagnosis-list'), items, (item) => {
+    const label = item.action && DIAGNOSIS_BUTTONS[item.action.kind];
+    const button = label ? rowButton(label(item.action), 'btn-primary', (b) => runDiagnosisAction(item, b)) : null;
+    return itemRow(item.title, item.message, null, button);
+  }, '');
+}
+
+async function loadDiagnosis() {
+  if (!document.getElementById('diagnosis')) return;
+  try {
+    renderDiagnosis((await fetchJson('/api/server/diagnosis')).items || []);
+  } catch (error) {
+    // the next status poll retries
+  }
+}
+
+// ---------- Log files ----------
+async function viewLog(file, button) {
+  await runAction(button, null, async () => {
+    const data = await fetchJson(`/api/server/logs/${file.folder}/${encodeURIComponent(file.name)}`);
+    const view = document.getElementById('log-view');
+    const fragment = document.createDocumentFragment();
+    data.lines.forEach((line) => fragment.appendChild(el('span', consoleLineClass(line), `${line}\n`)));
+    view.replaceChildren(fragment);
+    view.hidden = false;
+    const title = document.getElementById('log-view-title');
+    title.textContent = `${file.folder}/${file.name}${data.truncated ? ` (last ${data.lines.length} lines)` : ''}`;
+    title.hidden = false;
+    view.scrollTop = view.scrollHeight;
+    return null;
+  });
+}
+
+async function loadLogs() {
+  const list = document.getElementById('log-list');
+  if (!list) return;
+  try {
+    const { files } = await fetchJson('/api/server/logs');
+    renderItems(list, files, (file) => {
+      const download = el('a', 'btn btn-ghost btn-sm', 'Download');
+      download.href = `/api/server/logs/${file.folder}/${encodeURIComponent(file.name)}?download=true`;
+      download.download = file.name;
+      const when = new Date(file.modified * 1000).toLocaleString();
+      return itemRow(file.name, file.folder === 'crash-reports' ? 'Crash report' : 'Server log',
+        `${formatBytes(file.size)} · ${when}`, [rowButton('View', 'btn-ghost', (b) => viewLog(file, b)), download]);
+    }, 'No log files yet. They appear after the server has run once.');
+  } catch (error) {
+    setStatus(`Log list unavailable: ${error.message}`, 'error');
+  }
+}
+
 // ---------- Console ----------
 let lastConsoleSignature = '';
 

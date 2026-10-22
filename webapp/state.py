@@ -64,6 +64,11 @@ class RuntimeState:
     restart_warnings_sent: set[int] = field(default_factory=set)
     empty_since: float | None = None
     stopped_reason: str = ""
+    # FEAT-08: last crash diagnosis (list of {code, title, message, action}) and when it was made;
+    # when the current/last server process started (to pick crash reports written since then).
+    diagnosis: list[dict[str, Any]] = field(default_factory=list)
+    diagnosis_at: float = 0.0
+    last_start_at: float = 0.0
     crash_times: list[float] = field(default_factory=list)
     # Outcome of the last background lifecycle job (create/start/restart/world switch), for the UI.
     operation_error: str = ""
@@ -127,6 +132,7 @@ class RuntimeState:
                 "operation_error": self.operation_error,
                 "operation_message": self.operation_message,
                 "stopped_reason": self.stopped_reason,
+                "diagnosis_at": self.diagnosis_at,
                 "install_status": self.install_status,
                 "install_progress": self.install_progress,
                 "install_message": self.install_message,

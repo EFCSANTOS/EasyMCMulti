@@ -44,6 +44,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Console | Works — polled every 2 s via `GET /api/console` |
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
+| Crash diagnosis + log viewer | Works in tests (8 real-format log fixtures in `tests/fixtures/logs/`, alert text, fixes, traversal) and headless Edge (fake Fabric crash → card with "Install sodium" on Overview without opening the console; log list and viewer) |
 | Schedule (daily restart with chat warnings, idle stop, quiet hours) | Works in tests with a patched clock and headless Edge (settings save and reload); **not yet run against a real Minecraft server** |
 | Scheduled backups, retention, safety backups | Works in tests (patched clock, quiet save sequence, low-disk guard, delete safety) and headless Edge (manual backup listed with kind/size/total, schedule saved); **quiet save not yet run against a real Minecraft server** |
 | Mod browser (browse/category/sort/details, install + dependencies, remove), upload jars | Works; live read-only check against Modrinth; vanilla → 400 with explanation |

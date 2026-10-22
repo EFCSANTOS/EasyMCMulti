@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 
-from core import config_store, downloaders, java_manager, players
+from core import config_store, diagnose, downloaders, java_manager, players
 from webapp import common
 from webapp.services import Services, require_auth
 from webapp.validation import require_command, require_player, validate_config_update
@@ -127,8 +127,8 @@ def register(app: FastAPI, s: Services) -> None:
         return accepted(response, f"Creating {loader} {version}; downloads can take a few minutes.",
                         loader=loader, version=version)
 
-    def handle_crash(code: int) -> None:
-        """Schedule an automatic restart, unless the server keeps crashing."""
+    def handle_crash(code: int, cause: str = "") -> None:
+        """Schedule an automatic restart, unless the server keeps crashing. `cause`: diagnosis line."""
         now = time.monotonic()
         runtime.crash_times = [t for t in runtime.crash_times if now - t < common.CRASH_WINDOW_SEC]
         runtime.crash_times.append(now)
@@ -140,14 +140,14 @@ def register(app: FastAPI, s: Services) -> None:
                 "Check the console log, fix the problem and press Start."
             )
             append_console_line(f"[server] {message}")
-            notify("server", "Minecraft server is DOWN (auto-restart paused)", message)
+            notify("server", "Minecraft server is DOWN (auto-restart paused)", f"{message}\n\n{cause}".strip())
             return
         message = (
             f"The server crashed (exit code {code}); restarting in {common.CRASH_RESTART_DELAY_SEC} s "
             f"(attempt {attempt} of {common.CRASH_RESTART_LIMIT})."
         )
         append_console_line(f"[server] {message}")
-        notify("server", "Minecraft server crashed", message)
+        notify("server", "Minecraft server crashed", f"{message}\n\n{cause}".strip())
         timer = threading.Timer(common.CRASH_RESTART_DELAY_SEC, restart_after_crash)
         timer.daemon = True
         timer.start()
@@ -204,13 +204,14 @@ def register(app: FastAPI, s: Services) -> None:
                 if runtime.stopped_reason != "idle":  # the idle stop already told them why
                     s.notify_friends("status", "Server is offline.")
                 return
+            cause = diagnose.first_line(s.run_diagnosis())
             if common._effective_config().get("auto_restart"):
                 s.notify_friends("status", "Server crashed; it restarts by itself in a moment.")
-                handle_crash(code)
+                handle_crash(code, cause)
             else:
                 s.notify_friends("status", "Server stopped unexpectedly and is offline.")
                 notify("server", "Minecraft server stopped unexpectedly",
-                       f"The server exited with code {code}. Automatic restart is off.")
+                       f"The server exited with code {code}. Automatic restart is off.\n\n{cause}".strip())
 
         def on_output(line: str) -> None:
             event = runtime.track_player_event(line)
@@ -236,6 +237,8 @@ def register(app: FastAPI, s: Services) -> None:
         )
         runtime.clear_players()
         runtime.process = process
+        runtime.last_start_at = time.time()
+        s.clear_diagnosis()
         process.start()
         runtime.set_state("running", "idle")
         runtime.empty_since = time.time()  # the idle timer runs until someone joins
