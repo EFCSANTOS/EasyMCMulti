@@ -9,18 +9,59 @@
 6. Bounded buffers: history 2000, queue 250, replay 500.
 7. File-based persistence; no DB.
 8. kebab-case translation for `server.properties`.
-9. Graceful stop (`"stop"`) before `kill()`.
+9. Graceful stop: `ServerProcess.stop()` sends `"stop"`. Only restart escalates to `kill()` after
+   `RESTART_STOP_TIMEOUT_SEC`; plain stop has no timeout.
 10. Backwards-compatible route aliases (metrics, backups, mods).
 11. Platform-aware PlayIt agent naming.
-12. Dashboard rendered inline (Python f-string HTML) rather than Jinja templates; only `/login`
-    reads a template file.
+12. Dashboard rendered inline (Python HTML string constants composed per page) rather than Jinja
+    templates; only `/login` reads a template file (`templates/login.html`).
 13. Backups are zip archives with pre-restore rename of `world/`.
-14. Mods go to `mods/` for forge/fabric/neoforge, `plugins/` otherwise.
+14. Mods go to `mods/` for forge/fabric/neoforge, `plugins/` for paper; vanilla rejects mods
+    (`paths.content_folder` is the single source).
+15. Stateless client-side auth: creds kept in browser `sessionStorage`, re-sent as Basic on each call.
+16. All runtime data under one portable `EZ_Server_Data/` dir (PyInstaller-aware `paths.base_dir`);
+    `.gitignore` also ignores `build/`, `dist/`, `*.spec`.
+17. Portable JRE per Java major downloaded on demand (no system Java required).
+18. English-only UI and code text; no localization layer (conventions.md).
+19. GUI console uses REST polling, not the WS, because browsers cannot send Basic auth on a WebSocket.
+20. Android support via Termux (2026-10-22): installed Java instead of downloads, `termux-chroot`
+    for the PlayIt agent, psutil skipped (metrics fall back to `/proc/meminfo`).
+21. Remote dashboard access through a **Cloudflare quick tunnel** (2026-10-22). First built on a
+    second PlayIt TCP tunnel (owner's initial choice), but PlayIt's API rejects untyped tunnels
+    and the website offered no custom TCP tunnel, so the owner switched to Cloudflare: HTTPS, no
+    account, automatic. Trade-offs: random link that changes on restart; quick tunnels have no
+    uptime guarantee. Shipped with the existing Basic auth by owner decision; lockout/sessions
+    tracked as **must fix** (verification.md).
+26. Worlds via `level-name` (2026-10-22): switching is a config change, not a copy, so worlds
+    never move and switching is instant; display names are metadata so renames are safe while the
+    server runs. Mod installs resolve required dependencies and hide client-only projects because
+    those are the most common causes of a server that won't start after "installing a mod".
+25. Self-update via git (2026-10-22): the install is already a clone, so updating = fast-forward the
+    tracked branch. Fast-forward only and refuse on local edits/unpushed commits (never overwrite
+    the owner's work); roll back if dependency install fails; restart by exec-in-place so service
+    supervision survives. Auto-install is opt-in and waits for an empty server.
+24. Alerts (2026-10-22): plain SMTP (Gmail app password) rather than a third-party notification
+    service, since the owner asked for email; a healthchecks.io-style heartbeat covers outages the
+    app cannot report itself. Alerts are throttled per subject (10 min) except new-link mails.
+    The remote dashboard link is **on by default** at the owner's request.
+23. 24/7 operation (2026-10-22): crash auto-restart on by default but rate-limited (3 per 10 min)
+    so a broken server can't loop; deliberate stops never count as crashes; the dashboard stops
+    Minecraft on shutdown so service restarts don't orphan Java. On Termux, supervision is
+    `termux-services` (runit) + Termux:Boot rather than a custom watchdog.
+22. PlayIt setup is asynchronous and shows the approval link in the dashboard instead of opening a
+    browser on the host, so it works headless (phone) and from any device.
+
+## Resolved (2026-10-22)
+- Hidden `value="admin"` form: dead markup → removed. `run.bat` now prompts for credentials.
+- `crash_reporter`, `mailer`, `sysinfo`, `templates/dashboard.html`: desktop-launcher leftovers → deleted.
+- Player count: implemented from console join/leave lines (data-model.md).
+- Security findings from the audit fixed (verification.md "Security").
+- UI page routes stay unauthenticated by design: they are static shells (no data); login is
+  client-side and every `/api/*` call carries Basic auth.
+- Restart race → restart now waits for exit (workflows.md §6).
+- French text in `core/` → translated to English.
 
 ## Open questions
-- Why does dashboard embed `value="admin"` credentials? (test asserts it.)
-- Restart calls `stop_server` then immediately `start_server` — race with process exit.
-- `psutil` absent on Linux → cpu=0, uptime=0; intended?
 - `FALLBACK_VERSIONS` only on exception, not on empty; empty → 502.
-- Roles of `crash_reporter`, `mailer`, `sysinfo` — unreferenced by `app.py`.
+- Is Linux hosting a goal? PlayIt supports it; Java download does not (architecture.md).
 - No ADR history in repo; rationale inferred from code.

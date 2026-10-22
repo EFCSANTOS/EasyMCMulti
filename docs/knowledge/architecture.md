@@ -15,33 +15,85 @@
 - Metrics: `_system_metrics_snapshot`.
 - Paths/install: `_server_dir_for_config`, `_server_is_installed`, `ensure_server_installed`.
 - Console: `append_console_line`, `WebSocketManager`.
-- Dashboard: `render_dashboard_page(section)` (7 sections: overview, setup, advanced, mods, remote, backups, console).
-- PlayIt exit hook: `_playit_on_exit`.
+- Dashboard: module-level `_render_dashboard_page(section)`; pages (overview, setup, advanced, mods,
+  remote, backups, console) are tuples of `_SECTION_*` HTML constants in `_DASHBOARD_PAGES`.
+- PlayIt: `_playit_on_exit`, `_playit_state(runtime, cfg)` (running only if the agent process is alive).
+- Restart: `_wait_for_exit(process, timeout)`, `RESTART_STOP_TIMEOUT_SEC`.
+- Mods folder: `_content_dir_for_config` → `paths.content_folder` (400 for vanilla).
 
 ### `webapp/auth.py`
 `validate_auth_settings`, `get_expected_credentials`, `verify_credentials` (HTTPBasic),
 `verify_basic_auth_header` (manual Base64 for WS; requires `Basic user:pass`).
 
 ### `webapp/state.py`
-`RuntimeState` dataclass: loader, version, state, operation, install_*, players, lan_address,
-public_address, playit_*, playit_agent, process, `console_history` (deque 2000), `lock` (RLock);
+`RuntimeState` dataclass: loader, version, state, operation, install_*, `online_players` (set;
+`track_player_event(line)` / `clear_players()`), lan_address,
+public_address, playit_*, playit_agent, process, `lock` (RLock);
 `snapshot()` returns JSON-safe dict.
 
 ### `webapp/websocket_manager.py`
 `WebSocketManager`: `history` deque(2000), per-client `asyncio.Queue(250)`, `connect` replays last
 500 lines, `publish` thread-safe via `loop.call_soon_threadsafe`, `disconnect` cancels sender.
 
-### `core/`
-- `server_process.py` — `accept_eula`, `read_properties`, `update_properties`, `ServerProcess`.
-- `config_store.py` — `load()`, `save(config)` (called by `PUT /api/config`, `/api/server/create`, `/api/server/start`).
-- `downloaders.py` — `prepare`, `launch_args`, `list_versions`.
-- `java_manager.py` — `ensure_java`, `required_java`.
-- `modrinth.py` — `search`, `install`.
-- `playit.py` — `load_config`, `save_config`, `ensure_agent`, `ensure_tunnel`, `claim_interactive`,
-  `PlayitAgent`, `_agent_binary_name`.
-- `netinfo.py` — `lan_ip`, `public_ip`.
-- `paths.py` — `server_dir(loader, version)`.
-- Not inspected: `crash_reporter.py`, `mailer.py`, `sysinfo.py` (no imports from `app.py`).
+### `core/` (synchronous, no FastAPI imports; inherited from the former desktop launcher)
+- `paths.py` — `DATA_DIR`/`JAVA_DIR`/`SERVERS_DIR`, `ensure_dirs`, `server_dir(loader, version)`
+  (creates dir), `content_folder(loader, sdir)` (paper → `plugins/`, fabric/forge/neoforge → `mods/`,
+  vanilla → None). Layout: data-model.md.
+- `config_store.py` — `load()` → dict (`{}` on missing/invalid JSON); `save(data)` swallows `OSError`.
+- `server_process.py` — `accept_eula`, `read_properties`, `update_properties` (read-merge-rewrite via
+  `read_properties`), `ServerProcess(args, cwd, on_output, on_exit)` with `start`/`send`/`stop` (sends
+  `"stop"`)/`kill` (used by restart on timeout)/`is_running`.
+- `hostenv.py` — `is_windows()`, `is_termux()` (`TERMUX_VERSION` env or `com.termux` in `PREFIX`),
+  `termux_prefix()`.
+- `java_manager.py` — `required_java(mc_version)`, `ensure_java(feature, log, progress)` → java path.
+  Windows: downloads a portable Temurin JRE. Elsewhere: `find_system_java(feature)` scans
+  `JAVA_HOME`, `$PREFIX/lib/jvm/*` (Termux), `/usr/lib/jvm/*`, `PATH`; picks the exact major, else
+  the oldest newer one; none → `RuntimeError` with an install hint (`pkg install openjdk-N` on Termux).
+- `downloaders.py` — `list_versions(loader, include_snapshots)`, `prepare(loader, version, sdir, java_exe,
+  log, progress)`, `launch_args(loader, java_exe, sdir, ram_mb)`, `download(url, dest, …)` (writes
+  `.part` then `os.replace`). `JAR_LOADERS`=vanilla/paper/fabric, `INSTALLER_LOADERS`=forge/neoforge.
+- `modrinth.py` — `search(query, loader, game_version, limit)` → `[{title,slug,description,downloads}]`;
+  `install(project_ref, loader, game_version, dest_dir, log)` → filename (newest compatible version's
+  primary file; `resolve_project_slug` accepts slug or ID).
+- `playit.py` — claim/tunnel API client + `PlayitAgent` daemon wrapper (workflows.md §14);
+  Minecraft tunnel only.
+- `cloudflared.py` — `ensure_binary`, `find_url`, `QuickTunnel` (Cloudflare quick tunnel for the
+  web dashboard; workflows.md §16).
+- `notifier.py` — alert settings (`load_config`/`save_config`/`public_config`), `send_email`
+  (smtplib), `ping_heartbeat` (workflows.md §17).
+- `worlds.py` — multiple worlds per server dir: `list_worlds`, `create`, `import_zip`, `rename`,
+  `delete`, `export_zip` (workflows.md §19).
+- `modrinth.py` — also `categories`, `project` (details), dependency-aware `install`,
+  `installed_projects` / `forget_file` (workflows.md §20).
+- `updater.py` — `status`, `apply`, `install_requirements`, `restart_process`: self-update from the
+  git clone (workflows.md §18). Requires `git` on PATH and a clone (not a zip download).
+- `netinfo.py` — `lan_ip()` (UDP "connect" to 8.8.8.8, fallback `127.0.0.1`), `public_ip()`
+  (`api.ipify.org`, 10 s timeout, returns `"unavailable"` on error; successful lookups cached for
+  `PUBLIC_IP_TTL_SEC` = 300 s because the dashboard polls `/api/status`).
+- Desktop-launcher leftovers (`crash_reporter.py`, `mailer.py`, `sysinfo.py`,
+  `webapp/templates/dashboard.html`) and dead helpers (`netinfo.port_in_use/pids_on_port/free_port`,
+  `paths.list_servers`, `playit.is_configured`, `playit.TUNNELS_URL`) were deleted 2026-10-22.
+  Everything in `core/` is now used by the web app.
+- `requirements.txt` (runtime): requests, fastapi, plain `uvicorn` + `websockets` (no
+  `uvicorn[standard]`: its uvloop/httptools need compiling on Android), python-multipart (FastAPI
+  `File` uploads), psutil (skipped on Termux). `requirements-dev.txt` adds pytest + httpx.
+
+### Frontend (`webapp/static/js/dashboard.js`, `webapp/templates/login.html`)
+- Plain JS, no framework/build. `login.html` checks creds against `GET /api/status`, stores them in
+  `sessionStorage`; `dashboard.js::boot` redirects to `/login` if absent, then binds events, loads
+  config (+ `/api/versions/{loader}`), status, backups, mods and console. Each loader skips its fetch
+  when its elements are not on the current page.
+- Polling: metrics 2 s (overview only, `/api/system/metrics`), console 2 s (`CONSOLE_POLL_MS`, pages
+  with `#console-output`; re-rendered only when the last line changes), status 5 s (`STATUS_POLL_MS`,
+  every page — drives the top-bar state pill and button enablement).
+- Layout (2026-10-22 redesign): sidebar nav with inline SVG icons (`_ICON_PATHS` / `_icon`), sticky
+  top bar per page (title, subtitle, `#server-state` pill, Start/Restart/Stop), content cards,
+  toast `#action-status`. Theme tokens are CSS custom properties at the top of `dashboard.css`
+  (dark only; accent `--accent` green; chart series `--series-1` `#3987e5`; status colors reserved
+  for state). `login.html` duplicates the tokens inline.
+- All calls use `fetchJson` with `Authorization: Basic` from `buildBasicAuth` (upload uses raw `fetch`
+  with `FormData`).
+- GUI feature status: verification.md.
 
 ## Control flow (verified)
 1. Uvicorn imports `webapp.app:app` → `create_app()` → `validate_auth_settings()` → attach
@@ -55,8 +107,29 @@ public_address, playit_*, playit_agent, process, `console_history` (deque 2000),
 6. PlayIt: `load_config` → `ensure_agent` → `PlayitAgent.start(secret)` → `ensure_tunnel` → `save_config`.
 
 ## External interfaces
-- LAN HTTP (web port 8000 per README; MC port from config).
+- LAN HTTP on `WEB_PORT` (`EZ_WEBAPP_PORT`, default 8000; `run.bat`/`run.sh` pass the same value to
+  uvicorn); optionally exposed over the internet by a Cloudflare quick tunnel (`core/cloudflared.py`,
+  workflows.md §16). MC port from config, optionally exposed by the PlayIt tunnel.
+- `cloudflared` subprocess + Cloudflare edge (`*.trycloudflare.com`); binary from
+  `github.com/cloudflare/cloudflared` releases (`cloudflared.RELEASE_URL`).
 - Java subprocess (stdin/stdout piped, `CREATE_NO_WINDOW` on Windows).
 - PlayIt agent subprocess.
 - Modrinth HTTP API.
 - Mojang/Paper/Fabric/Forge/NeoForge download endpoints.
+- Endpoint constants: `downloaders.VANILLA_MANIFEST`, `PAPER_API` (v2), `FABRIC_META`, `FORGE_PROMOS`/
+  `FORGE_MAVEN`, `NEOFORGE_VERSIONS`/`NEOFORGE_MAVEN`; `java_manager.ADOPTIUM`; `modrinth.API`;
+  `playit.API_BASE`, `playit.RELEASES_API` (GitHub latest release); `api.ipify.org`.
+
+## Platform constraints
+Supported hosts: Windows (primary), Linux and Termux on Android (added 2026-10-22, device test pending).
+- Java auto-download is Windows x64 only (`java_manager.ADOPTIUM`); Linux/Termux use an installed
+  Java. Temurin's Linux builds need glibc and cannot run on Android's bionic libc.
+- Termux offers `openjdk-17` and `openjdk-21`: Minecraft 1.17–1.21.x work; ≤1.16 (Java 8) does not;
+  26.x needs Java 25 if/when Termux packages it.
+- Forge/NeoForge modern launch uses `libraries/**/win_args.txt` on Windows, `unix_args.txt` elsewhere
+  (`downloaders._find_args_file`).
+- Android blocks `/proc/stat`: CPU shows 0; memory comes from `/proc/meminfo`
+  (`app._memory_usage`). Android may also suspend Termux; `run.sh` takes a wake lock.
+- PlayIt on Termux uses the Linux binary wrapped in `termux-chroot` (`playit.agent_command`).
+- Android 12+ "phantom process killer" can SIGKILL Termux child processes (Java, PlayIt agent);
+  the user must disable it (README Android notes). The app cannot work around it.
