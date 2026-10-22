@@ -31,6 +31,11 @@
 global failure windows), `client_ip`, `check_login` (429 / 401 + count), `authenticate` (cookie or
 Basic, works on HTTP and WebSocket; cookie writes pass the same-origin/JSON CSRF check).
 
+### `webapp/validation.py`
+`require_player`, `require_command` (400s), `ConfigUpdate` (Pydantic, `extra="forbid"`; `ram_mb`
+capped by the `ram_cap_mb` validation context), `validate_config_update` (422 in FastAPI's format),
+`clean_stored_config` (lenient read of saved config).
+
 ### `webapp/state.py`
 `RuntimeState` dataclass: loader, version, state, operation, install_*, `online_players` (set;
 `track_player_event(line)` / `clear_players()`), lan_address,

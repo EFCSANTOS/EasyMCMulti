@@ -1804,3 +1804,69 @@ def test_atomic_writes_cover_every_settings_file(tmp_path):
         assert not os.path.exists(path + ".tmp"), path
     assert server_process.read_properties(str(tmp_path))["motd"] == "two"
     assert worlds.load_meta(str(tmp_path))["world"]["name"] == "Two"
+
+
+# ---------- Input validation (FIX-05) ----------
+def test_player_names_with_newlines_are_rejected(fake_server):
+    _start()
+    for bad in ("x\nstop", "a b", "ab", "x" * 17, "Steve;op", ""):
+        response = client.post("/api/admin/kick", auth=("admin", "s3cret-pass"), json={"player": bad})
+        assert response.status_code == 400, bad
+    assert fake_server[0].sent == []
+    for good in ("Steve", "Alex_99", ".BedrockGuy"):
+        assert client.post("/api/admin/op", auth=("admin", "s3cret-pass"), json={"player": good}).status_code == 200
+    assert fake_server[0].sent == ["op Steve", "op Alex_99", "op .BedrockGuy"]
+
+
+def test_console_commands_must_be_one_line(fake_server):
+    _start()
+    for bad in ("say hi\nstop", "say hi\rstop", "say \x00", "say " + "x" * 300):
+        response = client.post("/api/server/command", auth=("admin", "s3cret-pass"), json={"command": bad})
+        assert response.status_code == 400, repr(bad)
+    assert fake_server[0].sent == []
+    assert client.post("/api/server/command", auth=("admin", "s3cret-pass"),
+                       json={"command": "say hello"}).status_code == 200
+
+
+def test_config_rejects_bad_values_naming_the_field():
+    cases = {"ram_mb": "lots", "server_port": 80, "max_players": -1, "view_distance": 99,
+             "gamemode": "god", "motd": "line one\nline two", "version": "../../etc", "level_name": "../x",
+             "loader": "bukkit"}
+    for key, value in cases.items():
+        response = client.put("/api/config", auth=("admin", "s3cret-pass"), json={key: value})
+        assert response.status_code == 422, key
+        detail = response.json()["detail"]
+        assert detail[0]["loc"] == ["body", key] and key in detail[0]["msg"]
+    response = client.put("/api/config", auth=("admin", "s3cret-pass"), json={"surprise": 1})
+    assert response.status_code == 422 and response.json()["detail"][0]["loc"] == ["body", "surprise"]
+    assert config_store.load() == {}  # nothing was saved
+
+
+def test_config_ram_is_capped_by_host_memory(monkeypatch):
+    monkeypatch.setattr(webapp_module, "_host_ram_mb", lambda: 4096)
+    response = client.put("/api/config", auth=("admin", "s3cret-pass"), json={"ram_mb": 8192})
+    assert response.status_code == 422 and "4096" in response.json()["detail"][0]["msg"]
+    assert client.put("/api/config", auth=("admin", "s3cret-pass"), json={"ram_mb": 3072}).status_code == 200
+
+
+def test_start_payload_is_validated_too(fake_server):
+    response = client.post("/api/server/start", auth=("admin", "s3cret-pass"), json={"server_port": "nope"})
+    assert response.status_code == 422
+    assert fake_server == []
+
+
+def test_stored_garbage_falls_back_to_defaults(fake_server):
+    config_store.save({"ram_mb": "lots", "server_port": 99999, "motd": "kept", "custom": "x"})
+    app.state.console_manager.history.clear()
+    config = client.get("/api/config", auth=("admin", "s3cret-pass")).json()
+    assert config["ram_mb"] == 2048 and config["server_port"] == 25565
+    assert config["motd"] == "kept" and config["custom"] == "x"
+    assert any("Ignoring invalid saved value ram_mb='lots'" in line for line in app.state.console_manager.history)
+    assert _start().status_code == 202
+    assert app.state.runtime.state == "running"
+
+
+def test_dashboard_highlights_rejected_fields():
+    js_path = os.path.join(os.path.dirname(webapp_module.__file__), "static", "js", "dashboard.js")
+    source = open(js_path, encoding="utf-8").read()
+    assert "markInvalidFields" in source and "aria-invalid" in source

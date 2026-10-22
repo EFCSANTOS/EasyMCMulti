@@ -532,6 +532,12 @@ input::placeholder {
   color: var(--faint);
 }
 
+/* Set by markInvalidFields when the server rejects a value (422). */
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
+  border-color: var(--critical);
+}
+
 .hint {
   display: block;
   margin-top: 0.3rem;

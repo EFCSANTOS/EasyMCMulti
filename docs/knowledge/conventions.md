@@ -40,6 +40,12 @@
 - Routes `/api/<domain>[/<action>]`; UI `/dashboard/{section}`.
 - Tests `test_<feature>_<expectation>`.
 
+## Input validation
+- Anything that reaches the server's stdin goes through `validation.require_command` or
+  `validation.require_player` — never format raw client text into a console command.
+- Config writes go through `validation.validate_config_update`; add new config keys to both
+  `_default_config` and `ConfigUpdate` (and the HTML `min`/`max`/`maxlength` should match).
+
 ## Files
 - Write settings/metadata with `fsutil.write_json_atomic` / `write_text_atomic` and read them with
   `fsutil.read_json(path, default)` — never a bare `open(path, "w")` for anything the app needs to

@@ -73,10 +73,46 @@ async function fetchJson(url, method = 'GET', body = null) {
   } catch (err) {
     data = { detail: text };
   }
-  if (!response.ok) {
-    throw new Error(data.detail || data.error || `Request failed (HTTP ${response.status})`);
-  }
+  if (!response.ok) throw errorFromResponse(data, response.status);
   return data;
+}
+
+// FastAPI-style 422 bodies list each bad field: detail = [{loc: ['body', field], msg}].
+// The error carries those field names so forms can highlight the inputs.
+function errorFromResponse(data, status) {
+  if (Array.isArray(data.detail)) {
+    const error = new Error(data.detail.map((item) => item.msg).join(' · ') || `Invalid input (HTTP ${status})`);
+    error.fields = data.detail.map((item) => (item.loc || [])[(item.loc || []).length - 1]).filter(Boolean);
+    return error;
+  }
+  return new Error(data.detail || data.error || `Request failed (HTTP ${status})`);
+}
+
+// Marks the config inputs the server rejected; each clears itself once edited.
+function markInvalidFields(error) {
+  const fields = new Set(error && error.fields ? error.fields : []);
+  CONFIG_FIELDS.forEach(([id, key]) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+    if (fields.has(key)) {
+      element.setAttribute('aria-invalid', 'true');
+      element.addEventListener('input', () => element.removeAttribute('aria-invalid'), { once: true });
+    } else {
+      element.removeAttribute('aria-invalid');
+    }
+  });
+}
+
+// Sends a config payload and highlights rejected inputs before rethrowing.
+async function fetchConfig(url, method, body) {
+  try {
+    const result = await fetchJson(url, method, body);
+    markInvalidFields(null);
+    return result;
+  } catch (error) {
+    markInvalidFields(error);
+    throw error;
+  }
 }
 
 // ---------- Feedback ----------
@@ -316,7 +352,7 @@ async function loadConfig() {
 
 async function saveConfigFromForm(button) {
   await runAction(button, 'Saving…', async () => {
-    appState.config = await fetchJson('/api/config', 'PUT', collectConfigFromPage());
+    appState.config = await fetchConfig('/api/config', 'PUT', collectConfigFromPage());
     renderStatus(appState.status);
     return 'Settings saved.';
   });
@@ -437,7 +473,7 @@ function serverAction(path, pendingMessage) {
 
 async function createServer(button) {
   await runAction(button, null, async () => {
-    const response = await fetchJson('/api/server/create', 'POST', collectConfigFromPage());
+    const response = await fetchConfig('/api/server/create', 'POST', collectConfigFromPage());
     trackOperation(response);
     await loadConfig();
     return response.message;

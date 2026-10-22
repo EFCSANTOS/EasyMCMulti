@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-109 passed (~26 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+116 passed (~22 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Data isolation
@@ -50,6 +50,10 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Input validation (FIX-05): bad player names / multi-line or over-long commands → 400 and nothing
+  sent; each bad config field → 422 naming it, unknown key → 422, nothing saved; `ram_mb` above host
+  RAM (`_host_ram_mb` patched) → 422; start payload validated; stored garbage → defaults + one console
+  warning, and start still works.
 - Atomic writes (FIX-03): `.bak` kept and no `.tmp` left for every settings file; a truncated
   `launcher_config.json` is restored from `.bak`, repaired on disk and logged; a failed replace
   leaves the original intact; `PUT /api/config` → 500 on a disk error. Patch inside
