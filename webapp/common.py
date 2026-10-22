@@ -4,6 +4,7 @@ Routers use these as `common.NAME` so tests can monkeypatch them in one place.
 """
 from __future__ import annotations
 
+import datetime
 import glob
 import logging
 import os
@@ -31,9 +32,9 @@ CRASH_RESTART_DELAY_SEC = 10
 CRASH_RESTART_LIMIT = 3
 CRASH_WINDOW_SEC = 600
 LOADER_LABELS = {"vanilla": "Vanilla", "paper": "Paper", "fabric": "Fabric", "forge": "Forge", "neoforge": "NeoForge"}
-# Scheduled backups (FEAT-01): how often the scheduler checks, and how long to wait for the server
-# to confirm "save-all flush" before zipping anyway.
-BACKUP_CHECK_SEC = 60
+# How often the scheduler (backups, daily restart, idle stop) checks; how long a backup waits for
+# the server to confirm "save-all flush" before zipping anyway.
+SCHEDULER_TICK_SEC = 60
 BACKUP_SAVE_TIMEOUT_SEC = 30
 # Friends Discord channel: joins/leaves within this window are sent as one message.
 FRIENDS_BATCH_SEC = 30
@@ -132,6 +133,12 @@ def _default_config() -> dict[str, Any]:
         "backup_keep_recent": 8,
         "backup_keep_daily": 7,
         "backup_prune_manual": False,
+        # Schedule (FEAT-06): daily restart "HH:MM" ("" = off), stop after N empty minutes (0 = off),
+        # quiet hours "HH:MM"–"HH:MM" without autostart / crash restart ("" = off).
+        "restart_daily_time": "",
+        "idle_stop_minutes": 0,
+        "quiet_hours_start": "",
+        "quiet_hours_end": "",
     }
 
 
@@ -269,6 +276,15 @@ def _is_safe_world_member(member: str) -> bool:
 def _active_world(config: dict[str, Any]) -> str:
     folder = str(config.get("level_name") or "world")
     return folder if worlds.valid_folder(folder) else "world"
+
+
+def _in_quiet_hours(config: dict[str, Any], now: Any = None) -> bool:
+    """True between quiet_hours_start and quiet_hours_end (host local time; may wrap past midnight)."""
+    start, end = str(config.get("quiet_hours_start") or ""), str(config.get("quiet_hours_end") or "")
+    if not start or not end or start == end:
+        return False
+    current = (now or datetime.datetime.now()).strftime("%H:%M")
+    return start <= current < end if start < end else current >= start or current < end
 
 
 def _wait_for_exit(process: Any, timeout_sec: float) -> bool:

@@ -3,7 +3,7 @@
 ## Layout
 `tests/test_webapp_smoke.py`; sets env vars at import; `TestClient(create_app())`.
 Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-155 passed (~30 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
+160 passed (~32 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
 ## Patching
@@ -56,6 +56,10 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Schedule (FEAT-06, `scheduler_tick(datetime)` with fixed times): warnings at 10/5/1 then one
+  restart a day; a late joiner hears the real minutes left; no restart when >30 min late; idle stop
+  only after N empty minutes, cancelled by a join, `stopped_reason` shown and cleared, friends told
+  once; quiet hours wrap midnight and block autostart; time/minute validation.
 - Backups (FEAT-01): name parsing (old and labelled); retention picks the right set and spares
   manual backups; `backup_tick` with a patched clock only backs up a changing world and sends
   `save-off`/`save-all flush`/`save-on`; manual vs safety labels and pruning; low disk → 500 +

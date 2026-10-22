@@ -40,7 +40,7 @@ def register(app: FastAPI, s: Services) -> None:
         if os.getenv("EZ_NO_AUTOSTART") == "1":
             return
         threading.Thread(target=s.heartbeat_loop, name="heartbeat", daemon=True).start()
-        threading.Thread(target=s.backup_loop, name="backup-schedule", daemon=True).start()
+        threading.Thread(target=s.scheduler_loop, name="scheduler", daemon=True).start()
         threading.Thread(target=s.update_check_loop, name="update-check", daemon=True).start()
         config = common._effective_config()
         resume = s.take_resume_marker()  # what was running before an in-app update restarted us

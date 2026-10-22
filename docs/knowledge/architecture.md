@@ -31,7 +31,10 @@
   `install_server`, `request_stop`, `stop_and_wait`, `restart_job`, `server_running` — commands,
   admin), `backups`, `mods` (+ Modrinth), `worlds`, `players` (whitelist/ops/bans), `public` (invite + `/s/<token>` status page), `remote` (PlayIt + Cloudflare), `updates`
   (self-update + alert settings).
-- `background.py` — `run_in_background`, `autostart`, `shutdown`.
+- `background.py` — `run_in_background`, `autostart` (also starts `heartbeat_loop` and
+  `scheduler_loop`), `shutdown`.
+- `scheduler.py` — `scheduler_tick(now)` / `scheduler_loop`: backups, daily restart, idle stop
+  (workflows.md §24).
 - `pages/` — `widgets.py` (`_ICON_PATHS`, `_icon`, `_copy_button`, `_switch`), `sections_main.py`
   and `sections_more.py` (`_SECTION_*` HTML constants), `layout.py` (`_DASHBOARD_NAVIGATION`,
   `_INSTALL_BANNER`, `_TOPBAR_CONTROLS`, `_DASHBOARD_PAGES`, `_render_dashboard_page`, `SCRIPTS`,

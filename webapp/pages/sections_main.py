@@ -230,6 +230,48 @@ _SECTION_ALWAYS_ON = f"""
         </section>
 """
 
+_SECTION_SCHEDULE = """
+        <section id="schedule" class="card">
+          <div class="card-header">
+            <div>
+              <h2>Schedule</h2>
+              <p class="card-sub">Restart once a day to keep the server snappy, stop it when nobody plays, and keep
+                it off at night. Times are this device's local time.</p>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label for="restart-daily-time">Restart every day at</label>
+              <input id="restart-daily-time" type="time" />
+              <p class="hint">Empty = off. Players get warnings in chat 10, 5 and 1 minute before, and a backup is made first.</p>
+            </div>
+            <div class="field">
+              <label for="idle-stop-minutes">Stop when nobody is online for</label>
+              <select id="idle-stop-minutes">
+                <option value="0">Never</option>
+                <option value="15">15 minutes</option>
+                <option value="30">30 minutes</option>
+                <option value="60">1 hour</option>
+                <option value="120">2 hours</option>
+              </select>
+              <p class="hint">Saves battery and power. Your friends' Discord is told why it stopped.</p>
+            </div>
+            <div class="field">
+              <label for="quiet-hours-start">Quiet hours from</label>
+              <input id="quiet-hours-start" type="time" />
+            </div>
+            <div class="field">
+              <label for="quiet-hours-end">until</label>
+              <input id="quiet-hours-end" type="time" />
+              <p class="hint">No automatic start or crash restart in this window. Empty = off.</p>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button id="schedule-save-button" class="btn btn-primary" type="button">Save</button>
+          </div>
+        </section>
+"""
+
 _SECTION_ALERTS = f"""
         <section id="alerts" class="card">
           <div class="card-header">
