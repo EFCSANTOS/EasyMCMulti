@@ -23,6 +23,12 @@ Linux / Termux: `bash run.sh` (reads `.env`). Android install: `termux-setup.sh`
 Login hardening (sessions + lockout) before relying on the remote dashboard link — see
 `docs/knowledge/verification.md` "Must fix".
 
+## Git flow
+See `docs/knowledge/git-flow.md`. Branch `feat/…`/`fix/…` from `release` → PR into `development`
+→ PR the same branch into `release`. Every commit gets `Co-Authored-By: Claude <noreply@anthropic.com>`.
+Merge commits only. **Never open or merge a PR into `main`, and never push to `main`.** The owner
+does `release` → `main` when it is stable.
+
 ## Language
 All code comments, log/error messages and UI text are English. No localization layer.
 
