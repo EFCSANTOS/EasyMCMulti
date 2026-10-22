@@ -22,6 +22,7 @@ Auth: header  Authorization: Agent-Key <secret>
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import subprocess
@@ -40,6 +41,25 @@ CLAIM_PAGE = "https://playit.gg/claim/{}"
 MINECRAFT_TUNNEL_NAME = "EZ Minecraft"
 
 _CONFIG_FILE = os.path.join(paths.DATA_DIR, "playit_config.json")
+
+# Agent log markers meaning playit.gg no longer accepts the secret key (agent deleted on the website,
+# key revoked...). Retrying never helps; the launcher has to be linked again.
+KEY_REJECTED_MARKERS = ("InvalidAgentKey", "NoLongerValid")
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def is_key_rejected(line):
+    return any(marker in line for marker in KEY_REJECTED_MARKERS)
+
+
+def is_valid_secret(secret):
+    """The agent only accepts hex secret keys (what /claim/exchange and `playit setup` produce)."""
+    secret = (secret or "").strip()
+    try:
+        bytes.fromhex(secret)
+    except ValueError:
+        return False
+    return bool(secret)
 
 
 def _agent_binary_name() -> str:
@@ -114,7 +134,7 @@ def _api(path, body, secret=None):
     """
     headers = {"Content-Type": "application/json"}
     if secret:
-        headers["Authorization"] = f"Agent-Key {secret}"
+        headers["Authorization"] = f"Agent-Key {secret.strip()}"  # the agent trims it the same way
     r = requests.post(API_BASE + path, json=body, headers=headers, timeout=30)
     try:
         data = r.json()
@@ -227,14 +247,21 @@ def claim_interactive(log, should_cancel, timeout_sec=300, on_url=None):
     return secret
 
 
-def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_type, label):
+def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_type, label, should_abort=None):
     """Ensure a tunnel matching `matches` -> localhost:local_port exists; return its public address.
 
     IMPORTANT: the API refuses to create a tunnel until the agent has run at least
     once (error 'AgentVersionTooOld'). The daemon must therefore be started BEFORE
     calling this function; creation is retried while the agent registers.
+    should_abort() may return a reason (str) to stop waiting early, e.g. the agent's key was rejected.
     """
     deadline = time.time() + timeout_sec
+
+    def check_abort():
+        reason = should_abort() if should_abort else None
+        if reason:
+            raise RuntimeError(reason)
+
     agent_id = _agent_id(secret)
 
     # Reuse an existing tunnel if it already points to the right local port.
@@ -259,6 +286,7 @@ def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_t
             "enabled": True,
         }
         while True:
+            check_abort()
             try:
                 _api("/tunnels/create", body, secret=secret)
                 break
@@ -271,6 +299,7 @@ def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_t
 
     log(f"Waiting for playit to allocate the {label} address...")
     while True:
+        check_abort()
         if time.time() > deadline:
             raise RuntimeError(f"The {label} tunnel did not receive an address in time.")
         t = _find_tunnel(secret, matches)
@@ -281,10 +310,10 @@ def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_t
         time.sleep(2)
 
 
-def ensure_tunnel(secret, local_port, log, timeout_sec=120):
+def ensure_tunnel(secret, local_port, log, timeout_sec=120, should_abort=None):
     """Ensure the Minecraft Java tunnel -> localhost:local_port; return the address for players."""
     return _ensure_tunnel(secret, local_port, log, timeout_sec, _is_mc_tunnel,
-                          MINECRAFT_TUNNEL_NAME, "minecraft-java", "Minecraft Java")
+                          MINECRAFT_TUNNEL_NAME, "minecraft-java", "Minecraft Java", should_abort)
 
 
 # ---------- Agent (daemon) download ----------
@@ -332,7 +361,7 @@ def agent_command(secret):
     `termux-chroot` (package `proot`) mounts Termux's etc/ over /etc and fixes that.
     Set EZ_PLAYIT_CHROOT=0 to run the binary directly.
     """
-    command = [_agent_path(), "--secret", secret]
+    command = [_agent_path(), "--secret", secret.strip()]
     wrapper = shutil.which("termux-chroot")
     if hostenv.is_termux() and wrapper and os.environ.get("EZ_PLAYIT_CHROOT", "1") != "0":
         return [wrapper] + command
@@ -362,7 +391,8 @@ class PlayitAgent:
 
     def _reader(self):
         for line in self.proc.stdout:
-            self.on_output(line.rstrip("\n"))
+            # The agent colours its log with ANSI codes; the dashboard console shows plain text.
+            self.on_output(_ANSI_ESCAPE.sub("", line.rstrip("\n")))
         self.on_exit(self.proc.wait())
 
     def stop(self):

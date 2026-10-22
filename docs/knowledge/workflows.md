@@ -164,6 +164,14 @@ maps to MC commands (`time set day`, `weather clear`, `save-all`, …); sends + 
   pending approval (setup → `idle`, no error); a changed secret stops the agent. A cancelled claim now
   ends in `setup="idle"` instead of `"error"`.
 - Agent exit → `_playit_on_exit` sets state stopped + console line.
+- Rejected key (2026-10-22, seen in the field: agent logs `ApiError(Auth(InvalidAgentKey))` forever
+  while our own API calls with the same key still succeed and `/tunnels/create` keeps answering
+  `AgentVersionTooOld`): `start_agent_and_tunnels` watches agent output via
+  `playit.is_key_rejected` (`InvalidAgentKey` / `NoLongerValid`) → deliberate stop (no crash
+  restart), `setup="error"` + `PLAYIT_KEY_REJECTED` ("Change account" to re-link), `tunnels` alert;
+  `ensure_tunnel(should_abort=…)` stops waiting at once (also when the agent died). Agent output is
+  stripped of ANSI colour codes. `PUT /api/playit/config` rejects non-hex secrets (the agent only
+  accepts hex); secrets are trimmed before use, like the agent does.
 
 Core details (`core/playit.py`):
 - `claim_interactive(log, should_cancel, timeout_sec=300, on_url=None)`: random 10-hex claim code →

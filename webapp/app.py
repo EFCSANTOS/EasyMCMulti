@@ -44,6 +44,8 @@ WEB_TUNNEL_RETRY_SEC = 15
 # Alerts: the same alert is emailed at most once per ALERT_REPEAT_SEC; heartbeat every HEARTBEAT_INTERVAL_SEC.
 ALERT_REPEAT_SEC = 600
 PLAYIT_RETRY_SEC = 30
+PLAYIT_KEY_REJECTED = ("playit.gg rejected the saved secret key (InvalidAgentKey). This happens when the agent was "
+                       "deleted on playit.gg or the key was revoked. Click \"Change account\" to link this launcher again.")
 MODRINTH_PAGE_SIZE = 20
 # Self-update: first check shortly after start, then every UPDATE_CHECK_INTERVAL_SEC.
 UPDATE_FIRST_CHECK_SEC = 120
@@ -1670,9 +1672,25 @@ def create_app() -> FastAPI:
 
     def start_agent_and_tunnels(secret: str) -> None:
         """Start the agent if needed, ensure the Minecraft tunnel and save its address."""
+        key_rejected = threading.Event()
         if not (runtime.playit_agent and runtime.playit_agent.is_running()):
             playit.ensure_agent(log=playit_log)
             agent: Any = None
+
+            def on_agent_output(line: str) -> None:
+                append_console_line(line)
+                if key_rejected.is_set() or not playit.is_key_rejected(line):
+                    return
+                # A rejected key never recovers by retrying: stop the agent (deliberately, so it is not
+                # restarted as a crash) and ask the owner to link the launcher again.
+                key_rejected.set()
+                runtime.playit_setup = "error"
+                runtime.playit_error = PLAYIT_KEY_REJECTED
+                playit_log(PLAYIT_KEY_REJECTED)
+                notify("tunnels", "PlayIt key rejected", PLAYIT_KEY_REJECTED)
+                if runtime.playit_agent is agent:
+                    stop_playit_agent()
+                    runtime.playit_state = "stopped"
 
             def on_agent_exit(code: int) -> None:
                 # Deliberate stops clear runtime.playit_agent first, so only a crash still finds itself here.
@@ -1689,11 +1707,20 @@ def create_app() -> FastAPI:
                 timer.daemon = True
                 timer.start()
 
-            agent = playit.PlayitAgent(on_output=append_console_line, on_exit=on_agent_exit)
+            agent = playit.PlayitAgent(on_output=on_agent_output, on_exit=on_agent_exit)
             runtime.playit_agent = agent
             agent.start(secret)
+
+        def should_abort() -> str | None:
+            if key_rejected.is_set():
+                return PLAYIT_KEY_REJECTED
+            if not (runtime.playit_agent and runtime.playit_agent.is_running()):
+                return "The PlayIt agent stopped before the tunnel was ready."
+            return None
+
         config = _effective_config()
-        address = playit.ensure_tunnel(secret, int(config.get("server_port", 25565)), playit_log)
+        address = playit.ensure_tunnel(secret, int(config.get("server_port", 25565)), playit_log,
+                                       should_abort=should_abort)
         playit.save_config(secret, address)
         runtime.playit_state = "running"
         runtime.playit_address = address
@@ -1761,6 +1788,9 @@ def create_app() -> FastAPI:
             return playit_info("PlayIt is not configured yet. Click Configure first.")
         if runtime.playit_agent and runtime.playit_agent.is_running():
             return playit_info("PlayIt tunnel is already running.")
+        if runtime.playit_setup == "error":  # a new attempt clears the previous failure
+            runtime.playit_setup = "idle"
+            runtime.playit_error = ""
         try:
             start_agent_and_tunnels(cfg["secret"])
         except Exception as exc:
@@ -1810,6 +1840,9 @@ def create_app() -> FastAPI:
         secret = secret.strip() or saved
         if not secret:
             raise HTTPException(status_code=400, detail="No saved secret key: paste one into \"secret\".")
+        if secret != saved and not playit.is_valid_secret(secret):
+            raise HTTPException(status_code=400, detail="That is not a playit secret key: it should be the long "
+                                                        "hexadecimal key (0-9, a-f) from playit.gg.")
         if secret != saved:
             stop_playit_agent()
             runtime.playit_state = "stopped"
