@@ -608,14 +608,10 @@ def test_server_start_installs_before_launch(monkeypatch):
     monkeypatch.setattr(webapp_module, "ServerProcess", DummyProcess)
     monkeypatch.setattr(webapp_module, "update_properties", fake_update_properties)
 
-    response = client.post(
-        "/api/server/start",
-        auth=("admin", "s3cret-pass"),
-        json={"server_port": 25566, "motd": "Advanced test", "max_players": 12},
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["message"] == "Server started."
+    response = _start(json={"server_port": 25566, "motd": "Advanced test", "max_players": 12})
+    assert response.status_code == 202
+    assert response.json()["operation"] == "starting"
+    assert app.state.runtime.operation_message == "Server started."
     assert app.state.runtime.install_status == "ready"
     assert app.state.runtime.install_progress >= 0
     assert calls["kwargs"]["server-port"] == 25566
@@ -624,8 +620,8 @@ def test_server_start_installs_before_launch(monkeypatch):
 
 
 def test_server_lifecycle_start_and_stop():
-    start_response = client.post("/api/server/start", auth=("admin", "s3cret-pass"))
-    assert start_response.status_code == 200
+    start_response = _start()
+    assert start_response.status_code in {200, 202}
     payload = start_response.json()
     assert payload["state"] in {"starting", "running"}
 
@@ -676,8 +672,9 @@ def test_restart_waits_for_previous_process_to_exit(monkeypatch):
     events.clear()
 
     response = client.post("/api/server/restart", auth=("admin", "s3cret-pass"))
-    assert response.status_code == 200
-    assert response.json()["message"] == "Server started."
+    assert response.status_code == 202
+    _wait_idle()
+    assert app.state.runtime.operation_message == "Server started."
     assert events == ["stop", "start"]
     assert app.state.runtime.process is not previous
 
@@ -737,8 +734,27 @@ def _wait_until(condition, timeout=3.0):
     return condition()
 
 
+def _lifecycle_free():
+    lock = app.state.runtime.lifecycle
+    if not lock.acquire(blocking=False):
+        return False
+    lock.release()
+    return True
+
+
+def _wait_idle(timeout=3.0):
+    """Wait for the background lifecycle job (create/start/restart/world switch) to finish."""
+    assert _wait_until(_lifecycle_free, timeout), "lifecycle job did not finish"
+
+
+def _start(**kwargs):
+    response = client.post("/api/server/start", auth=("admin", "s3cret-pass"), **kwargs)
+    _wait_idle()
+    return response
+
+
 def test_crash_triggers_automatic_restart(fake_server):
-    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    _start()
     fake_server[0].exit(1)
     assert _wait_until(lambda: len(fake_server) == 2)
     assert app.state.runtime.process is fake_server[1]
@@ -746,7 +762,7 @@ def test_crash_triggers_automatic_restart(fake_server):
 
 
 def test_crash_restart_pauses_after_limit(fake_server):
-    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    _start()
     now = time.monotonic()
     app.state.runtime.crash_times = [now] * webapp_module.CRASH_RESTART_LIMIT
     fake_server[0].exit(1)
@@ -758,11 +774,11 @@ def test_crash_restart_pauses_after_limit(fake_server):
 
 
 def test_deliberate_stops_are_not_crashes(fake_server):
-    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    _start()
     client.post("/api/server/stop", auth=("admin", "s3cret-pass"))
     fake_server[0].exit(1)
 
-    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    _start()
     client.post("/api/server/command", auth=("admin", "s3cret-pass"), json={"command": "/stop"})
     fake_server[1].exit(143)
     time.sleep(0.2)
@@ -773,7 +789,7 @@ def test_deliberate_stops_are_not_crashes(fake_server):
 def test_auto_restart_can_be_disabled(fake_server, monkeypatch):
     original = webapp_module._effective_config
     monkeypatch.setattr(webapp_module, "_effective_config", lambda: {**original(), "auto_restart": False})
-    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    _start()
     fake_server[0].exit(1)
     time.sleep(0.2)
     assert len(fake_server) == 1
@@ -800,7 +816,7 @@ def test_autostart_respects_kill_switch(fake_server, monkeypatch):
 
 
 def test_shutdown_stops_server_and_tunnel(fake_server, fake_playit):
-    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    _start()
     agent = DummyAgent()
     agent.start("s")
     app.state.runtime.playit_agent = agent
@@ -940,7 +956,7 @@ def sent_emails(monkeypatch):
 
 
 def test_crash_sends_email_and_repeats_are_throttled(fake_server, sent_emails):
-    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    _start()
     fake_server[0].exit(1)
     assert _wait_until(lambda: any("crashed" in subject for subject, _ in sent_emails))
     assert _wait_until(lambda: any("back online" in subject for subject, _ in sent_emails))
@@ -952,7 +968,7 @@ def test_crash_sends_email_and_repeats_are_throttled(fake_server, sent_emails):
 
 
 def test_auto_restart_paused_sends_down_alert(fake_server, sent_emails):
-    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    _start()
     app.state.runtime.crash_times = [time.monotonic()] * webapp_module.CRASH_RESTART_LIMIT
     fake_server[0].exit(1)
     assert _wait_until(lambda: any("DOWN" in subject for subject, _ in sent_emails))
@@ -1211,7 +1227,7 @@ def test_update_endpoint_restarts_and_resumes(fake_server, fake_playit, fake_clo
     restarts = []
     monkeypatch.setattr(updater, "apply", lambda log: {"updated": True, "from": "aaaaaaa", "to": "bbbbbbb", "changed_files": []})
     monkeypatch.setattr(updater, "restart_process", lambda: restarts.append("restart"))
-    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
+    _start()
 
     response = client.post("/api/update/apply", auth=("admin", "s3cret-pass"))
     assert response.json()["state"] == "updating"
@@ -1361,11 +1377,14 @@ def test_world_upload_download_and_switch_restarts_running_server(fake_server):
     import io
     assert f"{folder}/region/a.mca" in zipfile.ZipFile(io.BytesIO(download.content)).namelist()
 
-    client.post("/api/server/start", auth=("admin", "s3cret-pass"))
-    result = client.post(f"/api/worlds/{folder}/activate", auth=("admin", "s3cret-pass")).json()
-    assert "restarted" in result["message"]
+    _start()
+    switch = client.post(f"/api/worlds/{folder}/activate", auth=("admin", "s3cret-pass"))
+    assert switch.status_code == 202 and "Switching" in switch.json()["message"]
+    _wait_idle()
+    assert "restarted" in app.state.runtime.operation_message
     assert len(fake_server) == 2 and not fake_server[0].is_running() and fake_server[1].is_running()
     client.post("/api/worlds/world/activate", auth=("admin", "s3cret-pass"))
+    _wait_idle()
 
 
 def test_backup_follows_the_active_world(monkeypatch):
@@ -1616,3 +1635,101 @@ def test_remote_dashboard_reports_weak_password(monkeypatch):
     status = client.get("/api/remote-dashboard", auth=("admin", "a-much-longer-password")).json()
     assert status["weak_password"] is False
     assert 'id="remote-dashboard-weak-password"' in client.get("/dashboard/remote").text
+
+
+# ---------- Background lifecycle jobs and the lifecycle lock (FIX-02 / FIX-04) ----------
+@pytest.fixture
+def slow_install(fake_server, monkeypatch):
+    """Installs block until the test sets the returned event."""
+    gate = threading.Event()
+
+    def prepare(loader, version, target_dir, java_exe, log=print, progress=None):
+        if progress:
+            progress(10, 100)
+        if not gate.wait(5):
+            raise RuntimeError("test gate never opened")
+
+    monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: False)
+    monkeypatch.setattr(webapp_module.downloaders, "prepare", prepare)
+    monkeypatch.setattr(webapp_module, "accept_eula", lambda target_dir: None)
+    yield gate
+    gate.set()
+    _wait_idle()
+
+
+def test_create_returns_at_once_and_installs_in_background(slow_install):
+    started = time.monotonic()
+    response = client.post("/api/server/create", auth=("admin", "s3cret-pass"), json={"loader": "vanilla"})
+    assert time.monotonic() - started < 2
+    assert response.status_code == 202
+    assert response.json()["operation"] == "creating"
+    assert _wait_until(lambda: app.state.runtime.install_status == "installing")
+    assert client.get("/api/status", auth=("admin", "s3cret-pass")).json()["operation"] == "installing"
+    slow_install.set()
+    _wait_idle()
+    status = client.get("/api/status", auth=("admin", "s3cret-pass")).json()
+    assert status["install_status"] == "ready" and status["operation"] == "idle"
+    assert status["operation_message"] == "Server vanilla 1.21.7 is ready."
+
+
+def test_second_lifecycle_request_while_busy_gets_409(slow_install):
+    assert client.post("/api/server/create", auth=("admin", "s3cret-pass")).status_code == 202
+    for method, url, body in (("post", "/api/server/create", None), ("post", "/api/server/start", None),
+                              ("post", "/api/server/restart", None), ("post", "/api/server/stop", None),
+                              ("post", "/api/server/backups/restore", {"backup_path": "x.zip"})):
+        response = getattr(client, method)(url, auth=("admin", "s3cret-pass"), json=body)
+        assert response.status_code == 409, url
+        assert response.json()["detail"].startswith("Busy:")
+    slow_install.set()
+
+
+def test_concurrent_starts_launch_exactly_one_process(slow_install):
+    results = []
+
+    def press_start():
+        results.append(client.post("/api/server/start", auth=("admin", "s3cret-pass")).status_code)
+
+    threads = [threading.Thread(target=press_start) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert sorted(results) == [202, 409, 409, 409]
+    slow_install.set()
+    _wait_idle()
+    assert len(RecordingProcess.instances) == 1
+    assert app.state.runtime.state == "running"
+
+
+def test_failed_install_is_reported_through_status(fake_server, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("download blocked")
+
+    monkeypatch.setattr(webapp_module, "_server_is_installed", lambda target_dir, loader: False)
+    monkeypatch.setattr(webapp_module.downloaders, "prepare", broken)
+    assert _start().status_code == 202
+    status = client.get("/api/status", auth=("admin", "s3cret-pass")).json()
+    assert status["install_status"] == "failed"
+    assert status["state"] == "stopped" and status["operation"] == "idle"
+    assert "download blocked" in status["operation_error"]
+    history = client.get("/api/console", auth=("admin", "s3cret-pass")).json()["lines"]
+    assert any("Server start failed: download blocked" in line for line in history)
+    assert fake_server == []
+
+
+def test_crash_restart_waits_for_running_job_then_skips_if_started(slow_install):
+    runtime = app.state.runtime
+    assert client.post("/api/server/start", auth=("admin", "s3cret-pass")).status_code == 202
+    waiter = threading.Thread(target=app.state.restart_after_crash)  # what the crash timer runs
+    waiter.start()
+    time.sleep(0.2)
+    assert waiter.is_alive()  # blocked on the lifecycle lock while the start installs
+    slow_install.set()
+    waiter.join(3)
+    assert not waiter.is_alive()
+    assert len(RecordingProcess.instances) == 1 and runtime.state == "running"
+
+
+def test_install_banner_is_on_every_page():
+    for section in ("overview", "setup", "advanced", "worlds", "mods", "remote", "backups", "console"):
+        assert client.get(f"/dashboard/{section}").text.count('id="install-banner"') == 1, section

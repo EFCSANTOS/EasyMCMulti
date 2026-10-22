@@ -19,7 +19,10 @@
 - Dashboard: module-level `_render_dashboard_page(section)`; pages (overview, setup, advanced, mods,
   remote, backups, console) are tuples of `_SECTION_*` HTML constants in `_DASHBOARD_PAGES`.
 - PlayIt: `_playit_on_exit`, `_playit_state(runtime, cfg)` (running only if the agent process is alive).
-- Restart: `_wait_for_exit(process, timeout)`, `RESTART_STOP_TIMEOUT_SEC`.
+- Lifecycle (inside `create_app`): `start_lifecycle_job`, `busy_error`, `launch_server`,
+  `launch_when_free`, `install_server`, `request_stop`, `stop_and_wait`, `restart_job`;
+  `_wait_for_exit(process, timeout)`, `RESTART_STOP_TIMEOUT_SEC`, `LIFECYCLE_WAIT_SEC`
+  (workflows.md §5b).
 - Mods folder: `_content_dir_for_config` → `paths.content_folder` (400 for vanilla).
 
 ### `webapp/auth.py`
@@ -31,8 +34,9 @@ Basic, works on HTTP and WebSocket; cookie writes pass the same-origin/JSON CSRF
 ### `webapp/state.py`
 `RuntimeState` dataclass: loader, version, state, operation, install_*, `online_players` (set;
 `track_player_event(line)` / `clear_players()`), lan_address,
-public_address, playit_*, playit_agent, process, `lock` (RLock);
-`snapshot()` returns JSON-safe dict.
+public_address, playit_*, playit_agent, process, `operation_error`/`operation_message` (outcome
+of the last lifecycle job), `lock` (RLock), `lifecycle` (Lock, one server operation at a time);
+`set_state(state, operation=None)`; `snapshot()` returns JSON-safe dict.
 
 ### `webapp/websocket_manager.py`
 `WebSocketManager`: `history` deque(2000), per-client `asyncio.Queue(250)`, `connect` replays last
@@ -110,8 +114,9 @@ public_address, playit_*, playit_agent, process, `lock` (RLock);
 2. REST request → `require_auth` → session cookie, else Basic credentials (lockout-checked).
 3. WS `/ws/console` → `authenticate` (cookie or Basic) → `close(1008)` on failure, else `accept()` →
    `console_manager.connect` → keepalive loop (`wait_for(..., 30s)`).
-4. Start: `_effective_config` → `ensure_server_installed` (install if missing) →
-   `update_properties` → `ensure_java` → `launch_args` → `ServerProcess.start()`.
+4. Start: route saves the payload → 202 → lifecycle job thread: `ensure_server_installed`
+   (install if missing) → `update_properties` → `ensure_java` → `launch_args` →
+   `ServerProcess.start()`.
 5. Console: `ServerProcess._reader` thread → `on_output` → `console_manager.publish` → client queues.
 6. PlayIt: `load_config` → `ensure_agent` → `PlayitAgent.start(secret)` → `ensure_tunnel` → `save_config`.
 
