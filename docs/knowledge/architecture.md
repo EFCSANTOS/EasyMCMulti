@@ -46,7 +46,11 @@ of the last lifecycle job), `lock` (RLock), `lifecycle` (Lock, one server operat
 - `paths.py` — `DATA_DIR`/`JAVA_DIR`/`SERVERS_DIR`, `ensure_dirs`, `server_dir(loader, version)`
   (creates dir), `content_folder(loader, sdir)` (paper → `plugins/`, fabric/forge/neoforge → `mods/`,
   vanilla → None). Layout: data-model.md.
-- `config_store.py` — `load()` → dict (`{}` on missing/invalid JSON); `save(data)` swallows `OSError`.
+- `config_store.py` — `load()` → dict (`{}` when missing; the `.bak` copy when damaged);
+  `save(data)` writes atomically and raises `OSError`.
+- `fsutil.py` — `write_text_atomic`, `write_json_atomic` (tmp + fsync + `os.replace`, 3 retries on
+  Windows `PermissionError`, previous copy kept as `.bak`), `read_json(path, default)` (falls back to
+  and repairs from `.bak`), `set_logger(log)` (the web app routes it to the console as `[config]`).
 - `server_process.py` — `accept_eula`, `read_properties`, `update_properties` (read-merge-rewrite via
   `read_properties`), `ServerProcess(args, cwd, on_output, on_exit)` with `start`/`send`/`stop` (sends
   `"stop"`)/`kill` (used by restart on timeout)/`is_running`.

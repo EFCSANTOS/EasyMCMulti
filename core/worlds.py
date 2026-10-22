@@ -7,11 +7,12 @@ travel with their world. Display names live in <server dir>/ez-worlds.json (fold
 rename never moves files.
 """
 import datetime
-import json
 import os
 import re
 import shutil
 import zipfile
+
+from . import fsutil
 
 META_FILE = "ez-worlds.json"
 DIMENSION_SUFFIXES = ("_nether", "_the_end")
@@ -27,17 +28,12 @@ def _meta_path(sdir):
 
 
 def load_meta(sdir):
-    try:
-        with open(_meta_path(sdir), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    data = fsutil.read_json(_meta_path(sdir), {})
+    return data if isinstance(data, dict) else {}
 
 
 def _save_meta(sdir, meta):
-    with open(_meta_path(sdir), "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2, ensure_ascii=False)
+    fsutil.write_json_atomic(_meta_path(sdir), meta, ensure_ascii=False)
 
 
 def slugify(name):

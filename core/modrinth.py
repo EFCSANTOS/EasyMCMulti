@@ -12,6 +12,7 @@ import time
 
 import requests
 
+from . import fsutil
 from .downloaders import download
 
 API = "https://api.modrinth.com/v2"
@@ -152,17 +153,12 @@ def resolve_project_slug(project_ref):
 
 # ---------- Installed record ----------
 def load_record(dest_dir):
-    try:
-        with open(os.path.join(dest_dir, RECORD_FILE), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    data = fsutil.read_json(os.path.join(dest_dir, RECORD_FILE), {})
+    return data if isinstance(data, dict) else {}
 
 
 def _save_record(dest_dir, record):
-    with open(os.path.join(dest_dir, RECORD_FILE), "w", encoding="utf-8") as f:
-        json.dump(record, f, indent=2)
+    fsutil.write_json_atomic(os.path.join(dest_dir, RECORD_FILE), record)
 
 
 def installed_projects(dest_dir):
