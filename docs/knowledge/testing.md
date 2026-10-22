@@ -6,6 +6,12 @@ Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last ru
 116 passed (~22 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
 on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
 
+## Patching
+Routers use shared helpers as `common.NAME`, so monkeypatch `common_module` (`webapp.common`) for
+`_effective_config`, `_server_is_installed`, `ServerProcess`, `update_properties`, `accept_eula`,
+`psutil`, timeouts (`CRASH_RESTART_DELAY_SEC`, `PLAYIT_RETRY_SEC`, `WEB_TUNNEL_RETRY_SEC`) and
+`_host_ram_mb`; core functions are patched on their `core` module (`downloaders.prepare`, …).
+
 ## Data isolation
 Autouse fixture `isolated_data_dir` redirects `paths.DATA_DIR/JAVA_DIR/SERVERS_DIR`,
 `config_store._FILE` and `playit._CONFIG_FILE` to `tmp_path`, so tests no longer touch the real
@@ -32,7 +38,7 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - `/` dashboard content; `/dashboard/{7 sections}`; `#action-status` and server controls on every
   page; each feature's controls present on its page; Advanced page save button; no credentials in HTML.
 - **JS ↔ API contract**: `test_dashboard_js_only_calls_existing_api_routes` regex-extracts every
-  `/api/...` literal in `dashboard.js` and asserts a matching route exists (templated URLs match by
+  `/api/...` literal in every script of `layout.SCRIPTS` (`_dashboard_js()`) and asserts a matching route exists (templated URLs match by
   prefix).
 - `/api/console`, `/api/status` (401 unauth, 200 auth with keys).
 - Login (FIX-01): cookie flags and cookie auth, lockout after 5 failures (also for the right

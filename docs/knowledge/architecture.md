@@ -2,28 +2,40 @@
 
 ## Stack (verified)
 - Python 3.13+, FastAPI, Uvicorn, `fastapi.testclient` (tests).
-- `psutil` optional; Windows `ctypes` fallback (`webapp/app.py::_system_metrics_snapshot`).
+- `psutil` optional; Windows `ctypes` fallback (`webapp/common.py::_system_metrics_snapshot`).
 - No database. Files: JSON config (`core/config_store`), `server.properties`, `eula.txt`, `world/`,
   `world-backup-*.zip`, `mods/`, `plugins/`.
 
 ## Module map
-### `webapp/app.py` (HTTP layer, single file)
-- Factory `create_app()`; module-level `app = create_app()`.
-- Constants: `KNOWN_LOADERS`, `FALLBACK_VERSIONS`, `_APP_START_TIME`.
-- Auth: `require_auth(request)` → `auth.authenticate` with `app.state.sessions`,
-  `app.state.login_limiter`, `app.state.on_lockout`; routes `/api/login`, `/api/logout`, `/api/session`.
-- Config helpers: `_default_config`, `_effective_config`, `_server_properties_from_config`.
-- Metrics: `_system_metrics_snapshot`.
-- Paths/install: `_server_dir_for_config`, `_server_is_installed`, `ensure_server_installed`.
-- Console: `append_console_line`, `WebSocketManager`.
-- Dashboard: module-level `_render_dashboard_page(section)`; pages (overview, setup, advanced, mods,
-  remote, backups, console) are tuples of `_SECTION_*` HTML constants in `_DASHBOARD_PAGES`.
-- PlayIt: `_playit_on_exit`, `_playit_state(runtime, cfg)` (running only if the agent process is alive).
-- Lifecycle (inside `create_app`): `start_lifecycle_job`, `busy_error`, `launch_server`,
-  `launch_when_free`, `install_server`, `request_stop`, `stop_and_wait`, `restart_job`;
-  `_wait_for_exit(process, timeout)`, `RESTART_STOP_TIMEOUT_SEC`, `LIFECYCLE_WAIT_SEC`
-  (workflows.md §5b).
-- Mods folder: `_content_dir_for_config` → `paths.content_folder` (400 for vanilla).
+### `webapp/` HTTP layer (split by area, QUAL-01)
+- `app.py` — `create_app()`: `create_services(app)`, then `register(app, services)` for each router
+  (pages, system, server, backups, mods, worlds, remote, updates, background), `/ws/console`, and the
+  `app.state` hooks (`autostart`, `shutdown`, `restart_after_crash`, `notify`, `services`);
+  module-level `app = create_app()`; `_lifespan` runs autostart/shutdown.
+- `services.py` — `Services` (a namespace), `create_services(app)`: `runtime`, console
+  (`append_console_line`, `WebSocketManager`), alerts (`notify`, `heartbeat_loop`), login state
+  (`app.state.sessions`/`login_limiter`/`on_lockout`); `require_auth(request)` (the auth dependency).
+- `common.py` — constants (`KNOWN_LOADERS`, `FALLBACK_VERSIONS`, timeouts, `WEB_PORT`, …) and
+  module-level helpers: config (`_default_config`, `_effective_config`, `_host_ram_mb`,
+  `_server_properties_from_config`), paths/install (`_server_dir_for_config`, `_server_is_installed`,
+  `_content_dir_for_config`, `_active_world`), metrics (`_system_metrics_snapshot`, `_memory_usage`),
+  PlayIt (`_playit_on_exit`, `_playit_state`), `_wait_for_exit`, backup name checks; re-exports
+  `ServerProcess`/`accept_eula`/`update_properties`. Routers always write `common.NAME`, so tests
+  monkeypatch `webapp.common`.
+- `routes/*.py` — one `register(app, s)` per area; routes are closures. A router publishes helpers
+  other routers need on `s` (e.g. `s.launch_server`, `s.busy_error`, `s.stop_web_tunnel`) and calls
+  other routers' helpers as `s.name(...)` at call time:
+  `pages` (HTML shells, `/login`, `/api/login|logout|session`, `/dashboard.css`, `/js/{name}`,
+  `/health`), `system` (metrics, status, console history, config, versions), `server` (install +
+  lifecycle jobs — `start_lifecycle_job`, `busy_error`, `launch_server`, `launch_when_free`,
+  `install_server`, `request_stop`, `stop_and_wait`, `restart_job`, `server_running` — commands,
+  admin), `backups`, `mods` (+ Modrinth), `worlds`, `remote` (PlayIt + Cloudflare), `updates`
+  (self-update + alert settings).
+- `background.py` — `run_in_background`, `autostart`, `shutdown`.
+- `pages/` — `widgets.py` (`_ICON_PATHS`, `_icon`, `_copy_button`, `_switch`), `sections_main.py`
+  and `sections_more.py` (`_SECTION_*` HTML constants), `layout.py` (`_DASHBOARD_NAVIGATION`,
+  `_INSTALL_BANNER`, `_TOPBAR_CONTROLS`, `_DASHBOARD_PAGES`, `_render_dashboard_page`, `SCRIPTS`,
+  `ASSET_VERSION`).
 
 ### `webapp/auth.py`
 `validate_auth_settings`, `get_expected_credentials`, `credentials_match` (constant time),
@@ -99,9 +111,13 @@ of the last lifecycle job), `lock` (RLock), `lifecycle` (Lock, one server operat
   `uvicorn[standard]`: its uvloop/httptools need compiling on Android), python-multipart (FastAPI
   `File` uploads), psutil (skipped on Termux). `requirements-dev.txt` adds pytest + httpx.
 
-### Frontend (`webapp/static/js/dashboard.js`, `webapp/templates/login.html`)
-- Plain JS, no framework/build. `login.html` posts to `POST /api/login` (sets the HttpOnly cookie;
-  nothing is stored client-side); `dashboard.js::boot` calls `GET /api/session` (401 → `/login`),
+### Frontend (`webapp/static/js/*.js`, `webapp/templates/login.html`)
+- Plain JS, no framework/build. Six classic scripts sharing one global scope, loaded in order
+  (`layout.SCRIPTS`, served by `/js/{name}`): `api.js` (state, `fetchJson`, toasts, list helpers),
+  `server.js` (config form, status poll, lifecycle buttons), `content.js` (backups, mods, worlds),
+  `settings.js` (PlayIt, alerts, updates, remote link), `console.js` (console, charts), `main.js`
+  (event wiring + `boot`, last). `login.html` posts to `POST /api/login` (sets the HttpOnly cookie;
+  nothing is stored client-side); `boot` calls `GET /api/session` (401 → `/login`),
   then binds events, loads
   config (+ `/api/versions/{loader}`), status, backups, mods and console. Each loader skips its fetch
   when its elements are not on the current page.

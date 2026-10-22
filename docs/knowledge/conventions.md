@@ -5,8 +5,8 @@
   English.
 - **All text is English** — code comments, docstrings, log lines, error messages and UI strings.
   `core/` was translated from French on 2026-10-22; do not reintroduce other languages. There is no
-  i18n/localization layer: UI strings are inline in `webapp/app.py` (page HTML) and
-  `webapp/static/js/dashboard.js`.
+  i18n/localization layer: UI strings are inline in `webapp/pages/` (page HTML) and
+  `webapp/static/js/*.js`.
 - `core/`: no type hints (except a few in `playit.py`), no `__future__` import, plain docstrings.
 - `core/` reports progress via injected callbacks `log(str)` / `progress(done, total)`; web app wires
   them to `append_console_line` / `update_install_state`.
@@ -66,9 +66,14 @@
   `OSError`/`ValueError`.
 
 ## Frontend
-- Dashboard pages are composed from `_SECTION_*` HTML constants via `_DASHBOARD_PAGES` in
-  `webapp/app.py`; edit a section once and every page that shows it updates.
-- `dashboard.js` functions must tolerate missing elements (each page renders only some sections):
+- Dashboard pages are composed from `_SECTION_*` HTML constants (`webapp/pages/sections_*.py`) via
+  `_DASHBOARD_PAGES` in `webapp/pages/layout.py`; edit a section once and every page that shows it
+  updates.
+- New routes go in the `webapp/routes/` module for their area (or a new module registered in
+  `create_app`); shared helpers in `webapp/common.py` are referenced as `common.NAME`. New JS goes in
+  the script for its area; a new script file must be added to `layout.SCRIPTS` (order matters: a
+  file may only call functions from other files at runtime, not at load time).
+- Dashboard functions must tolerate missing elements (each page renders only some sections):
   guard with `if (!element) return;`. Settings are read via the `CONFIG_FIELDS` table
   (element id → config key), whose keys must match `_default_config`.
 - User feedback goes through `setStatus(message, 'ok'|'error'|'pending')` → toast `#action-status`

@@ -25,7 +25,7 @@ so a power cut never leaves a truncated file. The previous version stays as `<fi
 (`fsutil.read_json`) fall back to it when the main file is damaged, rewrite the main file from it
 and log `[config] <file> was damaged; restored the previous copy.` to the console.
 
-## Config profile (`core/config_store`, schema `webapp/app.py::_default_config`)
+## Config profile (`core/config_store`, schema `webapp/common.py::_default_config`)
 | Key | Type | Default |
 |---|---|---|
 | loader | str | "vanilla" |
@@ -70,7 +70,7 @@ unknown keys refused. Ranges: `loader` one of the five; `version` `^[0-9A-Za-z][
 `level_type` as listed in the form; `motd` ≤ 59 chars, one line; `level_seed` ≤ 64, one line;
 `level_name` a world folder name. Errors → 422 in FastAPI's format
 (`detail=[{loc:["body",<key>], msg:"<key>: …"}]`); nothing is saved. The dashboard's
-`CONFIG_FIELDS` table (`dashboard.js`) maps inputs to exactly these keys; `markInvalidFields`
+`CONFIG_FIELDS` table (`static/js/server.js`) maps inputs to exactly these keys; `markInvalidFields`
 outlines rejected inputs. New config keys must be added to `_default_config` **and** `ConfigUpdate`. `config_store.save` raises `OSError` (disk full, …);
 `PUT /api/config` turns it into 500 "Could not save settings (disk full?)".
 
@@ -117,7 +117,7 @@ Players: the server process's `on_output` calls `runtime.track_player_event(line
 so chat lines cannot spoof it). The set is cleared on start and on exit. Console history lives in
 `WebSocketManager.history` (the unused `RuntimeState.console_history` was removed).
 
-`state` values set by `app.py`: `stopped`, `ready` (briefly, create), `installing`, `starting`,
+`state` values set by the routers: `stopped`, `ready` (briefly, create), `installing`, `starting`,
 `running`, `stopping`, `crashed` (crash-restart limit reached). Also `stop_requested` (bool) and
 `crash_times` (monotonic timestamps) drive crash detection (workflows.md §5a). `operation`: `idle`, `creating`, `installing`, `starting`, `stopping`.
 `install_status`: `ready`, `installing`, `failed`.

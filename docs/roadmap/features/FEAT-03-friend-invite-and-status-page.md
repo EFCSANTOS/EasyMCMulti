@@ -31,7 +31,7 @@ that friends shouldn't have.
    changes on restart, so it is also included in the "new link" alert/Discord message (FEAT-05).
 
 ## Implementation notes
-- `webapp/app.py` (or `routes/public.py` after QUAL-01): `GET /s/{token}` renders an HTML page;
+- `webapp/routes/public.py`: `GET /s/{token}` renders an HTML page;
   `GET /s/{token}/status.json` for the refresh. Wrong token → 404 (not 401, nothing to probe).
 - Config keys: `status_page_enabled` (False), `status_page_token`, `status_page_show_names` (True).
 - No secrets, file paths or LAN IPs on the public page unless the owner chooses "show LAN address".
