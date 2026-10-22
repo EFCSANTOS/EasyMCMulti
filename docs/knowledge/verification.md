@@ -6,7 +6,7 @@ dashboard link, on by default) shipped as FIX-01 — see "Security" below. Remai
 limit: Cloudflare sees traffic in clear at its edge (TLS terminates there).
 
 ## Fetch status
-Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/dashboard.js`, `templates/*.html`),
+Audited 2026-10-22: all of `core/`, `webapp/` (incl. `static/js/*.js`, then one `dashboard.js`, `templates/*.html`),
 `tests/`, `requirements.txt`, `run.bat`, `.env.example`, `.gitignore`, README. Smoke suite: 76 passed.
 UI redesign (2026-10-22) verified with headless Edge screenshots at 1440 px and 390 px.
 Same day: cleanup + English-only pass + GUI feature check (see "Fixed 2026-10-22").
@@ -16,7 +16,8 @@ GUI verified by: smoke tests, a live uvicorn boot hitting every page and the GUI
 server / PlayIt agent.
 
 ## Verified route table
-UI: `/`, `/login`, `/dashboard`, `/dashboard/{section}`, `/dashboard.css`, `/dashboard.js`.
+UI: `/`, `/login`, `/dashboard`, `/dashboard/{section}`, `/dashboard.css`, `/js/{name}` (only names in
+`layout.SCRIPTS`).
 Health: `/health`.
 Metrics aliases: `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/metrics`.
 Status/console: `/api/status`, `/api/console`.

@@ -1,7 +1,9 @@
 # Decisions (verified) and Open Questions
 
 ## Verified
-1. Two layers: `webapp/` HTTP, `core/` runtime (imports in `app.py`).
+1. Two layers: `webapp/` HTTP, `core/` runtime. `webapp/` is split by area (QUAL-01, 2026-10-22):
+   routers keep the closure style (`register(app, services)`) rather than classes, so the move was
+   mechanical and `create_app()` stays re-creatable for tests.
 2. Factory `create_app()`; module-level `app = create_app()` for uvicorn.
 3. Env-var credentials with fail-fast startup; one owner account (friend accounts: FEAT-10).
 4. `RuntimeState` + RLock + `snapshot()` for thread-safe reads.
