@@ -41,7 +41,7 @@
   `ASSET_VERSION`).
 
 ### `core/` additions (after the audit)
-- `diagnose.py` (crash rule table, FEAT-08), `backups.py` (backup names/retention, FEAT-01),
+- `mod_updates.py` (mod update check/update/rollback, FEAT-07), `diagnose.py` (crash rule table, FEAT-08), `backups.py` (backup names/retention, FEAT-01),
   `fsutil.py` (atomic writes, FIX-03), `players.py` (whitelist/ops/bans JSON, UUIDs, refusal
   parsing, FEAT-02), `modpack.py` (`.mrpack` build, loader version detection, FEAT-04).
 

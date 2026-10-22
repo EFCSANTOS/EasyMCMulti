@@ -481,6 +481,29 @@ Core details (`core/playit.py`):
   `^[\w.-]+\.(log|txt|log.gz)$`, folder must be one of the two) with View (last 2000 lines,
   gz decompressed: `GET /api/server/logs/{folder}/{name}`) and Download (`?download=true`).
 
+## 26. Mod and plugin updates (FEAT-07)
+- `core/mod_updates.py::check(dest_dir, loader, mc_version)`: SHA-1 of every jar → **one**
+  `POST /v2/version_files/update {hashes, algorithm: sha1, loaders, game_versions}`; a jar is
+  outdated when the newest version's primary file has another hash. Works for uploaded jars Modrinth
+  recognises. Items: file, title (record title or file name), current, latest, changelog (plain
+  text, 400 chars), new_file, url, hashes, required dependencies. Stored in `runtime.mod_updates`.
+- `update()`: download to `<new>.download`, verify SHA-1 and SHA-512 (mismatch → error, old jar
+  untouched), rename the old jar to `<file>.old` (Minecraft only loads `.jar`), move the new one in,
+  record `filename`/`version` plus `previous`/`previous_version` (one generation: a second update
+  deletes the older `.old`), install missing required dependencies.
+- Routes (`routes/mods.py`): `GET /api/mods/updates`, `POST /api/mods/updates/check` (400 vanilla,
+  502 Modrinth down), `POST /api/mods/updates/apply {files?}` (409 while running; safety backup
+  `auto-pre-mod-update` **before** taking the lifecycle lock, since the backup takes it itself; per-mod
+  failures reported, the rest go on; `pack_changed` → "friends should download the pack again"),
+  `POST /api/mods/updates/rollback` (409 while running; restores every `.old`, removes the new jar,
+  fixes the record).
+- `scheduler.py::old_mods_tick`: once the server has run `OLD_MODS_KEEP_SEC` (300 s) since its last
+  start, `forget_old()` deletes the `.old` jars.
+- Daily: the self-update loop also runs the mod check and alerts (`updates`) once per new set;
+  updates are never installed unattended.
+- UI: Mods page → Updates card (Check, per-mod Update with old → new and changelog, Update all,
+  Undo last update).
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

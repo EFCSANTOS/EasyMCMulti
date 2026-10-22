@@ -288,6 +288,54 @@ function initModBrowser() {
   browseMods(true);
 }
 
+// ---------- Mod updates ----------
+function renderModUpdates(data) {
+  const list = document.getElementById('mod-updates-list');
+  if (!list) return;
+  const checked = data.checked_at ? `Last checked ${new Date(data.checked_at * 1000).toLocaleString()}.` : 'Not checked yet.';
+  renderItems(list, data.updates || [], (item) => itemRow(item.title, item.changelog || null,
+    `${item.current} → ${item.latest}`,
+    rowButton('Update', 'btn-primary', (b) => applyModUpdates([item.file], b))), `Everything is up to date. ${checked}`);
+  document.getElementById('mod-updates-all').hidden = (data.updates || []).length < 2;
+  document.getElementById('mod-updates-undo').hidden = !data.rollback_available;
+}
+
+async function loadModUpdates() {
+  if (!document.getElementById('mod-updates-list')) return;
+  try {
+    renderModUpdates(await fetchJson('/api/mods/updates'));
+  } catch (error) {
+    document.getElementById('mod-updates-card').hidden = true; // vanilla: nothing to update
+  }
+}
+
+async function checkModUpdates(button) {
+  await runAction(button, 'Asking Modrinth…', async () => {
+    const data = await fetchJson('/api/mods/updates/check', 'POST');
+    renderModUpdates(data);
+    return data.message;
+  });
+}
+
+async function applyModUpdates(files, button) {
+  await runAction(button, 'Backing up, then updating…', async () => {
+    const data = await fetchJson('/api/mods/updates/apply', 'POST', files ? { files } : {});
+    renderModUpdates(data);
+    await loadInstalledMods();
+    return data.message;
+  });
+}
+
+async function rollbackModUpdates(button) {
+  if (!window.confirm('Put the previous versions of the updated mods back?')) return;
+  await runAction(button, null, async () => {
+    const data = await fetchJson('/api/mods/updates/rollback', 'POST');
+    renderModUpdates(data);
+    await loadInstalledMods();
+    return data.message;
+  });
+}
+
 // ---------- Mod pack for friends (.mrpack) ----------
 async function loadModpack() {
   const card = document.getElementById('modpack-card');

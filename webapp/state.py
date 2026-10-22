@@ -69,6 +69,10 @@ class RuntimeState:
     diagnosis: list[dict[str, Any]] = field(default_factory=list)
     diagnosis_at: float = 0.0
     last_start_at: float = 0.0
+    # FEAT-07: last mod update check (full items incl. download URLs) and when it ran.
+    mod_updates: list[dict[str, Any]] = field(default_factory=list)
+    mod_updates_at: float = 0.0
+    mod_updates_notified: str = ""
     crash_times: list[float] = field(default_factory=list)
     # Outcome of the last background lifecycle job (create/start/restart/world switch), for the UI.
     operation_error: str = ""

@@ -88,6 +88,22 @@ def register(app: FastAPI, s: Services) -> None:
         s.shutdown()
         updater.restart_process()
 
+    def check_mods_daily() -> None:
+        """Mod/plugin updates (FEAT-07), alerted once per new set; never installed unattended."""
+        if str(common._effective_config().get("loader", "vanilla")) == "vanilla":
+            return
+        try:
+            found = s.check_mod_updates()
+        except Exception as exc:
+            update_log(f"Mod update check failed: {exc}")
+            return
+        key = ",".join(sorted(f"{item['file']}>{item['latest']}" for item in found))
+        if found and key != runtime.mod_updates_notified:
+            runtime.mod_updates_notified = key
+            lines = "\n".join(f"- {item['title']}: {item['current']} -> {item['latest']}" for item in found)
+            notify("updates", "Mod updates available", f"{len(found)} mod(s) can be updated:\n\n{lines}\n\n"
+                   "Open the Mods page, stop the server and click Update.", throttle=False)
+
     def update_check_loop() -> None:
         time.sleep(common.UPDATE_FIRST_CHECK_SEC)
         while not runtime.shutting_down:
@@ -103,6 +119,7 @@ def register(app: FastAPI, s: Services) -> None:
                     changes = "\n".join(f"- {c['subject']} ({c['when']})" for c in info.get("commits", []))
                     notify("updates", "Update available", f"{info['behind']} new change(s) on {info['upstream']}:\n\n"
                            f"{changes}\n\nOpen Server setup > Updates to install.", throttle=False)
+                check_mods_daily()
                 busy = runtime.state in {"starting", "stopping", "installing"} or bool(runtime.online_players)
                 if info.get("behind") and config.get("auto_update_install") and not busy and not info.get("local_changes"):
                     update_log("Installing the update automatically (no one is online).")
