@@ -2624,3 +2624,128 @@ def test_diagnosis_and_logs_cards_render():
     for element_id in ("diagnosis", "diagnosis-list", "log-list", "log-view"):
         assert f'id="{element_id}"' in console
     assert 'id="diagnosis"' in client.get("/dashboard/overview").text
+
+
+# ---------- Mod update checker (FEAT-07) ----------
+from core import mod_updates  # noqa: E402
+
+
+@pytest.fixture
+def outdated_mods(monkeypatch):
+    """A Fabric server with an outdated recorded mod, an outdated uploaded jar and an unknown jar."""
+    config_store.save({"loader": "fabric", "version": "1.21.1", "online_mode": False})
+    sdir = _world_dir()
+    mods = os.path.join(sdir, "mods")
+    os.makedirs(mods, exist_ok=True)
+    jars = {"sodium-0.5.jar": b"sodium old", "lithium-0.10.jar": b"lithium old", "homemade.jar": b"mine"}
+    for name, content in jars.items():
+        with open(os.path.join(mods, name), "wb") as handle:
+            handle.write(content)
+    from core import modrinth
+    modrinth._save_record(mods, {"P1": {"slug": "sodium", "title": "Sodium", "filename": "sodium-0.5.jar", "version": "0.5"}})
+    new_content = {"sodium-0.6.jar": b"sodium new", "lithium-0.11.jar": b"lithium new"}
+
+    def version(pid, number, filename, deps=()):
+        content = new_content[filename]
+        return {"project_id": pid, "version_number": number, "changelog": f"## {number}\n- fixes",
+                "dependencies": [{"project_id": d, "dependency_type": "required"} for d in deps],
+                "files": [{"primary": True, "filename": filename, "url": f"https://cdn.modrinth.com/{filename}",
+                           "size": len(content), "hashes": {"sha1": hashlib.sha1(content).hexdigest(),
+                                                            "sha512": hashlib.sha512(content).hexdigest()}}]}
+
+    requests_made = []
+
+    class Reply:
+        def __init__(self, data):
+            self._data = data
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._data
+
+    def fake_post(url, headers, timeout, json):
+        requests_made.append((url, json))
+        sha = {hashlib.sha1(c).hexdigest(): n for n, c in jars.items()}
+        answer = {}
+        for h in json["hashes"]:
+            if sha.get(h) == "sodium-0.5.jar":
+                answer[h] = version("P1", "0.6", "sodium-0.6.jar", deps=["P9"])
+            elif sha.get(h) == "lithium-0.10.jar":
+                answer[h] = version("P2", "0.11", "lithium-0.11.jar")
+        return Reply(answer)
+
+    def fake_download(url, dest, log=print, progress=None):
+        with open(dest, "wb") as handle:
+            handle.write(new_content[url.rsplit("/", 1)[1]])
+        return dest
+
+    installed_deps = []
+    monkeypatch.setattr(mod_updates.requests, "post", fake_post)
+    monkeypatch.setattr(mod_updates, "download", fake_download)
+    monkeypatch.setattr(modrinth, "install", lambda ref, loader, gv, dest, log=print: installed_deps.append(ref))
+    return {"mods": mods, "requests": requests_made, "deps": installed_deps, "sdir": sdir}
+
+
+def test_check_finds_updates_with_one_request(outdated_mods):
+    result = client.post("/api/mods/updates/check", auth=AUTH).json()
+    assert [(u["title"], u["current"], u["latest"]) for u in result["updates"]] == [
+        ("lithium-0.10", "lithium-0.10", "0.11"), ("Sodium", "0.5", "0.6")]
+    assert "fixes" in result["updates"][1]["changelog"] and "url" not in result["updates"][0]
+    [(url, body)] = outdated_mods["requests"]
+    assert url.endswith("/version_files/update") and len(body["hashes"]) == 3
+    assert body["loaders"] == ["fabric"] and body["game_versions"] == ["1.21.1"]
+
+
+def test_update_replaces_jar_keeps_old_and_installs_dependency(outdated_mods):
+    client.post("/api/mods/updates/check", auth=AUTH)
+    result = client.post("/api/mods/updates/apply", auth=AUTH, json={"files": ["sodium-0.5.jar"]}).json()
+    mods = outdated_mods["mods"]
+    assert result["updated"] == ["Sodium"] and result["pack_changed"] is True
+    assert open(os.path.join(mods, "sodium-0.6.jar"), "rb").read() == b"sodium new"
+    assert os.path.exists(os.path.join(mods, "sodium-0.5.jar.old"))
+    assert not os.path.exists(os.path.join(mods, "sodium-0.5.jar"))
+    from core import modrinth
+    assert modrinth.load_record(mods)["P1"]["version"] == "0.6"
+    assert outdated_mods["deps"] == ["P9"]
+    assert [u["file"] for u in result["updates"]] == ["lithium-0.10.jar"] and result["rollback_available"]
+    assert [b["label"] for b in backups_core.list_backups(outdated_mods["sdir"])] == ["auto-pre-mod-update"]
+    undo = client.post("/api/mods/updates/rollback", auth=AUTH).json()
+    assert "Restored 1" in undo["message"]
+    assert open(os.path.join(mods, "sodium-0.5.jar"), "rb").read() == b"sodium old"
+    assert not os.path.exists(os.path.join(mods, "sodium-0.6.jar"))
+    assert modrinth.load_record(mods)["P1"]["filename"] == "sodium-0.5.jar"
+
+
+def test_corrupted_download_leaves_the_old_jar(outdated_mods, monkeypatch):
+    client.post("/api/mods/updates/check", auth=AUTH)
+    monkeypatch.setattr(mod_updates, "download",
+                        lambda url, dest, log=print, progress=None: open(dest, "wb").write(b"tampered") and dest)
+    result = client.post("/api/mods/updates/apply", auth=AUTH, json={}).json()
+    assert result["updated"] == [] and len(result["failed"]) == 2 and "corrupted" in result["message"]
+    assert sorted(os.listdir(outdated_mods["mods"])) == [".ez-modrinth.json", "homemade.jar", "lithium-0.10.jar",
+                                                         "sodium-0.5.jar"]
+
+
+def test_updates_need_a_stopped_server(outdated_mods, fake_server):
+    client.post("/api/mods/updates/check", auth=AUTH)
+    _start()
+    assert client.post("/api/mods/updates/apply", auth=AUTH, json={}).status_code == 409
+    assert client.post("/api/mods/updates/rollback", auth=AUTH).status_code == 409
+
+
+def test_old_jars_are_removed_after_the_server_ran_fine(outdated_mods, fake_server):
+    client.post("/api/mods/updates/check", auth=AUTH)
+    client.post("/api/mods/updates/apply", auth=AUTH, json={})
+    _start()
+    tick = app.state.services.scheduler_tick
+    started = app.state.runtime.last_start_at
+    tick(datetime.datetime.fromtimestamp(started + 60))
+    assert mod_updates.old_jars(outdated_mods["mods"]) != []
+    tick(datetime.datetime.fromtimestamp(started + common_module.OLD_MODS_KEEP_SEC + 1))
+    assert mod_updates.old_jars(outdated_mods["mods"]) == []
+
+
+def test_vanilla_has_no_mod_updates():
+    assert client.post("/api/mods/updates/check", auth=AUTH).status_code == 400
