@@ -30,7 +30,6 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 |---|---|---|---|---|
 | [FEAT-09](features/FEAT-09-version-upgrade-world-migration.md) | Version upgrade with world migration | P2 | M | FEAT-01, FEAT-07 |
 | [FEAT-10](features/FEAT-10-friend-accounts-with-roles.md) | Friend accounts with limited permissions | P2 | M | FIX-01, FIX-05 |
-| [FEAT-15](features/FEAT-15-disk-usage-and-cleanup.md) | Disk usage view and cleanup | P2 | S | — |
 | [FEAT-16](features/FEAT-16-installable-mobile-app.md) | Installable phone app (PWA) | P3 | S | — |
 | [FEAT-17](features/FEAT-17-stable-remote-address.md) | Stable remote dashboard address | P3 | M | FIX-01 |
 | [FEAT-18](features/FEAT-18-bedrock-crossplay.md) | Bedrock crossplay (Geyser + Floodgate) | P3 | M | — |

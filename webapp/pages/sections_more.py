@@ -236,6 +236,19 @@ _SECTION_BACKUPS = f"""
             <p id="backup-total" class="hint"></p>
             <div id="backup-list" class="item-list"></div>
           </div>
+          <div id="storage" class="card">
+            <div class="card-header">
+              <div>
+                <h2>Storage</h2>
+                <p id="storage-free" class="card-sub">Measuring…</p>
+              </div>
+              <div class="card-tools">
+                <button id="storage-refresh-button" class="icon-btn" type="button" title="Measure again" aria-label="Measure storage again">{_icon("restart")}</button>
+              </div>
+            </div>
+            <div id="storage-list" class="item-list"></div>
+            <p class="hint">Deleting needs the server stopped. The server folder in use can't be deleted here.</p>
+          </div>
           <div class="card">
             <div class="card-header">
               <div>

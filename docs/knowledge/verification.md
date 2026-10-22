@@ -44,6 +44,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Console | Works — live over `/ws/console` (headless Edge: a command echoed in 0.03 s, no polling while the socket is open); `?since=` polling fallback; filters, search, ↑ history, Tab completion; chat box on the overview |
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
+| Storage use and cleanup | Works in tests (synthetic tree: sizes, active/unused, Java need, safe deletes, low-space alert once) and headless Edge (unused server folder deleted; the active one has no Delete) |
 | Server icon, MOTD editor, all properties | Works in tests and headless Edge (a 300×200 JPEG became a 64×64 PNG; two-line coloured MOTD preview; property filter/save; managed keys disabled). **Not yet seen in a real Minecraft multiplayer list** |
 | Performance presets, RAM advice, JVM flags | Works in tests and headless Edge on a simulated 4 GB phone (every preset capped at 2048 MB, red advice above it); the flags are not yet run against a real JVM here |
 | Player activity and playtime | Works in tests (sessions, stops, crash mid-session, compaction, half-written line) and headless Edge (10 days of synthetic play: rows, chart, tooltip at phone width) |
