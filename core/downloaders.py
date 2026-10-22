@@ -221,9 +221,30 @@ def prepare(loader, version, sdir, java_exe, log=print, progress=None):
     log("Installation complete.")
 
 
-def launch_args(loader, java_exe, sdir, ram_mb):
-    """Build the full server launch command."""
-    base = [java_exe, f"-Xms{ram_mb}M", f"-Xmx{ram_mb}M"]
+# Aikar's G1 garbage-collector flags (https://docs.papermc.io/paper/aikars-flags), the usual cure for
+# lag spikes. Removed: G1RSetUpdatingPauseTimePercent (obsolete since Java 20; only prints a warning).
+_AIKAR_FLAGS = [
+    "-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis=200", "-XX:+UnlockExperimentalVMOptions",
+    "-XX:+DisableExplicitGC", "-XX:G1HeapWastePercent=5", "-XX:G1MixedGCCountTarget=4",
+    "-XX:G1MixedGCLiveThresholdPercent=90", "-XX:SurvivorRatio=32", "-XX:+PerfDisableSharedMem",
+    "-XX:MaxTenuringThreshold=1", "-Dusing.aikars.flags=https://mcflags.emc.gs", "-Daikars.new.flags=true",
+]
+
+
+def jvm_flags(ram_mb, is_phone=False):
+    """Tuned GC flags for the heap size. Phones skip AlwaysPreTouch (slow start, memory pressure)."""
+    if ram_mb > 12 * 1024:
+        sizing = ["-XX:G1NewSizePercent=40", "-XX:G1MaxNewSizePercent=50", "-XX:G1HeapRegionSize=16M",
+                  "-XX:G1ReservePercent=15", "-XX:InitiatingHeapOccupancyPercent=20"]
+    else:
+        sizing = ["-XX:G1NewSizePercent=30", "-XX:G1MaxNewSizePercent=40", "-XX:G1HeapRegionSize=8M",
+                  "-XX:G1ReservePercent=20", "-XX:InitiatingHeapOccupancyPercent=15"]
+    return _AIKAR_FLAGS + sizing + ([] if is_phone else ["-XX:+AlwaysPreTouch"])
+
+
+def launch_args(loader, java_exe, sdir, ram_mb, extra_flags=()):
+    """Build the full server launch command (extra_flags go right after the memory settings)."""
+    base = [java_exe, f"-Xms{ram_mb}M", f"-Xmx{ram_mb}M", *extra_flags]
     if loader in JAR_LOADERS:
         return base + ["-jar", "server.jar", "nogui"]
     args_file = _find_args_file(sdir)

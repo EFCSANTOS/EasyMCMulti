@@ -137,6 +137,9 @@ def _default_config() -> dict[str, Any]:
         "backup_prune_manual": False,
         # Schedule (FEAT-06): daily restart "HH:MM" ("" = off), stop after N empty minutes (0 = off),
         # quiet hours "HH:MM"–"HH:MM" without autostart / crash restart ("" = off).
+        # Performance (FEAT-13): tuned GC flags on by default; extra JVM arguments for advanced users.
+        "jvm_preset_flags": True,
+        "jvm_extra_args": "",
         "restart_daily_time": "",
         "idle_stop_minutes": 0,
         "quiet_hours_start": "",

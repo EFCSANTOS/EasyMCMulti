@@ -26,6 +26,8 @@ const CONFIG_FIELDS = [
   ['autostart-server', 'autostart_server', 'checkbox'],
   ['auto-restart', 'auto_restart', 'checkbox'],
   ['autostart-playit', 'autostart_playit', 'checkbox'],
+  ['jvm-preset-flags', 'jvm_preset_flags', 'checkbox'],
+  ['jvm-extra-args', 'jvm_extra_args', 'text'],
   ['restart-daily-time', 'restart_daily_time', 'text'],
   ['idle-stop-minutes', 'idle_stop_minutes', 'number'],
   ['quiet-hours-start', 'quiet_hours_start', 'text'],
@@ -83,6 +85,69 @@ async function onLoaderChange() {
   // Keep the saved version selected only if the new loader offers it.
   const saved = appState.config.loader === loader ? appState.config.version : null;
   populateVersions(saved || appState.latestVersionList[0]);
+}
+
+// ---------- Performance presets and RAM advice ----------
+const PERFORMANCE_PRESETS = {
+  phone: { label: 'Phone / low-power', ram: 2048, view: 6, sim: 4 },
+  balanced: { label: 'Balanced', ram: 3072, view: 10, sim: 8 },
+  modded: { label: 'PC with many mods', ram: 6144, view: 10, sim: 8 },
+};
+const MODDED_LOADERS = ['fabric', 'forge', 'neoforge'];
+
+// Safe range for this device: at most ~50% of a phone's memory (Android needs headroom), ~70% on a PC.
+function ramLimits(loader) {
+  const host = appState.host || {};
+  const total = host.ram_mb || 0;
+  const max = total ? Math.max(512, Math.floor((total * (host.phone ? 0.5 : 0.7)) / 256) * 256) : 8192;
+  const wanted = MODDED_LOADERS.includes(loader) ? 3072 : (host.phone ? 1024 : 2048);
+  return { total, max, min: Math.min(wanted, max), phone: Boolean(host.phone) };
+}
+
+function currentLoader() {
+  const select = document.getElementById('loader-select');
+  return select ? select.value : (appState.config.loader || 'vanilla');
+}
+
+function renderRamAdvice() {
+  const advice = document.getElementById('ram-advice');
+  const input = document.getElementById('ram-input');
+  const paperHint = document.getElementById('paper-pregen-hint');
+  if (paperHint) paperHint.hidden = currentLoader() !== 'paper';
+  if (!advice || !input || !appState.host) return;
+  const limits = ramLimits(currentLoader());
+  const device = limits.phone ? 'phone' : 'computer';
+  const value = Number(input.value);
+  if (value > limits.max) {
+    advice.textContent = `Too much for this ${device} (${limits.total} MB total): use at most ${limits.max} MB, or it may be slowed down or stopped by the system.`;
+    advice.classList.add('hint-error');
+  } else {
+    advice.textContent = `Recommended: ${limits.min}–${limits.max} MB on this ${device} (${limits.total} MB total).`;
+    advice.classList.remove('hint-error');
+  }
+}
+
+async function loadHostInfo() {
+  if (!document.getElementById('ram-advice')) return;
+  try {
+    appState.host = await fetchJson('/api/system/host');
+  } catch (error) {
+    appState.host = null;
+  }
+  renderRamAdvice();
+}
+
+async function applyPreset(name, button) {
+  const preset = PERFORMANCE_PRESETS[name];
+  await runAction(button, null, async () => {
+    const ram = Math.min(preset.ram, ramLimits(currentLoader()).max);
+    appState.config = await fetchJson('/api/config', 'PUT', {
+      ram_mb: ram, view_distance: preset.view, simulation_distance: preset.sim,
+    });
+    populateConfigForm(appState.config);
+    renderRamAdvice();
+    return `${preset.label}: ${ram} MB memory, view distance ${preset.view}, simulation distance ${preset.sim}.`;
+  });
 }
 
 async function loadConfig() {

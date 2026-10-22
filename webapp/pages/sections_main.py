@@ -122,7 +122,7 @@ _SECTION_SETUP = """
               <div class="field">
                 <label for="ram-input">Memory (MB)</label>
                 <input id="ram-input" name="ram_mb" type="number" min="512" step="256" value="2048" />
-                <p class="hint">2048–4096 MB suits most small servers.</p>
+                <p id="ram-advice" class="hint">2048–4096 MB suits most small servers.</p>
               </div>
               <div class="field">
                 <label for="port-input">Port</label>
@@ -231,6 +231,39 @@ _SECTION_ALWAYS_ON = f"""
           <div class="form-actions">
             <p class="hint">To start the dashboard itself on boot, see "Run 24/7" in the README.</p>
             <button id="always-on-save-button" class="btn btn-primary" type="button">Save</button>
+          </div>
+        </section>
+"""
+
+_SECTION_PERFORMANCE = f"""
+        <section id="performance" class="card">
+          <div class="card-header">
+            <div>
+              <h2>Performance</h2>
+              <p class="card-sub">A preset sets memory, view distance and simulation distance for this device; you can
+                still change each of them afterwards. Changes apply on the next start.</p>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-ghost btn-sm" type="button" data-preset="phone">Phone / low-power</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-preset="balanced">Balanced</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-preset="modded">PC with many mods</button>
+          </div>
+          <div class="switch-list">
+            {_switch("jvm-preset-flags", "Optimised Java flags",
+                     "Aikar's garbage-collector tuning: fewer lag spikes, same memory.", True)}
+          </div>
+          <div class="field">
+            <label for="jvm-extra-args">Extra Java options (advanced)</label>
+            <input id="jvm-extra-args" maxlength="500" placeholder="-XX:+UseStringDeduplication" autocomplete="off" />
+            <p class="hint">Only -X… and -D… options. Leave empty if unsure.</p>
+          </div>
+          <p id="paper-pregen-hint" class="callout callout-info" hidden>
+            <strong>Paper tip:</strong> pre-generate the world with the Chunky plugin (Mods page) so exploring
+            doesn't lag the server.
+          </p>
+          <div class="form-actions">
+            <button id="performance-save-button" class="btn btn-primary" type="button">Save</button>
           </div>
         </section>
 """

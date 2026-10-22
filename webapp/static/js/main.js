@@ -15,6 +15,12 @@ function bindEvents() {
   on('advanced-save-button', 'click', (event, button) => saveConfigFromForm(button));
   on('always-on-save-button', 'click', (event, button) => saveConfigFromForm(button));
   on('schedule-save-button', 'click', (event, button) => saveConfigFromForm(button));
+  on('performance-save-button', 'click', (event, button) => saveConfigFromForm(button));
+  on('ram-input', 'input', () => renderRamAdvice());
+  on('loader-select', 'change', () => renderRamAdvice());
+  document.querySelectorAll('[data-preset]').forEach((button) => {
+    button.addEventListener('click', () => applyPreset(button.dataset.preset, button));
+  });
   on('alerts-form', 'submit', (event) => {
     event.preventDefault();
     saveAlerts(document.getElementById('alerts-save-button'));
@@ -103,6 +109,7 @@ async function boot() {
   bindEvents();
   bindMetrics();
   await loadConfig();
+  await loadHostInfo();
   await loadStatus();
   await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(), loadInvite(), loadModpack(),
     loadDiagnosis(), loadLogs(), loadModUpdates(),
