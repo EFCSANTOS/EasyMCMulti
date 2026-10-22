@@ -14,6 +14,7 @@ function bindEvents() {
   });
   on('advanced-save-button', 'click', (event, button) => saveConfigFromForm(button));
   on('always-on-save-button', 'click', (event, button) => saveConfigFromForm(button));
+  on('schedule-save-button', 'click', (event, button) => saveConfigFromForm(button));
   on('alerts-form', 'submit', (event) => {
     event.preventDefault();
     saveAlerts(document.getElementById('alerts-save-button'));

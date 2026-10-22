@@ -116,7 +116,7 @@ def register(app: FastAPI, s: Services) -> None:
         return latest is None or now - latest["created"].timestamp() >= plan["interval_hours"] * 3600
 
     def backup_tick(now: float | None = None) -> None:
-        """One scheduler check (the loop calls it every BACKUP_CHECK_SEC)."""
+        """One backup check (webapp/scheduler.py calls it every SCHEDULER_TICK_SEC)."""
         if not backup_due(now or time.time()):
             return
         try:
@@ -124,13 +124,7 @@ def register(app: FastAPI, s: Services) -> None:
         except BackupError as exc:
             report_failure("scheduled", exc)
 
-    def backup_loop() -> None:
-        while not runtime.shutting_down:
-            time.sleep(common.BACKUP_CHECK_SEC)
-            backup_tick()
-
     s.safety_backup = safety_backup
-    s.backup_loop = backup_loop
     s.backup_tick = backup_tick
 
     @app.post("/api/server/backup")

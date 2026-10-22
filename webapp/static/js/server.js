@@ -26,6 +26,10 @@ const CONFIG_FIELDS = [
   ['autostart-server', 'autostart_server', 'checkbox'],
   ['auto-restart', 'auto_restart', 'checkbox'],
   ['autostart-playit', 'autostart_playit', 'checkbox'],
+  ['restart-daily-time', 'restart_daily_time', 'text'],
+  ['idle-stop-minutes', 'idle_stop_minutes', 'number'],
+  ['quiet-hours-start', 'quiet_hours_start', 'text'],
+  ['quiet-hours-end', 'quiet_hours_end', 'text'],
 ];
 
 function collectConfigFromPage() {
@@ -131,7 +135,11 @@ function renderStatus(status) {
   const pill = document.getElementById('server-state');
   if (pill) pill.dataset.state = state;
   const label = document.getElementById('server-state-label');
-  if (label) label.textContent = STATE_LABELS[state] || state;
+  if (label) {
+    const idle = state === 'stopped' && status.stopped_reason === 'idle';
+    label.textContent = idle ? 'Stopped · idle' : (STATE_LABELS[state] || state);
+    label.title = idle ? 'Stopped automatically because nobody was online (Server setup → Schedule).' : '';
+  }
   renderServerControls();
 
   const port = appState.config.server_port || 25565;

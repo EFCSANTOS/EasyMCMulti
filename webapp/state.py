@@ -57,6 +57,13 @@ class RuntimeState:
     shutting_down: bool = False
     # The world changed since the last backup (the server ran); the backup scheduler only acts then.
     backup_dirty: bool = False
+    # FEAT-06: date (ISO) of today's daily restart once done, warnings already sent (minutes),
+    # when the server became empty (epoch seconds; None while someone is online), and why it last
+    # stopped ("idle" for the idle stop, shown on the overview; "" otherwise).
+    daily_restart_done: str = ""
+    restart_warnings_sent: set[int] = field(default_factory=set)
+    empty_since: float | None = None
+    stopped_reason: str = ""
     crash_times: list[float] = field(default_factory=list)
     # Outcome of the last background lifecycle job (create/start/restart/world switch), for the UI.
     operation_error: str = ""
@@ -81,8 +88,11 @@ class RuntimeState:
         with self.lock:
             if event == "joined":
                 self.online_players.add(name)
+                self.empty_since = None
             else:
                 self.online_players.discard(name)
+                if not self.online_players:
+                    self.empty_since = time.time()
         if event == "joined":
             self.note_player(name, rejected=False)
         return name, event
@@ -116,6 +126,7 @@ class RuntimeState:
                 "operation": self.operation,
                 "operation_error": self.operation_error,
                 "operation_message": self.operation_message,
+                "stopped_reason": self.stopped_reason,
                 "install_status": self.install_status,
                 "install_progress": self.install_progress,
                 "install_message": self.install_message,

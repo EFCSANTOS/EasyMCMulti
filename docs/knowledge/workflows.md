@@ -155,7 +155,8 @@ Aliases `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/me
   `[backup] created …; removed N old backup(s)`.
 - Retention (`to_prune`, per world folder): keep the newest `backup_keep_recent` (8) plus the newest
   of each of the last `backup_keep_daily` (7) days; manual backups only when `backup_prune_manual`.
-- Schedule: `backup_loop` (started by autostart) calls `backup_tick` every `BACKUP_CHECK_SEC` (60 s):
+- Schedule: `webapp/scheduler.py::scheduler_loop` (started by autostart) calls `backup_tick` every
+  `SCHEDULER_TICK_SEC` (60 s):
   off when `backup_interval_hours` is 0 (default 6); `runtime.backup_dirty` is set while the server
   runs and cleared by a backup made while it is stopped, so an unchanged world isn't backed up again;
   due when the newest backup of the active world is older than the interval.
@@ -433,6 +434,28 @@ Core details (`core/playit.py`):
   `POST /api/modpack/build` → summary toast (+ warnings), then `GET /api/modpack/download`.
 - Friends: status page shows "Download the mod pack" (`/s/<token>/modpack.mrpack`, no auth, 404 when
   the token is wrong or there is nothing to pack); the invite says to get it there.
+
+## 24. Schedule: daily restart, idle stop, quiet hours (FEAT-06)
+- `webapp/scheduler.py`: one loop, one tick (`scheduler_tick(now)`): backups (§11), then the
+  daily restart, then the idle stop. Server setup → Schedule card (config keys below; saved with the
+  other setup fields through `CONFIG_FIELDS`).
+- **Daily restart** at `restart_daily_time` ("HH:MM" host local time, "" = off), only while running:
+  within 10 minutes of the time, if someone is online, `say Server restarting in N minute(s).` at
+  10, 5 and 1 minutes (N is the real time left, so a late joiner hears "3", not "5");
+  `runtime.restart_warnings_sent` prevents repeats. At the time (up to `RESTART_LATE_LIMIT` = 30 min
+  late, not later): `say … now`, `safety_backup("restart")`, then the normal restart job
+  (`start_lifecycle_job("restarting", restart_job)`); `runtime.daily_restart_done` = today's date
+  (cleared again if the lifecycle lock is busy, so the next tick retries); friends get "Daily
+  restart…".
+- **Idle stop** after `idle_stop_minutes` (0 = off) with nobody online: `runtime.empty_since` is set
+  when the server starts and when the last player leaves, cleared by a join. Due → lifecycle lock
+  (non-blocking; skip this tick if busy) → `stopped_reason = "idle"` → `request_stop()` (deliberate,
+  so not a crash) → console line and one friends message with the reason (the generic "Server is
+  offline." is suppressed). `/api/status` returns `stopped_reason`; the pill reads "Stopped · idle".
+  A start clears it.
+- **Quiet hours** `quiet_hours_start`–`quiet_hours_end` (may wrap midnight; "" = off,
+  `common._in_quiet_hours`): `launch_when_free` skips `autostart` and `crash restart` starts in that
+  window (console `[schedule] quiet hours: … skipped`). Manual starts and the daily restart still work.
 
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash

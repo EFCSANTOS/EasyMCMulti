@@ -2417,3 +2417,99 @@ def test_dashboard_scripts_do_not_redefine_each_others_globals():
     names = re.findall(r"(?m)^(?:async function|function|const|let)\s+([A-Za-z_$][\w$]*)", _dashboard_js())
     duplicates = sorted({name for name in names if names.count(name) > 1})
     assert duplicates == [], duplicates
+
+
+# ---------- Scheduled restarts, idle stop, quiet hours (FEAT-06) ----------
+def _at(hhmm, day=22):
+    hours, minutes = map(int, hhmm.split(":"))
+    return datetime.datetime(2026, 10, day, hours, minutes, 30)
+
+
+@pytest.fixture
+def schedule_runtime():
+    runtime = app.state.runtime
+    runtime.daily_restart_done = ""
+    runtime.restart_warnings_sent.clear()
+    runtime.stopped_reason = ""
+    runtime.online_players.clear()
+    yield runtime
+    runtime.online_players.clear()
+
+
+def test_daily_restart_warns_then_restarts_once_a_day(fake_server, schedule_runtime):
+    config_store.save({"restart_daily_time": "05:00"})
+    _start()
+    schedule_runtime.online_players.add("Alex")
+    tick = app.state.services.scheduler_tick
+    for hhmm in ("04:45", "04:50", "04:51", "04:55", "04:56", "04:59"):
+        tick(_at(hhmm))
+    says = [c for c in fake_server[0].sent if c.startswith("say")]
+    assert says == ["say Server restarting in 10 minutes.", "say Server restarting in 5 minutes.",
+                    "say Server restarting in 1 minute."]
+    tick(_at("05:00"))
+    _wait_idle()
+    assert len(fake_server) == 2 and fake_server[1].is_running() and not fake_server[0].is_running()
+    tick(_at("05:01"))
+    tick(_at("05:20"))
+    _wait_idle()
+    assert len(fake_server) == 2  # once a day
+    schedule_runtime.online_players.add("Alex")
+    tick(_at("04:50", day=23))
+    assert fake_server[1].sent == ["say Server restarting in 10 minutes."]
+
+
+def test_daily_restart_says_the_real_time_left_and_skips_when_late(fake_server, schedule_runtime):
+    config_store.save({"restart_daily_time": "05:00"})
+    _start()
+    tick = app.state.services.scheduler_tick
+    tick(_at("04:50"))  # nobody online: no warning
+    schedule_runtime.online_players.add("Sam")
+    tick(_at("04:57"))
+    assert [c for c in fake_server[0].sent if c.startswith("say")] == ["say Server restarting in 3 minutes."]
+    schedule_runtime.daily_restart_done = ""
+    tick(_at("05:45"))  # dashboard was off at 05:00; too late now
+    assert len(fake_server) == 1
+
+
+def test_idle_server_stops_and_says_why(fake_server, schedule_runtime, discord_posts):
+    client.put("/api/notifications", auth=AUTH, json={"discord_friends_url": FRIENDS_HOOK})
+    config_store.save({"idle_stop_minutes": 15})
+    _start()
+    started = schedule_runtime.empty_since
+    tick = app.state.services.scheduler_tick
+    tick(datetime.datetime.fromtimestamp(started + 14 * 60))
+    assert fake_server[0].is_running()
+    schedule_runtime.track_player_event("[12:00:00] [Server thread/INFO]: Alex joined the game")
+    tick(datetime.datetime.fromtimestamp(started + 40 * 60))
+    assert fake_server[0].is_running() and schedule_runtime.empty_since is None  # someone is playing
+    schedule_runtime.track_player_event("[12:00:00] [Server thread/INFO]: Alex left the game")
+    tick(datetime.datetime.fromtimestamp(schedule_runtime.empty_since + 16 * 60))
+    assert not fake_server[0].is_running()
+    fake_server[0].exit(0)
+    status = client.get("/api/status", auth=AUTH).json()
+    assert status["state"] == "stopped" and status["stopped_reason"] == "idle"
+    assert _wait_until(lambda: any("nobody was online for 15 minutes" in c for _, c in discord_posts))
+    time.sleep(0.1)
+    assert not any(c == "Server is offline." for _, c in discord_posts)  # told once, with the reason
+    _start()
+    assert client.get("/api/status", auth=AUTH).json()["stopped_reason"] == ""
+
+
+def test_quiet_hours_wrap_midnight_and_block_autostart(fake_server, monkeypatch):
+    config = {"quiet_hours_start": "23:00", "quiet_hours_end": "07:00"}
+    assert common_module._in_quiet_hours(config, _at("23:30"))
+    assert common_module._in_quiet_hours(config, _at("06:59"))
+    assert not common_module._in_quiet_hours(config, _at("07:00"))
+    assert not common_module._in_quiet_hours({"quiet_hours_start": "", "quiet_hours_end": "07:00"}, _at("03:00"))
+    assert common_module._in_quiet_hours({"quiet_hours_start": "13:00", "quiet_hours_end": "14:00"}, _at("13:15"))
+    monkeypatch.setattr(common_module, "_in_quiet_hours", lambda config, now=None: True)
+    assert app.state.services.launch_when_free("autostart") is False
+    assert fake_server == []
+
+
+def test_schedule_settings_are_validated():
+    for body in ({"restart_daily_time": "25:00"}, {"quiet_hours_start": "5am"}, {"idle_stop_minutes": -5}):
+        assert client.put("/api/config", auth=AUTH, json=body).status_code == 422, body
+    ok = client.put("/api/config", auth=AUTH, json={"restart_daily_time": "05:00", "quiet_hours_end": ""})
+    assert ok.status_code == 200
+    assert 'id="schedule-save-button"' in client.get("/dashboard/setup").text

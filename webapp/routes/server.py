@@ -160,6 +160,9 @@ def register(app: FastAPI, s: Services) -> None:
         try:
             if runtime.stop_requested and reason == "crash restart":
                 return False  # the user stopped the server in the meantime
+            if reason in ("autostart", "crash restart") and common._in_quiet_hours(common._effective_config()):
+                append_console_line(f"[schedule] quiet hours: {reason} skipped")
+                return False
             if server_running():
                 return False
             launch_server()
@@ -198,7 +201,8 @@ def register(app: FastAPI, s: Services) -> None:
             runtime.process = None
             runtime.clear_players()
             if code == 0 or runtime.stop_requested:
-                s.notify_friends("status", "Server is offline.")
+                if runtime.stopped_reason != "idle":  # the idle stop already told them why
+                    s.notify_friends("status", "Server is offline.")
                 return
             if common._effective_config().get("auto_restart"):
                 s.notify_friends("status", "Server crashed; it restarts by itself in a moment.")
@@ -234,6 +238,8 @@ def register(app: FastAPI, s: Services) -> None:
         runtime.process = process
         process.start()
         runtime.set_state("running", "idle")
+        runtime.empty_since = time.time()  # the idle timer runs until someone joins
+        runtime.stopped_reason = ""
         append_console_line(f"[server] started with {loader} {version}")
         address = s.join_address(config)
         s.notify_friends("status", f"Server is online: {common.LOADER_LABELS.get(loader, loader)} {version}"
@@ -340,3 +346,4 @@ def register(app: FastAPI, s: Services) -> None:
     s.stop_and_wait = stop_and_wait
     s.server_running = server_running
     s.stop_server = stop_server
+    s.restart_job = restart_job
