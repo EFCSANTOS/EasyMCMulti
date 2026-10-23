@@ -1698,3 +1698,17 @@ select[aria-invalid="true"] {
     transition: none !important;
   }
 }
+
+/* Mod jars for friends, one link each (shown after "Download jars") */
+.file-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.file-list .hint {
+  display: inline;
+  margin: 0 0 0 6px;
+}

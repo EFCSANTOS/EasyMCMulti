@@ -119,7 +119,8 @@ def build(sdir, loader, mc_version, name, log=print):
     meta_path = os.path.join(sdir, PACK_META)
     key = fingerprint(sdir, loader, mc_version, name)
     cached = fsutil.read_json(meta_path, {})
-    if cached.get("fingerprint") == key and os.path.isfile(pack_path):
+    # Summaries from before "client_jars" existed are rebuilt once so the jar download can use it.
+    if cached.get("fingerprint") == key and "client_jars" in cached and os.path.isfile(pack_path):
         return cached
 
     hashes = {jar: _hashes(os.path.join(mods_dir, jar)) for jar in jars}
@@ -131,7 +132,7 @@ def build(sdir, loader, mc_version, name, log=print):
         versions, projects = {}, {}
         warnings.append(f"Modrinth could not be reached ({exc}); every mod is bundled in the pack instead.")
 
-    files, bundled, excluded = [], [], []
+    files, bundled, excluded, client_jars = [], [], [], []
     for jar in jars:
         sha1, sha512 = hashes[jar]
         version = versions.get(sha1)
@@ -151,6 +152,7 @@ def build(sdir, loader, mc_version, name, log=print):
             })
         else:
             bundled.append(jar)
+        client_jars.append(jar)
     if bundled:
         warnings.append(f"{len(bundled)} mod(s) are not on Modrinth and are bundled in the pack: "
                         f"{', '.join(bundled)}. Only share them if their licence allows it.")
@@ -184,6 +186,7 @@ def build(sdir, loader, mc_version, name, log=print):
         "modrinth": len(files),
         "bundled": bundled,
         "excluded": excluded,
+        "client_jars": client_jars,
         "loader_version": loader_ver,
         "warnings": warnings,
     }
@@ -194,3 +197,11 @@ def build(sdir, loader, mc_version, name, log=print):
 
 def pack_path(sdir):
     return os.path.join(sdir, PACK_FILE)
+
+
+def client_jar_path(sdir, loader, summary, name):
+    """Path of a jar players need (in the summary's client_jars), or None for anything else."""
+    if name not in summary.get("client_jars", []):
+        return None  # server-only mods, unknown names and path tricks
+    path = os.path.join(paths.content_folder(loader, sdir), name)
+    return path if os.path.isfile(path) else None

@@ -89,6 +89,8 @@
         text-decoration: none;
       }
       .hint { display: block; margin-top: 0.4rem; color: var(--muted); font-size: 0.82rem; }
+      #mod-jars { margin-top: 0.8rem; }
+      #mod-jar-list { margin: 0.5rem 0 0; padding-left: 1.1rem; font-size: 0.85rem; overflow-wrap: anywhere; }
       .error { color: var(--critical); }
     </style>
   </head>
@@ -127,6 +129,10 @@
           <dd>
             <a id="modpack" class="button" href="#" download>Download the mod pack</a>
             <span class="hint">Open it with the Modrinth App or Prism Launcher (Add instance → Import).</span>
+            <button id="mod-jars" class="button" type="button">Download the mod files (.jar)</button>
+            <span class="hint">Or get each mod as its own .jar and put them in your game's mods folder.
+              Allow multiple downloads if the browser asks.</span>
+            <ul id="mod-jar-list" hidden></ul>
           </dd>
         </div>
       </dl>
@@ -165,6 +171,34 @@
         note.textContent = 'Updates every 30 seconds.';
       }
 
+      // One jar at a time with a short gap: browsers drop downloads started in the same instant.
+      async function downloadModJars() {
+        const button = document.getElementById('mod-jars');
+        button.disabled = true;
+        try {
+          const response = await fetch(`${basePath()}/mods.json`, { cache: 'no-store' });
+          if (!response.ok) return;
+          const list = document.getElementById('mod-jar-list');
+          const links = (await response.json()).jars.map((jar) => {
+            const link = document.createElement('a');
+            link.href = `${basePath()}/mods/${encodeURIComponent(jar.name)}`;
+            link.download = jar.name;
+            link.textContent = jar.name;
+            const item = document.createElement('li');
+            item.appendChild(link);
+            return item;
+          });
+          list.replaceChildren(...links);
+          list.hidden = !links.length;
+          for (const item of links) {
+            item.firstChild.click();
+            await new Promise((resolve) => setTimeout(resolve, 400));
+          }
+        } finally {
+          button.disabled = false;
+        }
+      }
+
       function basePath() {
         return location.pathname.replace(/\/$/, '');
       }
@@ -200,6 +234,7 @@
         setTimeout(() => { event.target.textContent = 'Copy'; }, 1500);
       });
 
+      document.getElementById('mod-jars').addEventListener('click', downloadModJars);
       refresh();
       setInterval(refresh, REFRESH_MS);
     </script>
