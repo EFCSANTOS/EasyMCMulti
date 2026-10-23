@@ -450,6 +450,13 @@ Core details (`core/playit.py`):
   `POST /api/modpack/build` → summary toast (+ warnings), then `GET /api/modpack/download`.
 - Friends: status page shows "Download the mod pack" (`/s/<token>/modpack.mrpack`, no auth, 404 when
   the token is wrong or there is nothing to pack); the invite says to get it there.
+- Second option, single jars (no zip), for launchers without .mrpack import: the summary lists
+  `client_jars` (every jar in the pack, Modrinth or bundled; server-only ones left out; older cached
+  summaries without it are rebuilt once). Owner: "Download jars" → `GET /api/modpack/jars`
+  `{jars: [{name, size}], excluded, warnings}`, then one `GET /api/modpack/jars/<name>` per jar, 400 ms
+  apart (browsers drop simultaneous downloads), and the links stay listed in the card. Friends: "Download
+  the mod files (.jar)" → `/s/<token>/mods.json` + `/s/<token>/mods/<name>`. A name outside
+  `client_jars` → 404 (`modpack.client_jar_path`), so server-only mods and path tricks can't be fetched.
 
 ## 24. Schedule: daily restart, idle stop, quiet hours (FEAT-06)
 - `webapp/scheduler.py`: one loop, one tick (`scheduler_tick(now)`): backups (§11), then the

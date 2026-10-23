@@ -118,6 +118,26 @@ def test_modpack_bundles_everything_when_modrinth_is_down(fabric_server, monkeyp
     assert any("could not be reached" in warning for warning in summary["warnings"])
 
 
+def test_client_jars_download_one_by_one_without_server_only_mods(fabric_server):
+    data = client.get("/api/modpack/jars", auth=AUTH).json()
+    assert [jar["name"] for jar in data["jars"]] == ["homemade.jar", "sodium.jar"] and data["excluded"] == ["Lag Fix"]
+    assert data["jars"][1]["size"] == len(fabric_server["jars"]["sodium.jar"])
+    download = client.get("/api/modpack/jars/sodium.jar", auth=AUTH)
+    assert download.status_code == 200 and download.content == fabric_server["jars"]["sodium.jar"]
+    assert 'filename="sodium.jar"' in download.headers["content-disposition"]
+    for name in ("lagfix.jar", "missing.jar", "..%2Fserver.jar"):  # server-only, unknown, path trick
+        assert client.get(f"/api/modpack/jars/{name}", auth=AUTH).status_code == 404
+    assert client.get("/api/modpack/jars/sodium.jar").status_code in (401, 403)
+
+    _, token = _enable_status_page()
+    public = client.get(f"/s/{token}/mods.json").json()
+    assert [jar["name"] for jar in public["jars"]] == ["homemade.jar", "sodium.jar"]
+    assert client.get(f"/s/{token}/mods/homemade.jar").content == b"not on modrinth"
+    assert client.get(f"/s/{token}/mods/lagfix.jar").status_code == 404
+    assert client.get("/s/wrong-token/mods/sodium.jar").status_code == 404
+    assert 'id="modpack-jars-button"' in client.get("/dashboard/mods").text
+
+
 def test_modpack_not_offered_for_paper_or_empty_servers():
     config_store.save({"loader": "paper", "version": "1.21.4"})
     assert client.get("/api/modpack", auth=AUTH).json()["available"] is False
