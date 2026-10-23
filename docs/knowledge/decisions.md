@@ -31,7 +31,7 @@
 19. GUI console streams over `/ws/console` with the session cookie (FEAT-11); REST polling with
     `?since=` is only the fallback for networks that block WebSockets.
 20. Android support via Termux (2026-10-22): installed Java instead of downloads, `termux-chroot`
-    for the PlayIt agent, psutil skipped (metrics fall back to `/proc/meminfo`).
+    for the PlayIt agent, psutil skipped (RAM from `/proc/meminfo`; CPU from Termux's own `/proc/<pid>/stat`, since `/proc/stat` is blocked).
 21. Remote dashboard access through a **Cloudflare quick tunnel** (2026-10-22). First built on a
     second PlayIt TCP tunnel (owner's initial choice), but PlayIt's API rejects untyped tunnels
     and the website offered no custom TCP tunnel, so the owner switched to Cloudflare: HTTPS, no
