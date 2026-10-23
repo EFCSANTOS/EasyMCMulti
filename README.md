@@ -248,7 +248,8 @@ webapp/
   templates/       login.html
 
 tests/
-  test_webapp_smoke.py
+  support.py, conftest.py   shared setup (no network, fresh state per test)
+  test_*.py                 one file per area
 
 docs/knowledge/  maintainer knowledge base
 
@@ -281,13 +282,13 @@ This app is intended for local or LAN use.
 
 ## Development and testing
 
-Run the smoke suite:
+Run the tests (install `requirements-dev.txt` first):
 
 ```bat
-.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py
+.venv\Scripts\python.exe -m pytest -q
 ```
 
-This verifies the web dashboard, status endpoints, config persistence, console websocket, lifecycle routes, and that every API call made by the dashboard scripts maps to a real route. Tests run against a temporary data folder and do not touch `EZ_Server_Data/`.
+They cover the dashboard and every API area, `core/` helpers, and that every API call made by the dashboard scripts maps to a real route. Tests run in random order, against a temporary data folder (never `EZ_Server_Data/`) and with the network blocked. GitHub Actions runs them on Windows and Ubuntu for every push and pull request.
 
 ---
 

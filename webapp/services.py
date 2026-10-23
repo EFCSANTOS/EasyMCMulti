@@ -171,6 +171,14 @@ def create_services(app: FastAPI) -> Services:
                 notifier.ping_heartbeat(url)
             time.sleep(common.HEARTBEAT_INTERVAL_SEC)
 
+    def reset_notifications() -> None:
+        """Forget alert throttles and pending friend join/leave batches (tests start clean)."""
+        last_alert_at.clear()
+        with players_lock:
+            pending_players["joined"].clear()
+            pending_players["left"].clear()
+
     return Services(app=app, runtime=runtime, append_console_line=append_console_line, notify=notify,
+                    reset_notifications=reset_notifications,
                     wait_for_console=wait_for_console, notify_friends=notify_friends, player_event=player_event,
                     flush_player_events=flush_player_events, heartbeat_loop=heartbeat_loop)
