@@ -237,6 +237,43 @@ _SECTION_ALWAYS_ON = f"""
         </section>
 """
 
+_SECTION_MIGRATE = """
+        <section id="migrate" class="card">
+          <div class="card-header">
+            <div>
+              <h2>Move to another version</h2>
+              <p class="card-sub">Upgrade Minecraft (or change loader) and bring your worlds, whitelist, operators, bans,
+                icon and compatible mods along. The current version stays as it is, so you can switch back.</p>
+            </div>
+          </div>
+          <form id="migrate-form" class="form-grid">
+            <div class="field">
+              <label for="migrate-loader">Loader</label>
+              <select id="migrate-loader">
+                <option value="vanilla">Vanilla</option>
+                <option value="paper">Paper (plugins)</option>
+                <option value="fabric">Fabric (mods)</option>
+                <option value="forge">Forge (mods)</option>
+                <option value="neoforge">NeoForge (mods)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="migrate-version">Version</label>
+              <select id="migrate-version"></select>
+            </div>
+            <div class="field field-action">
+              <button class="btn btn-ghost" type="submit">Check</button>
+            </div>
+          </form>
+          <div id="migrate-plan" class="stack-sm" hidden>
+            <ul id="migrate-plan-list" class="plain-list"></ul>
+            <div class="form-actions">
+              <button id="migrate-run-button" class="btn btn-primary" type="button">Move worlds and settings</button>
+            </div>
+          </div>
+        </section>
+"""
+
 _SECTION_PERFORMANCE = f"""
         <section id="performance" class="card">
           <div class="card-header">

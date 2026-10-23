@@ -12,6 +12,7 @@ from webapp.pages.sections_main import _SECTION_ALWAYS_ON  # noqa: F401
 from webapp.pages.sections_main import _SECTION_CONSOLE_PREVIEW  # noqa: F401
 from webapp.pages.sections_main import _SECTION_METRICS  # noqa: F401
 from webapp.pages.sections_main import _SECTION_OVERVIEW_TILES  # noqa: F401
+from webapp.pages.sections_main import _SECTION_MIGRATE  # noqa: F401
 from webapp.pages.sections_main import _SECTION_PERFORMANCE  # noqa: F401
 from webapp.pages.sections_main import _SECTION_SCHEDULE  # noqa: F401
 from webapp.pages.sections_main import _SECTION_SETUP  # noqa: F401
@@ -77,7 +78,7 @@ _TOPBAR_CONTROLS = f"""
 
 _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
     "overview": (_SECTION_OVERVIEW_TILES, _SECTION_DIAGNOSIS, _SECTION_INVITE, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
-    "setup": (_SECTION_SETUP, _SECTION_PERFORMANCE, _SECTION_ALWAYS_ON, _SECTION_SCHEDULE, _SECTION_ALERTS,
+    "setup": (_SECTION_SETUP, _SECTION_MIGRATE, _SECTION_PERFORMANCE, _SECTION_ALWAYS_ON, _SECTION_SCHEDULE, _SECTION_ALERTS,
               _SECTION_UPDATES),
     "advanced": (_SECTION_ADVANCED, _SECTION_IDENTITY, _SECTION_ALL_PROPERTIES),
     "worlds": (_SECTION_WORLDS,),

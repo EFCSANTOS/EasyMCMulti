@@ -576,6 +576,27 @@ Core details (`core/playit.py`):
   space recovers. Backups page → Storage card (free/total, list, Delete with a confirm that says what
   is lost).
 
+## 31. Move to another version (FEAT-09)
+- `core/migrate.py::plan(old_sdir, old_loader, old_version, new_loader, new_version, new_sdir)`:
+  `downgrade` (`_version_key` compare), `loader_change`, `worlds` (every generated world folder +
+  dimension folders), `files` (`ez-worlds.json`, whitelist/ops/banned lists, `server-icon.png`),
+  `mods` — same modded loader: one `POST /v2/version_files/update` for the target version →
+  `compatible` (download info) / `missing`; Paper → plugins `carried` as they are; loader change →
+  nothing carries over — `replaces` (folders already in the target dir), `size`, `free`,
+  `enough_space` (> 1.1 × size + 200 MB).
+- `apply()`: copies (never moves) the worlds and files; target folders that already exist are
+  renamed `<folder>-pre-migrate-<ts>` first; downloads compatible mods (SHA-1 checked) and records
+  them; copies carried plugins.
+- Routes (`routes/migrate.py`): `POST /api/server/migrate/plan {loader, version}` (400 same
+  version, 502 Modrinth down); `POST /api/server/migrate {loader, version, skip_missing?,
+  allow_downgrade?}` → 409 while running, for a downgrade without `allow_downgrade`, without enough
+  space, or with missing mods without `skip_missing`; else **202** lifecycle job "migrating":
+  `backups.create(old, active, "auto-pre-migrate")` (core call: the job already holds the lock) →
+  `ensure_server_installed(new)` → `apply` → save config (loader/version) → message about the slow
+  first start (or, for a downgrade, that the world may not load).
+- UI: Server setup → "Move to another version" (loader, version list from `/api/versions`, Check →
+  plan list with warnings, Move → confirm → background job with the usual progress/toast).
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`
