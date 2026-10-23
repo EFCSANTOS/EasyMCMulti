@@ -13,9 +13,11 @@ python -m uvicorn webapp.app:app --host 0.0.0.0 --port 8000
 
 ## Test
 ```powershell
-.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py
+.venv\Scripts\python.exe -m pytest -q
 ```
-Tests use a temporary data dir (autouse fixture) — see `docs/knowledge/testing.md`.
+Tests live in `tests/` (one file per area, shared setup in `tests/support.py`), run in random order,
+with a temporary data dir and no network — see `docs/knowledge/testing.md`. CI runs them on every
+push/PR (`.github/workflows/tests.yml`).
 
 Linux / Termux: `bash run.sh` (reads `.env`). Android install: `termux-setup.sh`.
 
