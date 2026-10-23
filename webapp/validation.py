@@ -104,6 +104,7 @@ class ConfigUpdate(BaseModel):
     backup_keep_daily: int | None = Field(None, ge=0, le=60)
     backup_prune_manual: bool | None = None
     extra_properties: dict[str, str] | None = None
+    friends_can_stop: bool | None = None
     jvm_preset_flags: bool | None = None
     jvm_extra_args: str | None = Field(None, max_length=500, pattern=_ONE_LINE)
     restart_daily_time: str | None = Field(None, pattern=_TIME_OR_EMPTY)

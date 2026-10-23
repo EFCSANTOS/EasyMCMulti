@@ -4,7 +4,7 @@ from __future__ import annotations
 from webapp.pages.widgets import _icon
 
 _SECTION_DIAGNOSIS = """
-        <section id="diagnosis" class="card callout-card" hidden>
+        <section id="diagnosis" class="card callout-card" data-owner-only hidden>
           <div class="card-header">
             <div>
               <h2>Why the server stopped</h2>

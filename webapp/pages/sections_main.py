@@ -79,7 +79,7 @@ _SECTION_METRICS = """
 """
 
 _COMMAND_FORM = """
-          <form id="command-form" class="command-form">
+          <form id="command-form" class="command-form" data-owner-only>
             <span class="prompt" aria-hidden="true">&gt;</span>
             <input id="command-input" name="command" placeholder="Type a server command, e.g. say hello" autocomplete="off" aria-label="Server command" />
             <button type="submit" class="btn btn-primary btn-sm">Send</button>
@@ -90,9 +90,9 @@ _SECTION_CONSOLE_PREVIEW = f"""
         <section id="console" class="card">
           <div class="card-header">
             <h2>Console</h2>
-            <a class="link" href="/dashboard/console">Open full console {_icon("arrow")}</a>
+            <a class="link" href="/dashboard/console" data-owner-only>Open full console {_icon("arrow")}</a>
           </div>
-          <pre id="console-output" class="console console-short">Waiting for logs...</pre>
+          <pre id="console-output" class="console console-short" data-owner-only>Waiting for logs...</pre>
           {_COMMAND_FORM}
           <form id="chat-form" class="command-form">
             <span class="prompt" aria-hidden="true">say</span>

@@ -57,7 +57,10 @@
 
 ## Security posture
 - Env-var credentials (constant-time compare); the browser uses the `ezmc_session` cookie, scripts
-  may use Basic auth; both share the lockout. New routes take `Depends(require_auth)`.
+  may use Basic auth; both share the lockout. New routes take `Depends(require_auth)`, which is
+  **owner-only**; open a route to friends only on purpose with `require_user` and add it to
+  `FRIEND_ROUTES` in `tests/test_users.py` (that test fails for any other route a friend can reach).
+  Mark owner-only page elements `data-owner-only`.
 - Never return secrets over HTTP; accept file names, not paths, from clients and resolve them inside
   the server dir; validate archive members before extracting.
 - CSRF: cookie-authenticated writes must be JSON or multipart and same-origin, so `fetchJson`

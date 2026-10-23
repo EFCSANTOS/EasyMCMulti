@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI, HTTPException
 
 from core import config_store, downloaders, hostenv, netinfo, playit
 from webapp import common
-from webapp.services import Services, require_auth
+from webapp.services import Services, require_auth, require_user
 from webapp.validation import validate_config_update
 
 
@@ -19,7 +19,7 @@ def register(app: FastAPI, s: Services) -> None:
     @app.get("/api/stats")
     @app.get("/api/metrics")
     @app.get("/metrics")
-    def system_metrics(_: str = Depends(require_auth)) -> dict[str, Any]:
+    def system_metrics(_: str = Depends(require_user)) -> dict[str, Any]:
         return common._system_metrics_snapshot()
 
     def status_payload(config: dict[str, Any]) -> dict[str, Any]:
@@ -48,7 +48,7 @@ def register(app: FastAPI, s: Services) -> None:
         return {"ram_mb": common._host_ram_mb(), "phone": hostenv.is_termux()}
 
     @app.get("/api/status")
-    def status(_: str = Depends(require_auth)) -> dict[str, Any]:
+    def status(_: str = Depends(require_user)) -> dict[str, Any]:
         return status_payload(common._effective_config())
 
     @app.get("/api/console")

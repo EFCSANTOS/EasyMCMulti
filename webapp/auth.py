@@ -11,6 +11,8 @@ from collections.abc import Callable
 from fastapi import HTTPException, status
 from starlette.requests import HTTPConnection
 
+from core import users
+
 SESSION_COOKIE = "ezmc_session"
 # Sliding expiry: every authenticated request pushes it back.
 SESSION_TTL_SEC = 7 * 24 * 3600
@@ -23,6 +25,23 @@ GLOBAL_FAILURE_LIMIT = 30
 WEAK_PASSWORD_LENGTH = 12
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+ROLE_OWNER = "owner"
+ROLE_FRIEND = users.ROLE_FRIEND
+
+
+class User(str):
+    """The signed-in username (a str, so routes can use it as before) plus its role (FEAT-10)."""
+
+    role: str
+
+    def __new__(cls, username: str, role: str = ROLE_OWNER) -> "User":
+        user = super().__new__(cls, username)
+        user.role = role
+        return user
+
+    @property
+    def is_owner(self) -> bool:
+        return self.role == ROLE_OWNER
 
 
 def validate_auth_settings() -> None:
@@ -48,6 +67,13 @@ def password_is_weak() -> bool:
     return len(get_expected_credentials()[1]) < WEAK_PASSWORD_LENGTH
 
 
+def login_role(username: str, password: str) -> str | None:
+    """"owner" for the environment account, "friend" for a friend account, else None."""
+    if credentials_match(username, password):
+        return ROLE_OWNER
+    return users.verify(username, password)
+
+
 def credentials_match(username: str, password: str) -> bool:
     """Constant-time comparison so response timing does not leak the expected credentials."""
     expected_username, expected_password = get_expected_credentials()
@@ -57,23 +83,23 @@ def credentials_match(username: str, password: str) -> bool:
 
 
 class SessionStore:
-    """In-memory login sessions: token -> (username, expires_at). A restart logs everyone out."""
+    """In-memory login sessions: token -> (username, role, expires_at). A restart logs everyone out."""
 
     def __init__(self, ttl: float = SESSION_TTL_SEC, clock: Callable[[], float] = time.monotonic) -> None:
         self.ttl = ttl
         self.clock = clock
         self._lock = threading.Lock()
-        self._sessions: dict[str, tuple[str, float]] = {}
+        self._sessions: dict[str, tuple[str, str, float]] = {}
 
-    def create(self, username: str) -> str:
+    def create(self, username: str, role: str = ROLE_OWNER) -> str:
         token = secrets.token_urlsafe(32)
         with self._lock:
             self._prune()
-            self._sessions[token] = (username, self.clock() + self.ttl)
+            self._sessions[token] = (username, role, self.clock() + self.ttl)
         return token
 
-    def get(self, token: str | None) -> str | None:
-        """Username for a live session (and extend it), else None."""
+    def get(self, token: str | None) -> User | None:
+        """The user of a live session (and extend it), else None."""
         if not token:
             return None
         with self._lock:
@@ -81,12 +107,18 @@ class SessionStore:
             entry = self._sessions.get(token)
             if entry is None:
                 return None
-            self._sessions[token] = (entry[0], self.clock() + self.ttl)
-            return entry[0]
+            self._sessions[token] = (entry[0], entry[1], self.clock() + self.ttl)
+            return User(entry[0], entry[1])
 
     def delete(self, token: str | None) -> None:
         with self._lock:
             self._sessions.pop(token or "", None)
+
+    def delete_user(self, username: str) -> None:
+        """Sign a user out everywhere (removed friend, reset password)."""
+        with self._lock:
+            for token in [t for t, (name, _role, _exp) in self._sessions.items() if name == username]:
+                del self._sessions[token]
 
     def clear(self) -> None:
         with self._lock:
@@ -94,7 +126,7 @@ class SessionStore:
 
     def _prune(self) -> None:
         now = self.clock()
-        for token in [token for token, (_, expires) in self._sessions.items() if expires <= now]:
+        for token in [token for token, (_, _role, expires) in self._sessions.items() if expires <= now]:
             del self._sessions[token]
 
 
@@ -183,8 +215,8 @@ def locked_out_error(retry_after: int) -> HTTPException:
 
 
 def check_login(conn: HTTPConnection, limiter: LoginLimiter, username: str, password: str,
-                on_lockout: Callable[[str], None], basic: bool = False) -> None:
-    """Raise 429 while locked out, 401 on wrong credentials (counted towards the lockout).
+                on_lockout: Callable[[str], None], basic: bool = False) -> str:
+    """The role on success; 429 while locked out, 401 on wrong credentials (counted towards the lockout).
 
     Only Basic-auth callers get a `WWW-Authenticate: Basic` challenge: on the login form it would
     make the browser hold the request and open its own password dialog.
@@ -193,9 +225,10 @@ def check_login(conn: HTTPConnection, limiter: LoginLimiter, username: str, pass
     retry_after = limiter.retry_after(ip)
     if retry_after:
         raise locked_out_error(retry_after)
-    if credentials_match(username, password):
+    role = login_role(username, password)
+    if role:
         limiter.record_success(ip)
-        return
+        return role
     if limiter.record_failure(ip):
         on_lockout(ip)
     raise HTTPException(
@@ -236,15 +269,14 @@ def _check_same_origin(conn: HTTPConnection) -> None:
 
 
 def authenticate(conn: HTTPConnection, sessions: SessionStore, limiter: LoginLimiter,
-                 on_lockout: Callable[[str], None]) -> str:
-    """Accept a session cookie (browser) or HTTP Basic credentials (scripts). Returns the username."""
-    username = sessions.get(conn.cookies.get(SESSION_COOKIE))
-    if username is not None:
+                 on_lockout: Callable[[str], None]) -> User:
+    """Accept a session cookie (browser) or HTTP Basic credentials (scripts). Returns the user."""
+    user = sessions.get(conn.cookies.get(SESSION_COOKIE))
+    if user is not None:
         _check_same_origin(conn)
-        return username
+        return user
     auth_header = conn.headers.get("authorization")
     if not auth_header:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
     username, password = _basic_credentials(auth_header)
-    check_login(conn, limiter, username, password, on_lockout, basic=True)
-    return username
+    return User(username, check_login(conn, limiter, username, password, on_lockout, basic=True))

@@ -147,6 +147,8 @@ def _default_config() -> dict[str, Any]:
         # Schedule (FEAT-06): daily restart "HH:MM" ("" = off), stop after N empty minutes (0 = off),
         # quiet hours "HH:MM"–"HH:MM" without autostart / crash restart ("" = off).
         # Performance (FEAT-13): tuned GC flags on by default; extra JVM arguments for advanced users.
+        # Friend accounts (FEAT-10): may friends stop/restart the server? (They can always start it.)
+        "friends_can_stop": False,
         "jvm_preset_flags": True,
         "jvm_extra_args": "",
         # Raw server.properties keys the Settings form doesn't cover (FEAT-14): {"spawn-protection": "0"}.
