@@ -75,6 +75,9 @@ class RuntimeState:
     mod_updates_notified: str = ""
     # FEAT-15: a low-space alert was sent; cleared once there is enough space again.
     low_space_alerted: bool = False
+    # FEAT-18: last Bedrock problem (install or tunnel), shown on the Remote page.
+    bedrock_error: str = ""
+    bedrock_busy: bool = False
     crash_times: list[float] = field(default_factory=list)
     # Outcome of the last background lifecycle job (create/start/restart/world switch), for the UI.
     operation_error: str = ""

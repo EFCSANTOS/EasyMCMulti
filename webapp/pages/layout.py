@@ -24,7 +24,7 @@ from webapp.pages.sections_more import _SECTION_REMOTE  # noqa: F401
 from webapp.pages.sections_more import _SECTION_WORLDS  # noqa: F401
 from webapp.pages.sections_diagnosis import _SECTION_DIAGNOSIS, _SECTION_LOGS
 from webapp.pages.sections_identity import _SECTION_ALL_PROPERTIES, _SECTION_IDENTITY
-from webapp.pages.sections_invite import _SECTION_INVITE
+from webapp.pages.sections_invite import _SECTION_BEDROCK, _SECTION_INVITE
 from webapp.pages.sections_players import _SECTION_PLAYERS
 from webapp.pages.sections_users import _SECTION_USERS
 from webapp.pages.widgets import _icon
@@ -87,7 +87,7 @@ _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
     "players": (_SECTION_PLAYERS,),
     "users": (_SECTION_USERS,),
     "mods": (_SECTION_MODS,),
-    "remote": (_SECTION_REMOTE, _SECTION_INVITE),
+    "remote": (_SECTION_REMOTE, _SECTION_BEDROCK, _SECTION_INVITE),
     "backups": (_SECTION_BACKUPS,),
     "console": (_SECTION_DIAGNOSIS, _SECTION_CONSOLE_FULL, _SECTION_LOGS),
 }

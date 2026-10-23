@@ -95,6 +95,8 @@ class ConfigUpdate(BaseModel):
     auto_update_check: bool | None = None
     auto_update_install: bool | None = None
     remote_dashboard: bool | None = None
+    bedrock_enabled: bool | None = None
+    bedrock_port: int | None = Field(None, ge=1024, le=65535)
     remote_mode: Literal["quick", "named"] | None = None
     remote_hostname: str | None = Field(
         None, max_length=253, pattern=r"^$|^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")

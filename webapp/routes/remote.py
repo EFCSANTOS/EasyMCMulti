@@ -104,6 +104,24 @@ def register(app: FastAPI, s: Services) -> None:
         playit.save_config(secret, address)
         runtime.playit_state = "running"
         runtime.playit_address = address
+        if config.get("bedrock_enabled"):
+            ensure_bedrock_tunnel(secret, config, should_abort)
+
+    def ensure_bedrock_tunnel(secret: str, config: dict[str, Any], should_abort: Any = None) -> None:
+        """The Bedrock (UDP) tunnel for Geyser (FEAT-18). A failure is shown, but never stops the Java tunnel."""
+        try:
+            bedrock = playit.ensure_bedrock_tunnel(secret, int(config.get("bedrock_port", 19132)), playit_log,
+                                                   should_abort=should_abort)
+        except Exception as exc:
+            runtime.bedrock_error = f"Bedrock tunnel: {exc}"
+            playit_log(runtime.bedrock_error)
+            return
+        runtime.bedrock_error = ""
+        current = playit.load_config()
+        playit.save_config(secret, current.get("address", ""), bedrock_address=bedrock)
+        playit_log(f"Bedrock players join at {bedrock}")
+
+    s.ensure_bedrock_tunnel = ensure_bedrock_tunnel
 
     def schedule_playit_restart(secret: str) -> None:
         """Restart the agent after common.PLAYIT_RETRY_SEC; replaces any restart already pending."""

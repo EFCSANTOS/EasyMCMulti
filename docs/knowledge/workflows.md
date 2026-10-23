@@ -647,6 +647,25 @@ Core details (`core/playit.py`):
 - UI: Remote access → "Use your own domain" (steps, link type, hostname, token). Tailscale/ZeroTier
   is documented in the README only.
 
+## 35. Bedrock crossplay (FEAT-18)
+- `core/geyser.py` (Paper, Fabric, NeoForge): `install()` — Geyser from Modrinth (with required
+  dependencies, e.g. Fabric API); Floodgate from Modrinth on Fabric/NeoForge but from GeyserMC's
+  download server on Paper (`FLOODGATE_SPIGOT_URL` → `plugins/floodgate-spigot.jar`; Modrinth has
+  no Paper build). `uninstall()` removes just those two (dependencies stay). `configure(sdir,
+  loader, port)` edits Geyser's `config.yml` line by line: `bedrock: port` and `auth-type: floodgate`
+  under `remote:` (older) or `java:` (newer); idempotent; False until Geyser has written the file on
+  its first start. `launch_server` calls it on every start when `bedrock_enabled`.
+- PlayIt: `ensure_bedrock_tunnel()` = `_ensure_tunnel(..., "minecraft-bedrock", port_type="udp")`
+  → `domain:port`; saved as `bedrock_address` in `playit_config.json` (`save_config` keeps it unless
+  the key changes). `start_agent_and_tunnels` ensures it after the Java tunnel when crossplay is on;
+  a failure only sets `runtime.bedrock_error`. **The Bedrock tunnel type hasn't been tried against a
+  real PlayIt account yet.**
+- `GET /api/bedrock` → `{supported, loader, enabled, busy, port, address, configured, error}` (read
+  only); `POST /api/bedrock {enabled}`: on → 400 for vanilla/Forge, else background install
+  (`bedrock_busy`) → `bedrock_enabled` + tunnel if the agent runs; off → uninstall + disabled.
+- Bedrock address: Remote access card, invite text ("Bedrock (phone/console): …") and the public
+  status page. Whitelist form "Bedrock player" adds Floodgate's `.` prefix (spaces → `_`).
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

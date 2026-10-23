@@ -28,7 +28,7 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 ## Features
 | ID | Title | Priority | Effort | Depends on |
 |---|---|---|---|---|
-| [FEAT-18](features/FEAT-18-bedrock-crossplay.md) | Bedrock crossplay (Geyser + Floodgate) | P3 | M | — |
+| — | All features have shipped (FEAT-01 … FEAT-18). | | | |
 
 ## Code quality
 | ID | Title | Priority | Effort | Depends on |
@@ -41,8 +41,12 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 2. **Friends can join without the owner** — done: FIX-05, FEAT-02, FEAT-03, FEAT-04, FEAT-05
    (FEAT-04's optional "recommended client mods" list was left for later).
 3. **Hands-off running** — done: FEAT-01, FEAT-06, FEAT-08, FEAT-07.
-4. **Polish** — everything else, picking by what the group actually asks for.
-QUAL-01 (split `app.py` into routers and page modules) has shipped, so new routes go in `webapp/routes/`.
+4. **Polish** — done: FIX-06, FEAT-09 … FEAT-18, QUAL-01, QUAL-02 (2026-10-23).
+
+Open follow-ups noted while shipping (not roadmap items yet): FEAT-04's optional "recommended
+client mods" list; the real-world checks listed as "not yet" in `docs/knowledge/verification.md`
+(Prism import of the mod pack, a real Discord webhook, a real Cloudflare named tunnel, the PlayIt
+Bedrock tunnel type on a real account, PWA install on a phone).
 
 ## Maintenance
 When an item ships: move its key facts into `docs/knowledge/` (workflows, data-model,
