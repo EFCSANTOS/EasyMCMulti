@@ -40,10 +40,47 @@ def test_metrics_survive_blocked_cpu_counters(monkeypatch):
             return Mem()
 
     monkeypatch.setattr(common_module, "psutil", BlockedPsutil)
+    monkeypatch.setattr(common_module, "PROC_DIR", "/nonexistent-proc")
     snapshot = common_module._system_metrics_snapshot()
-    assert snapshot["cpu"] == 0.0
+    assert snapshot["cpu"] == 0.0 and snapshot["cpuScope"] == "unavailable"
     assert snapshot["ram"] == 1024
     assert snapshot["ramTotal"] == 4096
+
+
+def test_cpu_without_psutil_reads_proc_stat(monkeypatch, tmp_path):
+    monkeypatch.setattr(common_module, "psutil", None)
+    monkeypatch.setattr(common_module, "PROC_DIR", str(tmp_path))
+    monkeypatch.setattr(common_module, "_cpu_last", {})
+    stat = tmp_path / "stat"
+    stat.write_text("cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 1 2 3 4\n", encoding="utf-8")
+    assert common_module._cpu_usage() == (0.0, "system")  # first reading
+    stat.write_text("cpu  150 0 150 900 0 0 0 0 0 0\n", encoding="utf-8")  # 100 busy of 200
+    assert common_module._cpu_usage() == (50.0, "system")
+
+
+def test_cpu_on_android_counts_our_own_processes(monkeypatch, tmp_path):
+    # Android: no psutil, /proc/stat blocked, but /proc/<pid>/stat of Termux processes readable.
+    monkeypatch.setattr(common_module, "psutil", None)
+    monkeypatch.setattr(common_module, "PROC_DIR", str(tmp_path))
+    monkeypatch.setattr(common_module, "_cpu_last", {})
+    monkeypatch.setattr(common_module, "_clock_ticks", lambda: 100)
+    monkeypatch.setattr(common_module.os, "cpu_count", lambda: 4)
+    clock = [1000.0]
+    monkeypatch.setattr(common_module.time, "monotonic", lambda: clock[0])
+    for pid in ("1", "2"):
+        (tmp_path / pid).mkdir()
+    (tmp_path / "self").mkdir()
+
+    def write(java_ticks, python_ticks):
+        rest = "S 1 1 1 0 -1 0 0 0 0 0"
+        (tmp_path / "1" / "stat").write_text(f"1 (java (server)) {rest} {java_ticks} 0 0 0", encoding="utf-8")
+        (tmp_path / "2" / "stat").write_text(f"2 (python) {rest} {python_ticks} 10 0 0", encoding="utf-8")
+
+    write(1000, 90)
+    assert common_module._cpu_usage() == (0.0, "processes")
+    clock[0] += 2  # 2 s on 4 cores = 800 ticks; 200 + 0 used
+    write(1200, 90)
+    assert common_module._cpu_usage() == (25.0, "processes")
 
 
 def test_config_can_persist_values():

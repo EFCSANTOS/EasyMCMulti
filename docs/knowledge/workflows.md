@@ -152,7 +152,11 @@ The Remote page additionally calls `GET /api/playit/status` for the real tunnel 
 
 ## 10. Metrics
 Aliases `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/metrics` →
-`{cpu, ram, ramTotal, uptime}` (psutil or Windows ctypes fallback).
+`{cpu, cpuScope, ram, ramTotal, uptime}`. RAM: psutil → `/proc/meminfo` → Windows ctypes. CPU
+(`common._cpu_usage`, delta since the previous poll): psutil → `/proc/stat` (`cpuScope: "system"`) →
+on Android, where apps can't read `/proc/stat`, the summed utime+stime of every readable
+`/proc/<pid>/stat` (only Termux's own processes, the server included) over elapsed time × cores
+(`"processes"`, shown as "now · Termux processes") → `0` / `"unavailable"`.
 
 ## 11. Backups (FEAT-01: schedule, retention, safety backups)
 - Names (`core/backups.py`): `world-backup-<folder>-<YYYYmmdd-HHMMSS>[-<label>].zip`; labels

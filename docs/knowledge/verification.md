@@ -66,7 +66,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | PlayIt configure / start / stop / status | Works; configure runs in the background and the dashboard shows the approval link (open from any device); "Change account" resets |
 | Remote dashboard (Cloudflare) | Works: live-checked on Windows 2026-10-22 (download, registration-gated link, request served through `trycloudflare.com`); login has sessions + lockout |
 | ~~Dashboard over PlayIt~~ | Removed: PlayIt's `/tunnels/create` rejects untyped tunnels (`TunnelTypeRequiresDescription`); `/v1/tunnels/create` rejected every body that matches the published client ("failed to parse body"); the website did not let the owner add a custom TCP tunnel either |
-| System metrics charts | Works (overview only) |
+| System metrics charts | Works (overview only). Termux CPU (own processes only) tested with a fake `/proc`, not yet on a phone |
 | Player count + names | Works — parsed from server join/leave console lines |
 | Always-on (autostart server/PlayIt, crash restart) | Works in tests and a live uvicorn boot; not yet run on a device |
 | Self-update (Updates card) | Git logic tested against real temp repos and checked read-only on the real clone; **the process restart itself (exec on Linux/Termux, relaunch helper on Windows) is not yet run for real** |
