@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 
-from core import activity, config_store, diagnose, downloaders, hostenv, java_manager, players
+from core import activity, config_store, diagnose, downloaders, geyser, hostenv, java_manager, players
 from webapp import common
 from webapp.auth import User
 from webapp.services import Services, require_auth, require_user
@@ -229,6 +229,8 @@ def register(app: FastAPI, s: Services) -> None:
 
         target_dir = ensure_server_installed(config)
         runtime.set_state("starting", "starting")
+        if config.get("bedrock_enabled") and geyser.supported(loader):
+            geyser.configure(target_dir, loader, int(config.get("bedrock_port", geyser.DEFAULT_PORT)))
         common.update_properties(target_dir, **common._server_properties_from_config(config))
 
         java_exe = java_manager.ensure_java(java_manager.required_java(version),

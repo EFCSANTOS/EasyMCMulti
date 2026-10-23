@@ -31,6 +31,10 @@ def _with_port(host: str, port: int) -> str:
 def register(app: FastAPI, s: Services) -> None:
     runtime = s.runtime
 
+    def bedrock_address(config: dict[str, Any]) -> str:
+        """Where Bedrock players join (FEAT-18), or "" when crossplay is off or has no tunnel yet."""
+        return str(playit.load_config().get("bedrock_address") or "") if config.get("bedrock_enabled") else ""
+
     def join_address(config: dict[str, Any]) -> str:  # also used for the friends' "online" message
         """PlayIt address if set up, else the public IP (works only with the port forwarded)."""
         address = str(playit.load_config().get("address") or "").strip()
@@ -53,6 +57,7 @@ def register(app: FastAPI, s: Services) -> None:
             "players_online": snapshot["players"] if running else 0,
             "players_max": int(config.get("max_players", 10)),
             "address": join_address(config),
+            "bedrock_address": bedrock_address(config),
             "version": str(config.get("version", "")),
             "loader": LOADER_LABELS.get(loader, loader),
             "mods_required": s.modpack_available(),
@@ -79,6 +84,8 @@ def register(app: FastAPI, s: Services) -> None:
         elif str(config.get("loader", "vanilla")) not in CLIENT_MOD_LOADERS:
             version += " (no mods needed)"
         lines.append(version)
+        if status["bedrock_address"]:
+            lines.append(f"Bedrock (phone/console): {status['bedrock_address']}")
         if page_url:
             lines.append(f"Status page: {page_url}")
         return "\n".join(lines)

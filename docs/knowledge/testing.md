@@ -10,7 +10,7 @@ helpers like `_start`/`_wait_idle`/`_login`, constants like `AUTH`, and all shar
 (unit tests of `core/`). Each test file starts with `from support import *`. Real-format log
 snippets: `tests/fixtures/logs/`. `pytest.ini` sets `testpaths` and the `network` marker.
 Run: `.venv\Scripts\python.exe -m pytest -q` — random order (`pytest-randomly`; reproduce with
-`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-23: 217 passed
+`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-23: 225 passed
 (~30 s; the updater tests create real git repos, so `git` must be on PATH; every file also passes
 on its own). Dev deps: `pip install -r requirements-dev.txt`. CI: `.github/workflows/tests.yml`
 (Ubuntu + Windows, Python 3.13: pytest, `node --check` on the dashboard scripts, `bash -n` on
@@ -71,6 +71,10 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Bedrock (FEAT-18, `test_bedrock.py`): Geyser config edit (old `remote:` / new `java:` layouts,
+  idempotent, missing file); Bedrock tunnel request is `minecraft-bedrock` over UDP; PlayIt config keeps
+  the Bedrock address; switch installs/removes (Floodgate for Paper via GeyserMC); address on invite and
+  status page; a refused Bedrock tunnel doesn't stop the Java one; `.`-prefixed whitelist names.
 - Named tunnel (FEAT-17, `test_remote.py`): `NamedTunnel` command line with the token only in the
   environment; named mode gives the same address on each start (fake tunnel); settings validation.
 - App manifest (FEAT-16, `test_pages.py`): content type, standalone + start URL, icon sizes match the

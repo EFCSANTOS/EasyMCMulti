@@ -223,7 +223,11 @@ function bindPlayers() {
   on('whitelist-add-form', 'submit', async (event) => {
     event.preventDefault();
     const input = document.getElementById('whitelist-name');
-    if (await changePlayerList('whitelist', { action: 'add', name: input.value.trim() }, event.submitter)) input.value = '';
+    const bedrock = document.getElementById('whitelist-bedrock');
+    // Floodgate gives Bedrock players a "." prefix (FEAT-18); gamertag spaces become underscores.
+    let name = input.value.trim();
+    if (bedrock && bedrock.checked && !name.startsWith('.')) name = `.${name.replace(/ /g, '_')}`;
+    if (await changePlayerList('whitelist', { action: 'add', name }, event.submitter)) input.value = '';
   });
   on('ops-add-form', 'submit', async (event) => {
     event.preventDefault();

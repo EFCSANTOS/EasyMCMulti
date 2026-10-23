@@ -44,6 +44,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Console | Works — live over `/ws/console` (headless Edge: a command echoed in 0.03 s, no polling while the socket is open); `?since=` polling fallback; filters, search, ↑ history, Tab completion; chat box on the overview |
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
+| Bedrock crossplay (Geyser + Floodgate) | Works in tests (config edit both formats, UDP typed tunnel request, switch, address on invite/status page, tunnel failure isolated) and live installs from Modrinth/GeyserMC for Paper and Fabric 1.21.4; **the PlayIt `minecraft-bedrock` tunnel and a real Bedrock client join are not verified yet** |
 | Own-domain dashboard link (Cloudflare named tunnel) | Works in tests (command line + env token, stable `https://<hostname>` across restarts, validation, token never returned); **not yet run against a real Cloudflare tunnel** |
 | Installable app (manifest + icons) | Works in tests and headless Edge (`Page.getInstallabilityErrors` → none, manifest parses cleanly); **not yet installed on a real Android phone through the link** |
 | Friend accounts | Works in tests (a friend gets 403 on every one of 60+ owner API routes, start/chat/backup allowed, stop only when allowed, payload ignored, reset/remove sign out, WS refused, no plaintext stored) and headless Edge (owner creates alex; alex sees only the Overview, no Stop/invite/console, starts the server, is redirected from Settings, API 403) |

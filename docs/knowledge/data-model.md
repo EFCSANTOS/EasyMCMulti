@@ -36,6 +36,8 @@ Config keys (FEAT-01): `backup_interval_hours` (6, 0–168, 0 = off), `backup_ke
 
 `extra_properties` (FEAT-14): `{server.properties key: value}` the owner set in "All properties";
 `server-icon.png` (64×64) in the server dir.
+Bedrock keys (FEAT-18): `bedrock_enabled` (False), `bedrock_port` (19132, 1024–65535);
+`playit_config.json` may hold `bedrock_address`.
 Remote link keys (FEAT-17): `remote_mode` ("quick"), `remote_hostname` (""); the named-tunnel token is
 in `cloudflare_tunnel.json` (secret, never returned).
 Friend keys (FEAT-10): `friends_can_stop` (False).

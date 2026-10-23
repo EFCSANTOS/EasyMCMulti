@@ -39,6 +39,7 @@ CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 API_BASE = "https://api.playit.gg"
 CLAIM_PAGE = "https://playit.gg/claim/{}"
 MINECRAFT_TUNNEL_NAME = "EZ Minecraft"
+BEDROCK_TUNNEL_NAME = "EZ Minecraft Bedrock"
 
 _CONFIG_FILE = os.path.join(paths.DATA_DIR, "playit_config.json")
 
@@ -103,9 +104,16 @@ def load_config():
     return data if isinstance(data, dict) else {}
 
 
-def save_config(secret, address=""):
+def save_config(secret, address="", bedrock_address=None):
+    """Save the secret and Java address; the Bedrock address (FEAT-18) is kept unless given or the key changed."""
+    current = load_config()
+    if bedrock_address is None:
+        bedrock_address = current.get("bedrock_address", "") if current.get("secret") == secret else ""
+    data = {"secret": secret, "address": address}
+    if bedrock_address:
+        data["bedrock_address"] = bedrock_address
     paths.ensure_dirs()
-    fsutil.write_json_atomic(_CONFIG_FILE, {"secret": secret, "address": address})
+    fsutil.write_json_atomic(_CONFIG_FILE, data)
 
 
 def forget_config():
@@ -188,6 +196,10 @@ def _is_mc_tunnel(t):
     return t.get("tunnel_type") == "minecraft-java"
 
 
+def _is_bedrock_tunnel(t):
+    return t.get("tunnel_type") == "minecraft-bedrock"
+
+
 def _tunnel_address(t):
     """Public address to give to players, or None if not allocated yet."""
     alloc = t.get("alloc", {})
@@ -243,7 +255,8 @@ def claim_interactive(log, should_cancel, timeout_sec=300, on_url=None):
     return secret
 
 
-def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_type, label, should_abort=None):
+def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_type, label, should_abort=None,
+                   port_type="tcp"):
     """Ensure a tunnel matching `matches` -> localhost:local_port exists; return its public address.
 
     IMPORTANT: the API refuses to create a tunnel until the agent has run at least
@@ -274,7 +287,7 @@ def _ensure_tunnel(secret, local_port, log, timeout_sec, matches, name, tunnel_t
         body = {
             "name": name,
             "tunnel_type": tunnel_type,  # required: untyped tunnels are rejected by the API
-            "port_type": "tcp",
+            "port_type": port_type,
             "port_count": 1,
             "origin": {"type": "agent", "data": {
                 "agent_id": agent_id, "local_ip": "127.0.0.1",
@@ -310,6 +323,13 @@ def ensure_tunnel(secret, local_port, log, timeout_sec=120, should_abort=None):
     """Ensure the Minecraft Java tunnel -> localhost:local_port; return the address for players."""
     return _ensure_tunnel(secret, local_port, log, timeout_sec, _is_mc_tunnel,
                           MINECRAFT_TUNNEL_NAME, "minecraft-java", "Minecraft Java", should_abort)
+
+
+def ensure_bedrock_tunnel(secret, local_port, log, timeout_sec=120, should_abort=None):
+    """Ensure the Bedrock (UDP) tunnel -> localhost:local_port for Geyser (FEAT-18); return host:port."""
+    return _ensure_tunnel(secret, local_port, log, timeout_sec, _is_bedrock_tunnel,
+                          BEDROCK_TUNNEL_NAME, "minecraft-bedrock", "Minecraft Bedrock", should_abort,
+                          port_type="udp")
 
 
 # ---------- Agent (daemon) download ----------

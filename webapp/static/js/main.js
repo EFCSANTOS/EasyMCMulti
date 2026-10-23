@@ -76,6 +76,7 @@ function bindEvents() {
   bindPlayers();
   bindIdentity();
   bindUsers();
+  on('bedrock-enabled', 'change', (event, toggle) => toggleBedrock(toggle));
   on('named-tunnel-form', 'submit', (event) => saveNamedTunnel(event));
   on('migrate-loader', 'change', () => loadMigrateVersions());
   on('migrate-form', 'submit', (event) => checkMigration(event));
@@ -145,7 +146,7 @@ async function boot() {
   loadServerIcon();
   await loadStatus();
   await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(), loadInvite(), loadModpack(),
-    loadDiagnosis(), loadLogs(), loadModUpdates(), loadProperties(), loadStorage(), loadUsers(),
+    loadDiagnosis(), loadLogs(), loadModUpdates(), loadProperties(), loadStorage(), loadUsers(), loadBedrock(),
     startConsole()]);
   initModBrowser(); // after loadInstalledMods so cards can show "Installed"
 
