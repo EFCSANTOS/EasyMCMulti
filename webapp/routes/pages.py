@@ -7,8 +7,9 @@ from typing import Any
 from fastapi import HTTPException, Depends, FastAPI, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from webapp.services import Services, require_auth
-from webapp.auth import SESSION_COOKIE, SESSION_TTL_SEC, check_login, is_https
+from webapp import common
+from webapp.services import Services, require_user
+from webapp.auth import SESSION_COOKIE, SESSION_TTL_SEC, User, check_login, is_https
 from webapp.pages.layout import SCRIPTS, STATIC_DIR, _render_dashboard_page
 
 _WEBAPP_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -30,11 +31,11 @@ def register(app: FastAPI, s: Services) -> None:
     def api_login(payload: dict[str, Any], request: Request, response: Response) -> dict[str, Any]:
         username = str(payload.get("username") or "").strip()
         password = str(payload.get("password") or "")
-        check_login(request, app.state.login_limiter, username, password, app.state.on_lockout)
-        token = app.state.sessions.create(username)
+        role = check_login(request, app.state.login_limiter, username, password, app.state.on_lockout)
+        token = app.state.sessions.create(username, role)
         response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL_SEC, httponly=True, samesite="strict",
                             secure=is_https(request), path="/")
-        return {"username": username}
+        return {"username": username, "role": role}
 
     @app.post("/api/logout")
     def api_logout(request: Request, response: Response) -> dict[str, Any]:
@@ -43,8 +44,10 @@ def register(app: FastAPI, s: Services) -> None:
         return {"message": "Signed out."}
 
     @app.get("/api/session")
-    def api_session(username: str = Depends(require_auth)) -> dict[str, Any]:
-        return {"username": username}
+    def api_session(user: User = Depends(require_user)) -> dict[str, Any]:
+        """Who is signed in and what the dashboard should show them (FEAT-10)."""
+        can_stop = user.is_owner or bool(common._effective_config().get("friends_can_stop"))
+        return {"username": user, "role": user.role, "can_stop": can_stop}
 
     @app.get("/dashboard")
     def dashboard() -> RedirectResponse:

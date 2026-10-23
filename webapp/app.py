@@ -10,7 +10,7 @@ from webapp import background, scheduler
 from webapp.auth import authenticate, validate_auth_settings
 from webapp.routes import (
     backups, diagnosis, identity, migrate, mods, pages, players, public, remote, server, storage, system, updates,
-    worlds,
+    users, worlds,
 )
 from webapp.services import create_services
 
@@ -29,7 +29,7 @@ def create_app() -> FastAPI:
     services = create_services(app)
     app.state.services = services
     for module in (pages, system, server, diagnosis, backups, mods, worlds, players, public, identity, storage, migrate,
-                   remote, updates, scheduler, background):
+                   users, remote, updates, scheduler, background):
         module.register(app, services)
 
     app.state.autostart = services.autostart
@@ -41,7 +41,9 @@ def create_app() -> FastAPI:
     async def console_websocket(websocket: WebSocket) -> None:
         state = app.state
         try:
-            authenticate(websocket, state.sessions, state.login_limiter, state.on_lockout)
+            user = authenticate(websocket, state.sessions, state.login_limiter, state.on_lockout)
+            if not user.is_owner:  # the console is owner-only (it shows player IPs and commands)
+                raise HTTPException(status_code=403)
         except HTTPException:
             await websocket.close(code=1008)
             return

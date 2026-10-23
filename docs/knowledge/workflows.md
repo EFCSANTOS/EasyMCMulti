@@ -597,6 +597,31 @@ Core details (`core/playit.py`):
 - UI: Server setup → "Move to another version" (loader, version list from `/api/versions`, Check →
   plan list with warnings, Move → confirm → background job with the usual progress/toast).
 
+## 32. Friend accounts (FEAT-10)
+- Roles: **owner** = the `EZ_WEBAPP_USERNAME`/`PASSWORD` account (never stored, can't be locked out
+  by the users file); **friend** = accounts in `EZ_Server_Data/users.json`
+  (`core/users.py`: `{username: {role, salt, hash, created}}`, `hashlib.scrypt` n=2^14 r=8 p=1,
+  `hmac.compare_digest`; unknown names still pay one scrypt so timing doesn't reveal them).
+- `auth.login_role()` → "owner" / "friend" / None; `check_login` returns the role; sessions store
+  `(username, role)`; `authenticate()` returns `auth.User` — a `str` (the username) with `.role`
+  and `.is_owner`.
+- Dependencies (`services.py`): `require_auth` = **owner only** (403 "Only the server owner can do
+  that."), used by every route unless opened on purpose; `require_user` = any role, used only by
+  `GET /api/session`, `GET /api/status`, the metrics routes, `POST /api/server/start` (a friend's
+  payload is ignored: they can't change settings), `POST /api/server/chat`,
+  `POST /api/server/backup`, and stop/restart through `require_can_stop` (owner, or a friend when
+  config `friends_can_stop` is on). `/ws/console` is owner-only. Friend actions log
+  `[dashboard] <name> started the server` etc.
+- Owner routes (`routes/users.py`): `GET /api/users`, `POST /api/users {username}` (2–32 chars
+  `[A-Za-z0-9_.-]`, not the owner's name, unique) → generated 12-char password shown once,
+  `POST /api/users/{name}/reset` → new password + `sessions.delete_user`, `DELETE /api/users/{name}`
+  → removed + signed out everywhere.
+- UI: `/api/session` → `{username, role, can_stop}`. Friends: `bootFriend()` — only the overview
+  (other pages redirect), `body.is-friend` hides every `[data-owner-only]` element (nav items except
+  Overview, invite card, diagnosis, console output and command box) and, without `can_stop`,
+  `[data-stop-control]` (Stop/Restart); only status, metrics, chat and backup load. Owner: Friends
+  page (create, new password, remove, "Friends can stop and restart" switch).
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

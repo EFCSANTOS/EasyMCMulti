@@ -11,6 +11,7 @@ EZ_Server_Data/
   cloudflared-<os>-<arch>  Cloudflare tunnel binary, downloaded on Windows/Linux (cloudflared.ensure_binary)
   notify_config.json       alert settings (notifier._CONFIG_FILE) — plaintext SMTP app password and Discord
                            webhook URLs; last_link
+  users.json               friend accounts {username: {role, salt, hash, created}} (core/users.py, FEAT-10)
   activity.jsonl           player joins/leaves/server stops, one JSON per line (core/activity.py, FEAT-12)
   resume_after_update.json {server, playit} written before an update restart, deleted on next start
   update-requirements.txt  temp requirements file used by updater.install_requirements
@@ -34,6 +35,7 @@ Config keys (FEAT-01): `backup_interval_hours` (6, 0–168, 0 = off), `backup_ke
 
 `extra_properties` (FEAT-14): `{server.properties key: value}` the owner set in "All properties";
 `server-icon.png` (64×64) in the server dir.
+Friend keys (FEAT-10): `friends_can_stop` (False).
 Performance keys (FEAT-13): `jvm_preset_flags` (True), `jvm_extra_args` ("").
 Schedule keys (FEAT-06): `restart_daily_time` ("" or "HH:MM"), `idle_stop_minutes` (0, 0–1440),
 `quiet_hours_start` / `quiet_hours_end` ("" or "HH:MM").
