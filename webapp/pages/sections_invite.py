@@ -4,7 +4,7 @@ from __future__ import annotations
 from webapp.pages.widgets import _copy_button, _icon, _switch
 
 _SECTION_INVITE = f"""
-        <section id="invite" class="card">
+        <section id="invite" class="card" data-owner-only>
           <div class="card-header">
             <div>
               <h2>Invite friends</h2>

@@ -28,7 +28,7 @@ def test_login_sets_session_cookie_that_authenticates():
     cookie = response.headers["set-cookie"]
     assert "ezmc_session=" in cookie and "HttpOnly" in cookie and "SameSite=strict" in cookie
     assert browser.get("/api/status").status_code == 200
-    assert browser.get("/api/session").json() == {"username": "admin"}
+    assert browser.get("/api/session").json() == {"username": "admin", "role": "owner", "can_stop": True}
 
 
 def test_login_page_does_not_store_credentials_in_browser_storage():

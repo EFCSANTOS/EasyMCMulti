@@ -44,6 +44,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Console | Works — live over `/ws/console` (headless Edge: a command echoed in 0.03 s, no polling while the socket is open); `?since=` polling fallback; filters, search, ↑ history, Tab completion; chat box on the overview |
 | Console commands, admin buttons | Works (409 when server not running) |
 | Backup / list / restore | Works |
+| Friend accounts | Works in tests (a friend gets 403 on every one of 60+ owner API routes, start/chat/backup allowed, stop only when allowed, payload ignored, reset/remove sign out, WS refused, no plaintext stored) and headless Edge (owner creates alex; alex sees only the Overview, no Stop/invite/console, starts the server, is redirected from Settings, API 403) |
 | Move to another version | Works in tests (Fabric 1.21.1 → 1.21.4 with 3 mods: world, whitelist and 2 compatible mods carried, old dir untouched, backup made) and headless Edge (vanilla 1.21.7 → 1.21.6 copy with the downgrade warning); **not yet run with a real server start after the move** |
 | Storage use and cleanup | Works in tests (synthetic tree: sizes, active/unused, Java need, safe deletes, low-space alert once) and headless Edge (unused server folder deleted; the active one has no Delete) |
 | Server icon, MOTD editor, all properties | Works in tests and headless Edge (a 300×200 JPEG became a 64×64 PNG; two-line coloured MOTD preview; property filter/save; managed keys disabled). **Not yet seen in a real Minecraft multiplayer list** |
