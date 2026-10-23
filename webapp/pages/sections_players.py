@@ -27,6 +27,7 @@ _SECTION_PLAYERS = f"""
                 <label for="whitelist-name">Player name</label>
                 <input id="whitelist-name" maxlength="17" pattern="{_NAME_PATTERN}" title="3 to 16 letters, digits or _" placeholder="e.g. Steve" autocomplete="off" required />
               </div>
+              <label class="inline-check"><input id="whitelist-bedrock" type="checkbox" /> Bedrock player</label>
               <div class="field field-action">
                 <button class="btn btn-primary" type="submit">Add to whitelist</button>
               </div>

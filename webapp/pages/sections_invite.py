@@ -3,6 +3,25 @@ from __future__ import annotations
 
 from webapp.pages.widgets import _copy_button, _icon, _switch
 
+_SECTION_BEDROCK = f"""
+        <section id="bedrock" class="card">
+          <div class="card-header">
+            <div>
+              <h2>Bedrock friends (phones, consoles)</h2>
+              <p class="card-sub">Let players on Minecraft Bedrock Edition join this Java server, without a Java account.
+                Uses the Geyser and Floodgate plugins. Paper, Fabric and NeoForge only.</p>
+            </div>
+          </div>
+          {_switch("bedrock-enabled", "Let Bedrock players join", "Installs Geyser + Floodgate; restart the server after turning it on.", False)}
+          <p id="bedrock-status" class="hint"></p>
+          <div id="bedrock-address-row" class="address-row" hidden>
+            <span class="address-kind">Bedrock</span>
+            <code data-field="bedrock_address">—</code>{_copy_button("bedrock_address", "Bedrock address")}
+          </div>
+          <p id="bedrock-error" class="callout callout-error" hidden></p>
+        </section>
+"""
+
 _SECTION_INVITE = f"""
         <section id="invite" class="card" data-owner-only>
           <div class="card-header">
