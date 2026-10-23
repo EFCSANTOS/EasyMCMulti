@@ -10,7 +10,7 @@ helpers like `_start`/`_wait_idle`/`_login`, constants like `AUTH`, and all shar
 (unit tests of `core/`). Each test file starts with `from support import *`. Real-format log
 snippets: `tests/fixtures/logs/`. `pytest.ini` sets `testpaths` and the `network` marker.
 Run: `.venv\Scripts\python.exe -m pytest -q` — random order (`pytest-randomly`; reproduce with
-`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-23: 227 passed
+`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-23: 228 passed
 (~30 s; the updater tests create real git repos, so `git` must be on PATH; every file also passes
 on its own). Dev deps: `pip install -r requirements-dev.txt`. CI: `.github/workflows/tests.yml`
 (Ubuntu + Windows, Python 3.13: pytest, `node --check` on the dashboard scripts, `bash -n` on
@@ -129,7 +129,9 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - Mod pack (FEAT-04, `fabric_server` fixture fakes `modpack._lookup`/`_projects`): index format,
   hashes and env; server-only mod excluded; unknown jar in `overrides/mods/`; cached until a jar
   changes; Modrinth down → all bundled; Paper/empty → 400; loader version detection for
-  Fabric/Forge/NeoForge; friends download it signed out from the status page.
+  Fabric/Forge/NeoForge; friends download it signed out from the status page. Single jars: list without
+  the server-only mod, one-by-one download, 404 for server-only/unknown/traversal names, auth required,
+  status-page variant.
 - Status page (FEAT-03, `offline_network` fixture fakes `netinfo.public_ip`/`lan_ip`): off by
   default (404, owner API needs auth); only public fields and no secrets/emails/LAN IP/token in page
   or JSON; show-LAN/show-names switches; PlayIt address preferred, public IP fallback; regenerate and

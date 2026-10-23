@@ -186,6 +186,42 @@ def register(app: FastAPI, s: Services) -> None:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return FileResponse(path, media_type="application/x-modrinth-modpack+zip", filename=summary["filename"])
 
+    # The other option: every jar players need as its own download, for launchers without .mrpack import.
+    def client_jars() -> dict[str, Any]:
+        """{jars: [{name, size}], excluded, warnings}; ValueError when there is no pack to make."""
+        config = common._effective_config()
+        folder = paths.content_folder(str(config.get("loader", "vanilla")), common._server_dir_for_config(config))
+        summary = ensure_modpack()[1]
+        jars = [{"name": name, "size": os.path.getsize(os.path.join(folder, name))}
+                for name in summary.get("client_jars", []) if os.path.isfile(os.path.join(folder, name))]
+        return {"jars": jars, "excluded": summary["excluded"], "warnings": summary["warnings"]}
+
+    def client_jar_response(name: str, **headers: str) -> FileResponse:
+        config = common._effective_config()
+        try:
+            summary = ensure_modpack()[1]
+        except ValueError:
+            summary = {}
+        path = modpack.client_jar_path(common._server_dir_for_config(config), str(config.get("loader", "vanilla")),
+                                       summary, name)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Not found.")
+        return FileResponse(path, media_type="application/java-archive", filename=name, headers=headers)
+
+    s.client_jars = client_jars
+    s.client_jar_response = client_jar_response
+
+    @app.get("/api/modpack/jars")
+    def list_client_jars(_: str = Depends(require_auth)) -> dict[str, Any]:
+        try:
+            return client_jars()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/modpack/jars/{name}")
+    def download_client_jar(name: str, _: str = Depends(require_auth)) -> FileResponse:
+        return client_jar_response(name)
+
     # ---------- Mod updates (FEAT-07) ----------
     def content_dir() -> tuple[str, str, str]:
         """(loader, game version, mods/plugins folder); 400 for vanilla."""
