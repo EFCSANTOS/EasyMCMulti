@@ -39,4 +39,5 @@ def fresh_runtime():
     """Every test starts from a new RuntimeState, so no test depends on what an earlier one left."""
     app.state.runtime.__dict__.update(RuntimeState().__dict__)
     app.state.services.reset_notifications()
+    app.state.services.reset_health()
     yield

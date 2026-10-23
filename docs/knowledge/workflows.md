@@ -152,11 +152,16 @@ The Remote page additionally calls `GET /api/playit/status` for the real tunnel 
 
 ## 10. Metrics
 Aliases `/api/system/metrics`, `/api/system`, `/api/stats`, `/api/metrics`, `/metrics` →
-`{cpu, cpuScope, ram, ramTotal, uptime}`. RAM: psutil → `/proc/meminfo` → Windows ctypes. CPU
-(`common._cpu_usage`, delta since the previous poll): psutil → `/proc/stat` (`cpuScope: "system"`) →
+`{cpu, cpuScope, ram, ramTotal, temperatures, uptime}`. RAM: psutil → `/proc/meminfo` → Windows ctypes. CPU
+(`common._cpu_usage(last)`, delta since the previous call with the same `last` dict; the dashboard
+shares `_cpu_last`, the health check keeps its own): psutil `cpu_times` → `/proc/stat` (`cpuScope: "system"`) →
 on Android, where apps can't read `/proc/stat`, the summed utime+stime of every readable
 `/proc/<pid>/stat` (only Termux's own processes, the server included) over elapsed time × cores
 (`"processes"`, shown as "now · Termux processes") → `0` / `"unavailable"`.
+`temperatures`: `core/temperatures.read()` → `[{label, celsius, kind: "device"|"battery"}]`, hottest
+first, from psutil sensors → `/sys/class/thermal/thermal_zone*` (m°C) + `/sys/class/power_supply/*/temp`
+(0.1 °C) → `termux-battery-status` (Termux:API, cached 30 s); values outside 1–150 °C are dropped; `[]`
+on Windows (needs admin). Overview "Temperature" card charts the hottest sensor and lists the others.
 
 ## 11. Backups (FEAT-01: schedule, retention, safety backups)
 - Names (`core/backups.py`): `world-backup-<folder>-<YYYYmmdd-HHMMSS>[-<label>].zip`; labels
@@ -676,6 +681,22 @@ Core details (`core/playit.py`):
   (`bedrock_busy`) → `bedrock_enabled` + tunnel if the agent runs; off → uninstall + disabled.
 - Bedrock address: Remote access card, invite text ("Bedrock (phone/console): …") and the public
   status page. Whitelist form "Bedrock player" adds Floodgate's `.` prefix (spaces → `_`).
+
+## 36. Device health alerts (CPU / RAM / temperature)
+- `webapp/routes/health.py::health_tick`, run by the scheduler once a minute (after `storage_tick`):
+  CPU = average since the previous tick (own `_cpu_usage` dict), RAM % = used / total, temperatures =
+  hottest "device" and hottest "battery" reading.
+- Usage (`notify_usage`): CPU ≥ `alert_cpu_percent` or RAM ≥ `alert_ram_percent` for
+  `alert_usage_minutes` consecutive ticks → one alert. Temperature (`notify_temperature`): device ≥
+  `alert_temp_c` or battery ≥ `alert_battery_c` for 2 ticks in a row. Each watch alerts once, then
+  re-arms only when the value drops `RECOVER_MARGIN` (5) below the limit, which also sends "… is
+  back to normal". Not throttled (the state machine already prevents repeats).
+- Where they go: `channels_usage` / `channels_temperature` = "both" | "email" | "discord";
+  `notifier.channels(config, category)` filters inside `services.notify` (other categories: both).
+- Settings: Server setup → Alerts → "Device health" (switch + "Send by" + limits per alert), saved via
+  `PUT /api/notifications`; `notifier.save_config` rejects other channel values and limits outside
+  `notifier.LIMITS` (400). Termux setup installs `termux-api`; the battery reading also needs the
+  Termux:API app.
 
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash

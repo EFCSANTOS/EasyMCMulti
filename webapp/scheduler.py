@@ -101,6 +101,7 @@ def register(app: FastAPI, s: Services) -> None:
         idle_tick(now, config)
         old_mods_tick(now, config)
         s.storage_tick()
+        s.health_tick()
 
     def scheduler_loop() -> None:
         while not runtime.shutting_down:
