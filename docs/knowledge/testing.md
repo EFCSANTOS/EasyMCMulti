@@ -40,6 +40,9 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 `server_port: 25566`, or a `demo-secret` PlayIt config.)
 
 ## Notes
+- Background timers (crash/tunnel retries) can outlive their test and fire in a later one: assert
+  the outcome ("a new tunnel replaced the crashed one"), not exact instance counts. CI prints the
+  `--randomly-seed` in its header to reproduce an order-dependent failure.
 - One shared `app`/`client` per session (cheap and keeps the `common_module` patch targets simple);
   isolation comes from the autouse fixtures above.
 - `test_admin_action_routes_exist_for_dashboard_buttons` exercises only the 409 branch (no server);
