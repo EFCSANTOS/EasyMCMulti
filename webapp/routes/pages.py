@@ -5,7 +5,7 @@ import os
 from typing import Any
 
 from fastapi import HTTPException, Depends, FastAPI, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from webapp import common
 from webapp.services import Services, require_user
@@ -13,6 +13,7 @@ from webapp.auth import SESSION_COOKIE, SESSION_TTL_SEC, User, check_login, is_h
 from webapp.pages.layout import SCRIPTS, STATIC_DIR, _render_dashboard_page
 
 _WEBAPP_DIR = os.path.dirname(os.path.dirname(__file__))
+APP_ICONS = {"icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"}
 
 
 def register(app: FastAPI, s: Services) -> None:
@@ -56,6 +57,29 @@ def register(app: FastAPI, s: Services) -> None:
     @app.get("/dashboard/{section}")
     def dashboard_section(section: str) -> HTMLResponse:
         return _render_dashboard_page(section)
+
+    # ---------- Installable app (FEAT-16): manifest + icons, public like the other shells ----------
+    @app.get("/manifest.webmanifest")
+    def web_manifest() -> JSONResponse:
+        manifest = {
+            "name": "EZ Minecraft Server", "short_name": "EZ MC", "id": "/dashboard/overview",
+            "start_url": "/dashboard/overview", "scope": "/", "display": "standalone",
+            "background_color": "#0d0e10", "theme_color": "#0d0e10",
+            "description": "Start, watch and manage your Minecraft server.",
+            "icons": [
+                {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                {"src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            ],
+        }
+        return JSONResponse(manifest, media_type="application/manifest+json")
+
+    @app.get("/icons/{name}")
+    def app_icon(name: str) -> FileResponse:
+        if name not in APP_ICONS:
+            raise HTTPException(status_code=404, detail="Not found.")
+        return FileResponse(os.path.join(STATIC_DIR, "icons", name), media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
 
     @app.get("/dashboard.css")
     def dashboard_css() -> FileResponse:

@@ -84,3 +84,21 @@ def test_always_on_settings_render_on_setup_page():
     text = client.get("/dashboard/setup").text
     for element_id in ("autostart-server", "auto-restart", "autostart-playit", "always-on-save-button"):
         assert f'id="{element_id}"' in text
+
+
+def test_installable_app_manifest_and_icons():
+    response = client.get("/manifest.webmanifest")  # public, like the other shells
+    assert response.status_code == 200 and response.headers["content-type"].startswith("application/manifest+json")
+    manifest = response.json()
+    assert manifest["display"] == "standalone" and manifest["start_url"] == "/dashboard/overview"
+    sizes = {(icon["sizes"], icon["purpose"]) for icon in manifest["icons"]}
+    assert {("192x192", "any"), ("512x512", "any"), ("512x512", "maskable")} <= sizes
+    for icon in manifest["icons"]:
+        png = client.get(icon["src"])
+        assert png.status_code == 200 and png.content.startswith(b"\x89PNG")
+        width = int.from_bytes(png.content[16:20], "big")
+        assert f"{width}x{width}" == icon["sizes"]
+    assert client.get("/icons/../app.py").status_code == 404
+    for path in ("/login", "/dashboard/overview", "/dashboard/remote"):
+        text = client.get(path).text
+        assert '<link rel="manifest" href="/manifest.webmanifest" />' in text and 'apple-touch-icon' in text, path

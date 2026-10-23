@@ -116,6 +116,10 @@ def _render_dashboard_page(section: str) -> HTMLResponse:
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title} · EZ Minecraft Server</title>
     <link rel="stylesheet" href="/dashboard.css?v={ASSET_VERSION}" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0d0e10" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   </head>
   <body data-page="{normalized}">
     <div class="app-shell">
