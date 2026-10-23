@@ -10,7 +10,7 @@ helpers like `_start`/`_wait_idle`/`_login`, constants like `AUTH`, and all shar
 (unit tests of `core/`). Each test file starts with `from support import *`. Real-format log
 snippets: `tests/fixtures/logs/`. `pytest.ini` sets `testpaths` and the `network` marker.
 Run: `.venv\Scripts\python.exe -m pytest -q` — random order (`pytest-randomly`; reproduce with
-`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-23: 204 passed
+`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-23: 208 passed
 (~30 s; the updater tests create real git repos, so `git` must be on PATH; every file also passes
 on its own). Dev deps: `pip install -r requirements-dev.txt`. CI: `.github/workflows/tests.yml`
 (Ubuntu + Windows, Python 3.13: pytest, `node --check` on the dashboard scripts, `bash -n` on
@@ -68,6 +68,9 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Migration (FEAT-09, `test_migrate.py`, `fabric_1_21_1` fixture fakes Modrinth and downloads):
+  plan (worlds, files, compatible/missing mods, downgrade, loader change); the full move; missing
+  mods/downgrade/running → 409; existing target worlds kept aside.
 - Storage (FEAT-15, `storage_tree` fixture): breakdown sizes and flags, Java need from server
   versions; deletes refused for the active dir, backups, unknown ids and while running; low-space
   alert once until recovered.

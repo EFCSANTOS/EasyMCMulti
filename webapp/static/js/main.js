@@ -75,6 +75,9 @@ function bindEvents() {
   on('world-create-form', 'submit', (event) => createWorld(event));
   bindPlayers();
   bindIdentity();
+  on('migrate-loader', 'change', () => loadMigrateVersions());
+  on('migrate-form', 'submit', (event) => checkMigration(event));
+  on('migrate-run-button', 'click', (event, button) => runMigration(button));
   on('storage-refresh-button', 'click', () => loadStorage(true));
   on('mod-updates-check', 'click', (event, button) => checkModUpdates(button));
   on('mod-updates-all', 'click', (event, button) => applyModUpdates(null, button));
@@ -112,6 +115,7 @@ async function boot() {
   bindMetrics();
   await loadConfig();
   await loadHostInfo();
+  loadMigrateVersions();
   renderMotdPreview();
   loadServerIcon();
   await loadStatus();
