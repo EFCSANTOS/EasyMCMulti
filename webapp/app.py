@@ -9,8 +9,8 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from webapp import background, scheduler
 from webapp.auth import authenticate, validate_auth_settings
 from webapp.routes import (
-    backups, bedrock, diagnosis, identity, migrate, mods, pages, players, public, remote, server, storage, system,
-    updates, users, worlds,
+    backups, bedrock, diagnosis, health, identity, migrate, mods, pages, players, public, remote, server, storage,
+    system, updates, users, worlds,
 )
 from webapp.services import create_services
 
@@ -29,7 +29,7 @@ def create_app() -> FastAPI:
     services = create_services(app)
     app.state.services = services
     for module in (pages, system, server, diagnosis, backups, mods, worlds, players, public, identity, storage, migrate,
-                   users, remote, bedrock, updates, scheduler, background):
+                   users, remote, bedrock, health, updates, scheduler, background):
         module.register(app, services)
 
     app.state.autostart = services.autostart

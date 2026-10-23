@@ -29,6 +29,12 @@ _SECTION_OVERVIEW_TILES = f"""
         </section>
 """
 
+_CHANNEL_SELECT = """<select id="{id}">
+                  <option value="both">Email and Discord</option>
+                  <option value="email">Email only</option>
+                  <option value="discord">Discord only</option>
+                </select>"""
+
 _SECTION_METRICS = """
         <section id="metrics" class="card">
           <div class="card-header">
@@ -73,6 +79,23 @@ _SECTION_METRICS = """
                 <span>avg <strong id="ram-avg">—</strong></span>
                 <span>max <strong id="ram-max">—</strong></span>
               </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-head">
+                <div class="metric-label">Temperature</div>
+                <div id="temp-sub" class="metric-sub">waiting</div>
+              </div>
+              <div id="temp-value" class="metric-value">—</div>
+              <div class="chart-wrap">
+                <canvas id="temp-chart" height="120" aria-label="Hottest sensor over the last two minutes" role="img"></canvas>
+                <div class="chart-tip" hidden></div>
+              </div>
+              <div class="metric-foot">
+                <span>min <strong id="temp-min">—</strong></span>
+                <span>avg <strong id="temp-avg">—</strong></span>
+                <span>max <strong id="temp-max">—</strong></span>
+              </div>
+              <p id="temp-list" class="hint"></p>
             </div>
           </div>
         </section>
@@ -399,6 +422,49 @@ _SECTION_ALERTS = f"""
               {_switch("alerts-notify-updates", "Updates", "A new version is available, or an update failed.", True)}
               {_switch("alerts-notify-security", "Sign-in lockouts", "Someone entered a wrong dashboard password too many times.", True)}
               {_switch("alerts-notify-backup", "Backups and storage", "A backup failed, or the device is running out of space.", True)}
+            </div>
+            <h3 class="subhead">Device health</h3>
+            <p class="hint">Checked once a minute. Each alert is sent once, then again only after things went back to
+              normal (you also get a "back to normal" message).</p>
+            <div class="health-alert">
+              {_switch("alerts-notify-usage", "High CPU or memory use", "CPU or memory stays above the limit for a few minutes.", True)}
+              <div class="field">
+                <label for="alerts-channels-usage">Send by</label>
+                {_CHANNEL_SELECT.format(id="alerts-channels-usage")}
+              </div>
+            </div>
+            <div class="form-grid alerts-limits">
+              <div class="field">
+                <label for="alerts-cpu-limit">CPU limit (%)</label>
+                <input id="alerts-cpu-limit" type="number" min="10" max="100" value="90" />
+              </div>
+              <div class="field">
+                <label for="alerts-ram-limit">Memory limit (%)</label>
+                <input id="alerts-ram-limit" type="number" min="10" max="100" value="90" />
+              </div>
+              <div class="field">
+                <label for="alerts-usage-minutes">For at least (minutes)</label>
+                <input id="alerts-usage-minutes" type="number" min="1" max="120" value="5" />
+              </div>
+            </div>
+            <div class="health-alert">
+              {_switch("alerts-notify-temperature", "Device too hot", "A temperature sensor stays above the limit for 2 minutes.", True)}
+              <div class="field">
+                <label for="alerts-channels-temperature">Send by</label>
+                {_CHANNEL_SELECT.format(id="alerts-channels-temperature")}
+              </div>
+            </div>
+            <div class="form-grid alerts-limits">
+              <div class="field">
+                <label for="alerts-temp-limit">Device limit (°C)</label>
+                <input id="alerts-temp-limit" type="number" min="30" max="120" value="80" />
+                <p class="hint">CPU and other chips.</p>
+              </div>
+              <div class="field">
+                <label for="alerts-battery-limit">Battery limit (°C)</label>
+                <input id="alerts-battery-limit" type="number" min="25" max="80" value="45" />
+                <p class="hint">Phones: batteries suffer above about 45 °C.</p>
+              </div>
             </div>
             <h3 class="subhead">Discord</h3>
             <p class="hint">In your Discord server: channel settings → Integrations → Webhooks → New Webhook → Copy

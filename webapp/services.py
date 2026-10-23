@@ -81,13 +81,15 @@ def create_services(app: FastAPI) -> Services:
 
     def notify(category: str, subject: str, body: str, throttle: bool = True) -> None:
         """Send an owner alert by email and/or the owner Discord webhook, in the background, if
-        enabled for `category` (server / link / tunnels / updates / security).
+        enabled for `category` (server / link / tunnels / updates / security / backup / usage /
+        temperature). `channels_<category>` (usage, temperature) can limit it to email or Discord.
 
         The same subject is sent at most once per ALERT_REPEAT_SEC so a flapping service can't spam.
         """
         config = notifier.load_config()
-        email = notifier.email_ready(config)
-        discord_url = config.get("discord_owner_url")
+        use_email, use_discord = notifier.channels(config, category)
+        email = use_email and notifier.email_ready(config)
+        discord_url = config.get("discord_owner_url") if use_discord else ""
         if not (email or discord_url) or not config.get(f"notify_{category}", True):
             return
         now = time.monotonic()
