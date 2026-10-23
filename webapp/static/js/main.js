@@ -76,6 +76,7 @@ function bindEvents() {
   bindPlayers();
   bindIdentity();
   bindUsers();
+  on('named-tunnel-form', 'submit', (event) => saveNamedTunnel(event));
   on('migrate-loader', 'change', () => loadMigrateVersions());
   on('migrate-form', 'submit', (event) => checkMigration(event));
   on('migrate-run-button', 'click', (event, button) => runMigration(button));

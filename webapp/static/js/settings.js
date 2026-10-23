@@ -365,6 +365,23 @@ function bindInvite() {
   });
 }
 
+// ---------- Own-domain link (FEAT-17) ----------
+async function saveNamedTunnel(event) {
+  event.preventDefault();
+  const token = document.getElementById('remote-token');
+  const body = {
+    mode: document.getElementById('remote-mode').value,
+    hostname: document.getElementById('remote-hostname').value.trim(),
+  };
+  if (token.value.trim()) body.token = token.value.trim(); // empty keeps the saved token
+  await runAction(event.submitter, 'Saving…', async () => {
+    const info = await fetchJson('/api/remote-dashboard/named', 'POST', body);
+    token.value = '';
+    renderRemoteDashboard(info);
+    return info.message;
+  });
+}
+
 // ---------- Remote dashboard (Cloudflare) ----------
 const REMOTE_LABELS = { off: 'Off', starting: 'Starting…', running: 'Online', error: 'Problem' };
 
@@ -386,6 +403,13 @@ function renderRemoteDashboard(info) {
   const errorBox = document.getElementById('remote-dashboard-error');
   errorBox.hidden = !(info.enabled && info.error);
   errorBox.textContent = info.error || '';
+
+  const mode = document.getElementById('remote-mode');
+  if (mode && document.activeElement !== mode) mode.value = info.mode || 'quick';
+  const hostname = document.getElementById('remote-hostname');
+  if (hostname && document.activeElement !== hostname && !hostname.value) hostname.value = info.hostname || '';
+  const token = document.getElementById('remote-token');
+  if (token) token.placeholder = info.token_set ? 'Saved (paste a new token to replace it)' : 'eyJ…';
 
   const weakPassword = document.getElementById('remote-dashboard-weak-password');
   if (weakPassword) weakPassword.hidden = !(info.enabled && info.weak_password);

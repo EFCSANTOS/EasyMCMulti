@@ -14,9 +14,12 @@ import shutil
 import subprocess
 import threading
 
-from . import hostenv, paths
+from . import fsutil, hostenv, paths
 
 RELEASE_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/{}"
+# Named-tunnel tokens are base64 JSON ("eyJ...") from the Cloudflare dashboard.
+TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_\-=.+/]{50,4096}$")
+HOSTNAME_PATTERN = re.compile(r"^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 URL_PATTERN = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 
@@ -66,6 +69,74 @@ def find_url(line):
     """The trycloudflare.com address in a cloudflared log line, or None."""
     match = URL_PATTERN.search(line)
     return match.group(0) if match else None
+
+
+# ---------- Named tunnel (FEAT-17): the owner's own domain, same address after every restart ----------
+def _token_path():
+    return os.path.join(paths.DATA_DIR, "cloudflare_tunnel.json")
+
+
+def load_token():
+    data = fsutil.read_json(_token_path(), {})
+    return str(data.get("token") or "") if isinstance(data, dict) else ""
+
+
+def save_token(token):
+    """Store the named-tunnel token (secret: never returned by the API). Raises ValueError if malformed."""
+    token = token.strip()
+    if not TOKEN_PATTERN.match(token):
+        raise ValueError("That doesn't look like a Cloudflare tunnel token (it starts with eyJ and is long).")
+    paths.ensure_dirs()
+    fsutil.write_json_atomic(_token_path(), {"token": token})
+
+
+def forget_token():
+    try:
+        os.remove(_token_path())
+    except FileNotFoundError:
+        pass
+
+
+class NamedTunnel:
+    """Runs `cloudflared tunnel run` for a tunnel created in the Cloudflare dashboard.
+
+    The public hostname is configured there; this only reports https://<hostname> once the first
+    connection to Cloudflare is registered. The token goes through the TUNNEL_TOKEN environment
+    variable, so it doesn't show up in the process list.
+    """
+
+    def __init__(self, hostname, on_url, on_output, on_exit):
+        self.hostname = hostname
+        self.on_url = on_url
+        self.on_output = on_output
+        self.on_exit = on_exit
+        self.proc = None
+        self.url = None
+
+    def is_running(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def start(self, binary, token):
+        self.proc = subprocess.Popen(
+            [binary, "tunnel", "--no-autoupdate", "run"],
+            env={**os.environ, "TUNNEL_TOKEN": token},
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace",
+            creationflags=CREATE_NO_WINDOW)
+        threading.Thread(target=self._reader, daemon=True).start()
+
+    def _reader(self):
+        for line in self.proc.stdout:
+            line = line.rstrip("\n")
+            if self.url is None and "Registered tunnel connection" in line:
+                self.url = f"https://{self.hostname}"
+                self.on_url(self.url)
+            self.on_output(line)
+        self.on_exit(self.proc.wait())
+
+    def stop(self):
+        if self.proc is not None:
+            self.proc.terminate()
 
 
 class QuickTunnel:
