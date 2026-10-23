@@ -374,6 +374,7 @@ def test_named_mode_gives_the_same_address_after_restart(fake_cloudflared, monke
 
 
 def test_named_tunnel_settings_are_validated():
+    config_store.save({"remote_dashboard": False})  # saving must not start a real tunnel thread here
     named = lambda body: client.post("/api/remote-dashboard/named", auth=AUTH, json=body)  # noqa: E731
     assert named({"mode": "named", "hostname": "mc.example.com"}).status_code == 400  # no token yet
     assert named({"mode": "named", "hostname": "mc.example.com", "token": "short"}).status_code == 400
