@@ -414,7 +414,10 @@ function updateMetricsUi(sample) {
 
   const cpu = summarize(metricsState.cpu);
   document.getElementById('cpu-value').textContent = `${sample.cpu.toFixed(1)}%`;
-  document.getElementById('cpu-sub').textContent = 'now';
+  const cpuSub = document.getElementById('cpu-sub');
+  // Android hides machine-wide CPU use, so on Termux this is the server plus the other Termux processes.
+  cpuSub.textContent = { processes: 'now · Termux processes', unavailable: 'not available' }[sample.cpuScope] || 'now';
+  cpuSub.title = sample.cpuScope === 'processes' ? 'Android does not let apps see total CPU use; this counts what runs in Termux, including the server.' : '';
   document.getElementById('cpu-min').textContent = `${cpu.min.toFixed(1)}%`;
   document.getElementById('cpu-avg').textContent = `${cpu.avg.toFixed(1)}%`;
   document.getElementById('cpu-max').textContent = `${cpu.max.toFixed(1)}%`;
@@ -435,7 +438,7 @@ async function refreshMetrics() {
   const badge = document.getElementById('metrics-badge');
   try {
     const data = await fetchJson('/api/system/metrics');
-    updateMetricsUi({ cpu: Number(data.cpu) || 0, ram: Number(data.ram) || 0, ramTotal: Number(data.ramTotal) || 1 });
+    updateMetricsUi({ cpu: Number(data.cpu) || 0, cpuScope: data.cpuScope, ram: Number(data.ram) || 0, ramTotal: Number(data.ramTotal) || 1 });
     badge.textContent = 'live';
     badge.className = 'badge badge-live';
   } catch (error) {
