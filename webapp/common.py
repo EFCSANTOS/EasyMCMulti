@@ -203,19 +203,85 @@ def _effective_config() -> dict[str, Any]:
 
 def _system_metrics_snapshot() -> dict[str, Any]:
     # Each source is tried separately: Android blocks /proc/stat (CPU) but allows /proc/meminfo.
-    cpu = 0.0
-    if psutil is not None:
-        try:
-            cpu = float(psutil.cpu_percent(interval=None))
-        except Exception:
-            cpu = 0.0
+    cpu, scope = _cpu_usage()
     used, total = _memory_usage()
     return {
         "cpu": cpu,
+        "cpuScope": scope,
         "ram": int(used),
         "ramTotal": int(total),
         "uptime": int(time.time() - _APP_START_TIME),
     }
+
+
+PROC_DIR = "/proc"
+# Previous counter reading per source, so each poll reports the use since the last one.
+_cpu_last: dict[str, tuple[float, float]] = {}
+
+
+def _cpu_usage() -> tuple[float, str]:
+    """(percent, scope). Scope is "system", "processes" (only our own processes) or "unavailable".
+
+    psutil (absent on Termux) and /proc/stat give the whole machine. Android blocks /proc/stat for
+    apps but still lets them read /proc/<pid>/stat of their own processes, so there we add up the
+    CPU time of everything Termux runs (the Minecraft server included).
+    """
+    if psutil is not None:
+        try:
+            return float(psutil.cpu_percent(interval=None)), "system"
+        except Exception:
+            pass
+    try:
+        return _cpu_delta("system", *_proc_stat_ticks()), "system"
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        busy = _own_process_ticks()
+    except OSError:
+        return 0.0, "unavailable"
+    elapsed_ticks = time.monotonic() * _clock_ticks() * (os.cpu_count() or 1)
+    return _cpu_delta("processes", busy, elapsed_ticks), "processes"
+
+
+def _cpu_delta(source: str, busy: float, total: float) -> float:
+    previous = _cpu_last.get(source)
+    _cpu_last[source] = (busy, total)
+    if previous is None or total <= previous[1]:
+        return 0.0  # first reading: nothing to compare with yet
+    percent = (busy - previous[0]) / (total - previous[1]) * 100
+    return round(min(100.0, max(0.0, percent)), 1)
+
+
+def _proc_stat_ticks() -> tuple[float, float]:
+    """(busy, total) clock ticks of all CPUs from the first line of /proc/stat."""
+    with open(os.path.join(PROC_DIR, "stat"), "r", encoding="utf-8") as handle:
+        fields = [float(value) for value in handle.readline().split()[1:]]
+    idle = fields[3] + (fields[4] if len(fields) > 4 else 0.0)  # idle + iowait
+    total = sum(fields[:8])  # guest time is already counted in user/nice
+    return total - idle, total
+
+
+def _own_process_ticks() -> float:
+    """User + system clock ticks of every process whose /proc/<pid>/stat we may read."""
+    busy = 0.0
+    for name in os.listdir(PROC_DIR):
+        if not name.isdigit():
+            continue
+        try:
+            with open(os.path.join(PROC_DIR, name, "stat"), "r", encoding="utf-8") as handle:
+                # The command name (field 2) may contain spaces, so split after its closing ")".
+                fields = handle.read().rsplit(")", 1)[1].split()
+            busy += float(fields[11]) + float(fields[12])  # utime, stime
+        except (OSError, ValueError, IndexError):
+            continue  # exited meanwhile, or not ours
+    return busy
+
+
+def _clock_ticks() -> int:
+    try:
+        return int(os.sysconf("SC_CLK_TCK"))
+    except (AttributeError, ValueError, OSError):
+        return 100
 
 
 def _memory_usage() -> tuple[int, int]:

@@ -57,7 +57,7 @@ say "Installing Python packages (first run compiles some of them: 10-20 minutes 
 [ -x .venv/bin/python ] || python -m venv .venv </dev/null
 export ANDROID_API_LEVEL="$(getprop ro.build.version.sdk)"
 .venv/bin/python -m pip install --upgrade pip </dev/null
-# psutil is skipped: Android blocks the CPU counters it reads; memory comes from /proc/meminfo.
+# psutil is skipped: Android blocks the CPU counters it reads. The app reads /proc itself instead.
 grep -v '^psutil' requirements.txt > .requirements-termux.txt
 .venv/bin/python -m pip install -r .requirements-termux.txt </dev/null
 rm -f .requirements-termux.txt

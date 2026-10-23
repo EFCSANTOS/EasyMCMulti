@@ -10,7 +10,7 @@ helpers like `_start`/`_wait_idle`/`_login`, constants like `AUTH`, and all shar
 (unit tests of `core/`). Each test file starts with `from support import *`. Real-format log
 snippets: `tests/fixtures/logs/`. `pytest.ini` sets `testpaths` and the `network` marker.
 Run: `.venv\Scripts\python.exe -m pytest -q` — random order (`pytest-randomly`; reproduce with
-`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-23: 225 passed
+`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-23: 227 passed
 (~30 s; the updater tests create real git repos, so `git` must be on PATH; every file also passes
 on its own). Dev deps: `pip install -r requirements-dev.txt`. CI: `.github/workflows/tests.yml`
 (Ubuntu + Windows, Python 3.13: pytest, `node --check` on the dashboard scripts, `bash -n` on
@@ -182,7 +182,7 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
   skipped), installed `project_ids`, details plain text, remove, vanilla 400. A live read-only
   check against api.modrinth.com was run manually (2026-10-22), outside the suite.
 - Platform: system Java selection, Termux missing-Java hint, `unix_args.txt` vs `win_args.txt`,
-  metrics with blocked CPU counters, `termux-chroot` agent wrapping.
+  metrics with blocked CPU counters, CPU from `/proc/stat` without psutil and from own `/proc/<pid>/stat` (Android), `termux-chroot` agent wrapping.
 - Always-on (`fake_server` fixture + `RecordingProcess`, whose `exit(code)` fires `on_exit`;
   `CRASH_RESTART_DELAY_SEC` patched to 0): crash → restart, limit → `crashed`, Stop / console
   `stop` are not crashes, `auto_restart` off, autostart server + PlayIt, `EZ_NO_AUTOSTART`, shutdown
