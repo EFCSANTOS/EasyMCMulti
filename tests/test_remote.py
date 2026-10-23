@@ -305,3 +305,79 @@ def test_new_link_email_includes_status_page_link(fake_cloudflared, sent_emails,
     link_mail = next(body for subject, body in sent_emails if "New dashboard link" in subject)
     assert f"https://demo-1.trycloudflare.com/s/{token}" in link_mail
     assert client.get("/api/status-page", auth=AUTH).json()["url"] == f"https://demo-1.trycloudflare.com/s/{token}"
+
+
+# ---------- Own-domain dashboard link (FEAT-17) ----------
+TUNNEL_TOKEN = "eyJ" + "a" * 120
+
+
+def test_named_tunnel_runs_with_token_in_env_and_reports_hostname(monkeypatch):
+    calls = {}
+
+    class FakeProc:
+        stdout = iter(["2026 INF Starting tunnel\n", "2026 INF Registered tunnel connection connIndex=0\n"])
+
+        def poll(self):
+            return None
+
+        def wait(self):
+            return 0
+
+    def fake_popen(args, env, **kwargs):
+        calls.update(args=args, env=env)
+        return FakeProc()
+
+    monkeypatch.setattr(cloudflared.subprocess, "Popen", fake_popen)
+    urls, done = [], threading.Event()
+    tunnel = cloudflared.NamedTunnel("mc.example.com", on_url=urls.append, on_output=lambda line: None,
+                                     on_exit=lambda code: done.set())
+    tunnel.start("cloudflared", TUNNEL_TOKEN)
+    assert done.wait(3) and urls == ["https://mc.example.com"]
+    assert calls["args"] == ["cloudflared", "tunnel", "--no-autoupdate", "run"]
+    assert calls["env"]["TUNNEL_TOKEN"] == TUNNEL_TOKEN and TUNNEL_TOKEN not in " ".join(calls["args"])
+
+
+class FakeNamedTunnel:
+    instances: list = []
+
+    def __init__(self, hostname, on_url, on_output, on_exit):
+        self.hostname, self.on_url, self.on_exit, self.running = hostname, on_url, on_exit, False
+        FakeNamedTunnel.instances.append(self)
+
+    def start(self, binary, token):
+        self.token, self.running = token, True
+        self.on_url(f"https://{self.hostname}")
+
+    def is_running(self):
+        return self.running
+
+    def stop(self):
+        self.running = False
+        self.on_exit(0)
+
+
+def test_named_mode_gives_the_same_address_after_restart(fake_cloudflared, monkeypatch):
+    FakeNamedTunnel.instances = []
+    monkeypatch.setattr(cloudflared, "NamedTunnel", FakeNamedTunnel)
+    response = client.post("/api/remote-dashboard/named", auth=AUTH,
+                           json={"mode": "named", "hostname": "https://MC.Example.com/", "token": TUNNEL_TOKEN})
+    assert response.status_code == 200
+    info = response.json()
+    assert info["mode"] == "named" and info["hostname"] == "mc.example.com" and info["token_set"] is True
+    assert TUNNEL_TOKEN not in response.text and TUNNEL_TOKEN not in client.get("/api/remote-dashboard", auth=AUTH).text
+    for _ in range(2):  # enable, disable, enable again: same address both times
+        client.post("/api/remote-dashboard", auth=AUTH, json={"enabled": True})
+        assert _wait_until(lambda: app.state.runtime.web_tunnel_url == "https://mc.example.com")
+        client.post("/api/remote-dashboard", auth=AUTH, json={"enabled": False})
+    assert len(FakeNamedTunnel.instances) == 2 and FakeNamedTunnel.instances[0].token == TUNNEL_TOKEN
+    assert fake_cloudflared == []  # no quick tunnel was started
+
+
+def test_named_tunnel_settings_are_validated():
+    named = lambda body: client.post("/api/remote-dashboard/named", auth=AUTH, json=body)  # noqa: E731
+    assert named({"mode": "named", "hostname": "mc.example.com"}).status_code == 400  # no token yet
+    assert named({"mode": "named", "hostname": "mc.example.com", "token": "short"}).status_code == 400
+    assert named({"mode": "named", "hostname": "not a host", "token": TUNNEL_TOKEN}).status_code == 422
+    assert named({"mode": "named", "hostname": "mc.example.com", "token": TUNNEL_TOKEN}).status_code == 200
+    back = named({"mode": "quick", "token": None}).json()
+    assert back["mode"] == "quick" and back["token_set"] is False

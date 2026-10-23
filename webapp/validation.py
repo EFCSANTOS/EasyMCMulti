@@ -95,6 +95,9 @@ class ConfigUpdate(BaseModel):
     auto_update_check: bool | None = None
     auto_update_install: bool | None = None
     remote_dashboard: bool | None = None
+    remote_mode: Literal["quick", "named"] | None = None
+    remote_hostname: str | None = Field(
+        None, max_length=253, pattern=r"^$|^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
     status_page_enabled: bool | None = None
     status_page_show_names: bool | None = None
     status_page_show_lan: bool | None = None

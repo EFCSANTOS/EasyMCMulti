@@ -631,6 +631,22 @@ Core details (`core/playit.py`):
   worker: current Chrome/Edge don't need one to install, and caching would only risk stale state.
 - Installing needs https (the Cloudflare link) or localhost; the Remote access page says so.
 
+## 34. Own-domain dashboard link (FEAT-17)
+- `remote_mode`: `quick` (default: `QuickTunnel`, random trycloudflare.com link) or `named`.
+  Named is used only when `remote_hostname` is set **and** a token is saved
+  (`remote.py::named_mode`): `cloudflared.NamedTunnel(hostname)` runs
+  `cloudflared tunnel --no-autoupdate run` with the token in `TUNNEL_TOKEN` (not on the command line)
+  and reports `https://<hostname>` once "Registered tunnel connection" appears — the same address
+  after every restart. The hostname is set up in the Cloudflare dashboard; this app never calls the
+  Cloudflare API.
+- Token: `EZ_Server_Data/cloudflare_tunnel.json` (atomic; `TOKEN_PATTERN`), never returned —
+  `GET /api/remote-dashboard` adds `mode`, `hostname`, `token_set`.
+- `POST /api/remote-dashboard/named {mode, hostname?, token?}`: hostname normalised (scheme and
+  trailing slash removed, lower case) and validated (422); empty token keeps the saved one, `null`
+  forgets it; malformed token → 400; named without hostname+token → 400; restarts the link when on.
+- UI: Remote access → "Use your own domain" (steps, link type, hostname, token). Tailscale/ZeroTier
+  is documented in the README only.
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`
