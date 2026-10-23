@@ -36,6 +36,7 @@ const metricsState = {
   paused: false,
   cpu: [],
   ram: [],
+  temp: [],
   ramTotal: 0,
   maxPoints: 60,
   timer: null,

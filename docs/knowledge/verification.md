@@ -67,6 +67,7 @@ WS: `/ws/console` (session cookie or `Authorization: Basic`; close 1008 on failu
 | Remote dashboard (Cloudflare) | Works: live-checked on Windows 2026-10-22 (download, registration-gated link, request served through `trycloudflare.com`); login has sessions + lockout |
 | ~~Dashboard over PlayIt~~ | Removed: PlayIt's `/tunnels/create` rejects untyped tunnels (`TunnelTypeRequiresDescription`); `/v1/tunnels/create` rejected every body that matches the published client ("failed to parse body"); the website did not let the owner add a custom TCP tunnel either |
 | System metrics charts | Works (overview only). Termux CPU (own processes only) tested with a fake `/proc`, not yet on a phone |
+| Temperatures + device health alerts | Works in tests (fake `/sys`, fake Termux:API, alert timing/channels) and headless Edge (card shows "not available" on Windows; settings save and reload). **No real sensor read yet (Linux PC / phone), and no real alert email/Discord post sent** |
 | Player count + names | Works — parsed from server join/leave console lines |
 | Always-on (autostart server/PlayIt, crash restart) | Works in tests and a live uvicorn boot; not yet run on a device |
 | Self-update (Updates card) | Git logic tested against real temp repos and checked read-only on the real clone; **the process restart itself (exec on Linux/Termux, relaunch helper on Windows) is not yet run for real** |

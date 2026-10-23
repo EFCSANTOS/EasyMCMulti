@@ -359,6 +359,7 @@ function drawMetricChart(canvas, values, maxValue, hoverIndex = null) {
 const CHARTS = {
   'cpu-chart': { values: () => metricsState.cpu, max: () => 100, format: (v) => `${v.toFixed(1)}%` },
   'ram-chart': { values: () => metricsState.ram, max: () => metricsState.ramTotal, format: (v) => formatBytes(v) },
+  'temp-chart': { values: () => metricsState.temp, max: () => 100, format: (v) => `${v.toFixed(1)} °C` },
 };
 
 function redrawCharts() {
@@ -408,7 +409,9 @@ function updateMetricsUi(sample) {
   metricsState.cpu.push(sample.cpu);
   metricsState.ram.push(sample.ram);
   metricsState.ramTotal = sample.ramTotal;
-  [metricsState.cpu, metricsState.ram].forEach((series) => {
+  const readings = sample.temperatures || [];
+  if (readings.length) metricsState.temp.push(readings[0].celsius);
+  [metricsState.cpu, metricsState.ram, metricsState.temp].forEach((series) => {
     if (series.length > metricsState.maxPoints) series.shift();
   });
 
@@ -430,6 +433,23 @@ function updateMetricsUi(sample) {
   document.getElementById('ram-avg').textContent = pct(ram.avg);
   document.getElementById('ram-max').textContent = pct(ram.max);
 
+  // Hottest sensor on the chart; every sensor listed under it.
+  const degrees = (value) => `${value.toFixed(1)} °C`;
+  if (readings.length) {
+    const temp = summarize(metricsState.temp);
+    document.getElementById('temp-value').textContent = degrees(readings[0].celsius);
+    document.getElementById('temp-sub').textContent = readings[0].label;
+    document.getElementById('temp-min').textContent = degrees(temp.min);
+    document.getElementById('temp-avg').textContent = degrees(temp.avg);
+    document.getElementById('temp-max').textContent = degrees(temp.max);
+    document.getElementById('temp-list').textContent = readings.length > 1
+      ? readings.map((reading) => `${reading.label} ${Math.round(reading.celsius)} °C`).join(' · ') : '';
+  } else {
+    document.getElementById('temp-sub').textContent = 'not available';
+    document.getElementById('temp-list').textContent = 'This device does not let apps read its temperature sensors '
+      + '(Windows needs admin rights; on Android, install Termux:API and its app for the battery temperature).';
+  }
+
   redrawCharts();
 }
 
@@ -438,7 +458,7 @@ async function refreshMetrics() {
   const badge = document.getElementById('metrics-badge');
   try {
     const data = await fetchJson('/api/system/metrics');
-    updateMetricsUi({ cpu: Number(data.cpu) || 0, cpuScope: data.cpuScope, ram: Number(data.ram) || 0, ramTotal: Number(data.ramTotal) || 1 });
+    updateMetricsUi({ cpu: Number(data.cpu) || 0, cpuScope: data.cpuScope, temperatures: data.temperatures, ram: Number(data.ram) || 0, ramTotal: Number(data.ramTotal) || 1 });
     badge.textContent = 'live';
     badge.className = 'badge badge-live';
   } catch (error) {

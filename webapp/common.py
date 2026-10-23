@@ -18,7 +18,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - installed in project venv for runtime metrics
     psutil = None
 
-from core import backups, config_store, downloaders, paths, worlds
+from core import backups, config_store, downloaders, paths, temperatures, worlds
 # Re-exported for the routers (common.ServerProcess, …) so tests can patch them here.
 from core.server_process import ServerProcess, accept_eula, update_properties  # noqa: F401
 from webapp.state import RuntimeState
@@ -205,34 +205,41 @@ def _system_metrics_snapshot() -> dict[str, Any]:
     # Each source is tried separately: Android blocks /proc/stat (CPU) but allows /proc/meminfo.
     cpu, scope = _cpu_usage()
     used, total = _memory_usage()
+    readings = temperatures.read()
     return {
         "cpu": cpu,
         "cpuScope": scope,
         "ram": int(used),
         "ramTotal": int(total),
+        # Hottest sensor first; [] when the device doesn't let apps read any (Windows, some phones).
+        "temperatures": readings,
         "uptime": int(time.time() - _APP_START_TIME),
     }
 
 
 PROC_DIR = "/proc"
-# Previous counter reading per source, so each poll reports the use since the last one.
+# Previous counter reading per source, so each poll reports the use since the last one. Callers
+# that sample on their own schedule (the resource alerts) pass their own dict.
 _cpu_last: dict[str, tuple[float, float]] = {}
 
 
-def _cpu_usage() -> tuple[float, str]:
-    """(percent, scope). Scope is "system", "processes" (only our own processes) or "unavailable".
+def _cpu_usage(last: dict[str, tuple[float, float]] | None = None) -> tuple[float, str]:
+    """(percent since the previous call with the same `last`, scope).
+
+    Scope is "system", "processes" (only our own processes) or "unavailable".
 
     psutil (absent on Termux) and /proc/stat give the whole machine. Android blocks /proc/stat for
     apps but still lets them read /proc/<pid>/stat of their own processes, so there we add up the
     CPU time of everything Termux runs (the Minecraft server included).
     """
+    last = _cpu_last if last is None else last
     if psutil is not None:
         try:
-            return float(psutil.cpu_percent(interval=None)), "system"
+            return _cpu_delta(last, "psutil", *_psutil_ticks()), "system"
         except Exception:
             pass
     try:
-        return _cpu_delta("system", *_proc_stat_ticks()), "system"
+        return _cpu_delta(last, "system", *_proc_stat_ticks()), "system"
     except (OSError, ValueError, IndexError):
         pass
     try:
@@ -240,16 +247,23 @@ def _cpu_usage() -> tuple[float, str]:
     except OSError:
         return 0.0, "unavailable"
     elapsed_ticks = time.monotonic() * _clock_ticks() * (os.cpu_count() or 1)
-    return _cpu_delta("processes", busy, elapsed_ticks), "processes"
+    return _cpu_delta(last, "processes", busy, elapsed_ticks), "processes"
 
 
-def _cpu_delta(source: str, busy: float, total: float) -> float:
-    previous = _cpu_last.get(source)
-    _cpu_last[source] = (busy, total)
+def _cpu_delta(last: dict[str, tuple[float, float]], source: str, busy: float, total: float) -> float:
+    previous = last.get(source)
+    last[source] = (busy, total)
     if previous is None or total <= previous[1]:
         return 0.0  # first reading: nothing to compare with yet
     percent = (busy - previous[0]) / (total - previous[1]) * 100
     return round(min(100.0, max(0.0, percent)), 1)
+
+
+def _psutil_ticks() -> tuple[float, float]:
+    """(busy, total) CPU seconds from psutil, counted like psutil.cpu_percent does."""
+    times = psutil.cpu_times()
+    total = sum(times) - getattr(times, "guest", 0.0) - getattr(times, "guest_nice", 0.0)
+    return total - times.idle - getattr(times, "iowait", 0.0), total
 
 
 def _proc_stat_ticks() -> tuple[float, float]:
