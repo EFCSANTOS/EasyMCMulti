@@ -207,6 +207,9 @@ _SECTION_REMOTE = f"""
               Anyone with the link can try to sign in; after 5 wrong passwords that address is locked out
               for 15 minutes. Use a long, unique password.
             </div>
+            <p class="hint">On a phone, open the link and choose <strong>Install app</strong> (Android) or
+              <strong>Add to Home Screen</strong> (iPhone) to get the dashboard as an app. Installing needs this
+              https link; it doesn't work on the plain http:// LAN address.</p>
           </div>
           <div class="card">
             <div class="card-header">

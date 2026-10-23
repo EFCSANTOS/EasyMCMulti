@@ -622,6 +622,15 @@ Core details (`core/playit.py`):
   `[data-stop-control]` (Stop/Restart); only status, metrics, chat and backup load. Owner: Friends
   page (create, new password, remove, "Friends can stop and restart" switch).
 
+## 33. Installable app (FEAT-16)
+- `GET /manifest.webmanifest` (public, `application/manifest+json`): name, short name "EZ MC",
+  `display: standalone`, `start_url`/`id` `/dashboard/overview`, theme/background `#0d0e10`, icons
+  192/512 (`any`) and 512 `maskable`. `GET /icons/{name}` serves only the four PNGs in
+  `static/icons/` (grass block drawn by a stdlib script; regenerate rather than hand-edit).
+- Every page and `/login` link the manifest, `theme-color` and the apple-touch-icon. No service
+  worker: current Chrome/Edge don't need one to install, and caching would only risk stale state.
+- Installing needs https (the Cloudflare link) or localhost; the Remote access page says so.
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`
