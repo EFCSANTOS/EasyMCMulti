@@ -106,6 +106,10 @@
           <dt>Address</dt>
           <dd class="address"><code id="address">—</code><button id="copy" type="button">Copy</button></dd>
         </div>
+        <div id="bedrock-row" hidden>
+          <dt>Bedrock (phone, console)</dt>
+          <dd><code id="bedrock-address"></code></dd>
+        </div>
         <div id="lan-row" hidden>
           <dt>Same Wi-Fi</dt>
           <dd><code id="lan-address"></code></dd>
@@ -143,6 +147,8 @@
         setText('state-label', data.online ? 'Online' : 'Offline');
         setText('address', data.address || 'Ask the owner for the address');
         document.getElementById('copy').hidden = !data.address;
+        document.getElementById('bedrock-row').hidden = !data.bedrock_address;
+        if (data.bedrock_address) setText('bedrock-address', data.bedrock_address);
         const lanRow = document.getElementById('lan-row');
         lanRow.hidden = !data.lan_address;
         if (data.lan_address) setText('lan-address', data.lan_address);

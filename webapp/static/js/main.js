@@ -75,6 +75,12 @@ function bindEvents() {
   on('world-create-form', 'submit', (event) => createWorld(event));
   bindPlayers();
   bindIdentity();
+  bindUsers();
+  on('bedrock-enabled', 'change', (event, toggle) => toggleBedrock(toggle));
+  on('named-tunnel-form', 'submit', (event) => saveNamedTunnel(event));
+  on('migrate-loader', 'change', () => loadMigrateVersions());
+  on('migrate-form', 'submit', (event) => checkMigration(event));
+  on('migrate-run-button', 'click', (event, button) => runMigration(button));
   on('storage-refresh-button', 'click', () => loadStorage(true));
   on('mod-updates-check', 'click', (event, button) => checkModUpdates(button));
   on('mod-updates-all', 'click', (event, button) => applyModUpdates(null, button));
@@ -99,11 +105,34 @@ function bindEvents() {
   bindCopyButtons();
 }
 
+// Friends (FEAT-10) only get the overview: status, players, start (stop/restart if allowed), chat, backup.
+async function bootFriend() {
+  if (document.body.dataset.page !== 'overview') {
+    window.location.href = '/dashboard/overview';
+    return;
+  }
+  document.body.classList.add('is-friend');
+  document.body.classList.toggle('no-stop', !appState.canStop);
+  const session = document.getElementById('session-status');
+  if (session) session.textContent = `Signed in as ${appState.username} (friend)`;
+  bindEvents();
+  bindMetrics();
+  await loadStatus();
+  scheduleStatusPoll();
+}
+
 async function boot() {
   try {
-    appState.username = (await fetchJson('/api/session')).username;
+    const session = await fetchJson('/api/session');
+    appState.username = session.username;
+    appState.role = session.role;
+    appState.canStop = session.can_stop;
   } catch (error) {
     if (error.message.startsWith('Session expired')) return; // redirecting to /login
+  }
+  if (appState.role === 'friend') {
+    await bootFriend();
+    return;
   }
   const session = document.getElementById('session-status');
   if (session && appState.username) session.textContent = `Signed in as ${appState.username}`;
@@ -112,11 +141,12 @@ async function boot() {
   bindMetrics();
   await loadConfig();
   await loadHostInfo();
+  loadMigrateVersions();
   renderMotdPreview();
   loadServerIcon();
   await loadStatus();
   await Promise.all([loadBackups(), loadInstalledMods(), loadAlerts(), loadUpdate(), loadWorlds(), loadPlayers(), loadInvite(), loadModpack(),
-    loadDiagnosis(), loadLogs(), loadModUpdates(), loadProperties(), loadStorage(),
+    loadDiagnosis(), loadLogs(), loadModUpdates(), loadProperties(), loadStorage(), loadUsers(), loadBedrock(),
     startConsole()]);
   initModBrowser(); // after loadInstalledMods so cards can show "Installed"
 

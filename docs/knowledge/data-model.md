@@ -11,6 +11,8 @@ EZ_Server_Data/
   cloudflared-<os>-<arch>  Cloudflare tunnel binary, downloaded on Windows/Linux (cloudflared.ensure_binary)
   notify_config.json       alert settings (notifier._CONFIG_FILE) — plaintext SMTP app password and Discord
                            webhook URLs; last_link
+  cloudflare_tunnel.json   {"token"} for the owner's named tunnel (FEAT-17) — secret
+  users.json               friend accounts {username: {role, salt, hash, created}} (core/users.py, FEAT-10)
   activity.jsonl           player joins/leaves/server stops, one JSON per line (core/activity.py, FEAT-12)
   resume_after_update.json {server, playit} written before an update restart, deleted on next start
   update-requirements.txt  temp requirements file used by updater.install_requirements
@@ -18,7 +20,8 @@ EZ_Server_Data/
   java/jre-<feature>/      Temurin JRE per Java major (java_manager._install_dir)
   servers/<loader>-<version>/  one dir per loader+version; spaces → "_" (paths.server_dir)
 ```
-Switching loader/version in config switches to a different server dir (and world).
+Switching loader/version in config switches to a different server dir (and world); Server setup →
+"Move to another version" (FEAT-09) copies worlds, lists, icon and compatible mods across first.
 
 **Atomic writes (FIX-03).** Every settings/metadata file — `launcher_config.json`,
 `notify_config.json`, `playit_config.json`, `ez-worlds.json`, `.ez-modrinth.json`,
@@ -33,6 +36,11 @@ Config keys (FEAT-01): `backup_interval_hours` (6, 0–168, 0 = off), `backup_ke
 
 `extra_properties` (FEAT-14): `{server.properties key: value}` the owner set in "All properties";
 `server-icon.png` (64×64) in the server dir.
+Bedrock keys (FEAT-18): `bedrock_enabled` (False), `bedrock_port` (19132, 1024–65535);
+`playit_config.json` may hold `bedrock_address`.
+Remote link keys (FEAT-17): `remote_mode` ("quick"), `remote_hostname` (""); the named-tunnel token is
+in `cloudflare_tunnel.json` (secret, never returned).
+Friend keys (FEAT-10): `friends_can_stop` (False).
 Performance keys (FEAT-13): `jvm_preset_flags` (True), `jvm_extra_args` ("").
 Schedule keys (FEAT-06): `restart_daily_time` ("" or "HH:MM"), `idle_stop_minutes` (0, 0–1440),
 `quiet_hours_start` / `quiet_hours_end` ("" or "HH:MM").

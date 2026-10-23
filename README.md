@@ -248,7 +248,8 @@ webapp/
   templates/       login.html
 
 tests/
-  test_webapp_smoke.py
+  support.py, conftest.py   shared setup (no network, fresh state per test)
+  test_*.py                 one file per area
 
 docs/knowledge/  maintainer knowledge base
 
@@ -277,17 +278,31 @@ This app is intended for local or LAN use.
 - the dashboard pages themselves are public shells; all data and actions require auth
 - avoid exposing the port to the public internet without a proper firewall and reverse-proxy setup
 
+### A stable address instead of the random link
+
+- **Your own domain (Cloudflare named tunnel):** Remote access → "Use your own domain". Create a
+  tunnel in the Cloudflare dashboard (free plan, needs a domain on Cloudflare), add a public
+  hostname such as `mc.example.com` pointing to `http://localhost:8000`, and paste the tunnel token
+  and hostname. The address then stays the same after every restart, so bookmarks, the installed
+  app and the status page link keep working. Optionally put Cloudflare Access (email one-time
+  codes) in front for a second login.
+- **Nothing public at all (Tailscale or ZeroTier):** install Tailscale (or ZeroTier) on the host
+  and on each friend's device and join them to one private network. The dashboard is then at
+  `http://<host's tailnet IP>:8000` and Minecraft at `<host's tailnet IP>:25565` for everyone on
+  the network, without PlayIt or Cloudflare. The app already listens on all interfaces
+  (`--host 0.0.0.0`), so nothing changes in it; turn "Share this dashboard" off if you use this.
+
 ---
 
 ## Development and testing
 
-Run the smoke suite:
+Run the tests (install `requirements-dev.txt` first):
 
 ```bat
-.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py
+.venv\Scripts\python.exe -m pytest -q
 ```
 
-This verifies the web dashboard, status endpoints, config persistence, console websocket, lifecycle routes, and that every API call made by the dashboard scripts maps to a real route. Tests run against a temporary data folder and do not touch `EZ_Server_Data/`.
+They cover the dashboard and every API area, `core/` helpers, and that every API call made by the dashboard scripts maps to a real route. Tests run in random order, against a temporary data folder (never `EZ_Server_Data/`) and with the network blocked. GitHub Actions runs them on Windows and Ubuntu for every push and pull request.
 
 ---
 

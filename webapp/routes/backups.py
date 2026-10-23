@@ -12,7 +12,8 @@ from fastapi import Depends, FastAPI, HTTPException
 
 from core import backups
 from webapp import common
-from webapp.services import Services, require_auth
+from webapp.auth import User
+from webapp.services import Services, require_auth, require_user
 
 # The server's answer to "save-all flush" (1.13+: "Saved the game"; older: "Saved the world").
 SAVED_LINE = r"Saved the (game|world)"
@@ -128,8 +129,10 @@ def register(app: FastAPI, s: Services) -> None:
     s.backup_tick = backup_tick
 
     @app.post("/api/server/backup")
-    def backup_server(_: str = Depends(require_auth)) -> dict[str, Any]:
-        """Zip the active world (and its Paper dimension folders)."""
+    def backup_server(user: User = Depends(require_user)) -> dict[str, Any]:
+        """Zip the active world (and its Paper dimension folders). Friends may do this too."""
+        if not user.is_owner:
+            append_console_line(f"[dashboard] {user} made a backup")
         try:
             return create_backup("manual")
         except BackupError as exc:

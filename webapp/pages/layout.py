@@ -12,6 +12,7 @@ from webapp.pages.sections_main import _SECTION_ALWAYS_ON  # noqa: F401
 from webapp.pages.sections_main import _SECTION_CONSOLE_PREVIEW  # noqa: F401
 from webapp.pages.sections_main import _SECTION_METRICS  # noqa: F401
 from webapp.pages.sections_main import _SECTION_OVERVIEW_TILES  # noqa: F401
+from webapp.pages.sections_main import _SECTION_MIGRATE  # noqa: F401
 from webapp.pages.sections_main import _SECTION_PERFORMANCE  # noqa: F401
 from webapp.pages.sections_main import _SECTION_SCHEDULE  # noqa: F401
 from webapp.pages.sections_main import _SECTION_SETUP  # noqa: F401
@@ -23,8 +24,9 @@ from webapp.pages.sections_more import _SECTION_REMOTE  # noqa: F401
 from webapp.pages.sections_more import _SECTION_WORLDS  # noqa: F401
 from webapp.pages.sections_diagnosis import _SECTION_DIAGNOSIS, _SECTION_LOGS
 from webapp.pages.sections_identity import _SECTION_ALL_PROPERTIES, _SECTION_IDENTITY
-from webapp.pages.sections_invite import _SECTION_INVITE
+from webapp.pages.sections_invite import _SECTION_BEDROCK, _SECTION_INVITE
 from webapp.pages.sections_players import _SECTION_PLAYERS
+from webapp.pages.sections_users import _SECTION_USERS
 from webapp.pages.widgets import _icon
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
@@ -48,6 +50,7 @@ _DASHBOARD_NAVIGATION = (
     ("remote", "Remote access", "Remote access", "Let friends outside your network join."),
     ("backups", "Backups", "Backups", "Snapshot the world and roll back when needed."),
     ("console", "Console", "Console", "Live server output, commands and admin shortcuts."),
+    ("users", "Friends", "Friend accounts", "Let friends start the server without your password."),
 )
 
 # Shown on every page while an install runs (installs continue in the background).
@@ -68,8 +71,8 @@ _TOPBAR_CONTROLS = f"""
             </span>
             <div class="btn-group" role="group" aria-label="Server controls">
               <button id="start-button" class="btn btn-primary btn-sm" type="button" title="Start server" disabled>{_icon("play")} Start</button>
-              <button id="restart-button" class="btn btn-ghost btn-sm" type="button" title="Restart server" disabled>{_icon("restart")} Restart</button>
-              <button id="stop-button" class="btn btn-ghost btn-sm" type="button" title="Stop server" disabled>{_icon("stop")} Stop</button>
+              <button id="restart-button" class="btn btn-ghost btn-sm" type="button" title="Restart server" disabled data-stop-control>{_icon("restart")} Restart</button>
+              <button id="stop-button" class="btn btn-ghost btn-sm" type="button" title="Stop server" disabled data-stop-control>{_icon("stop")} Stop</button>
             </div>
           </div>
 """
@@ -77,13 +80,14 @@ _TOPBAR_CONTROLS = f"""
 
 _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
     "overview": (_SECTION_OVERVIEW_TILES, _SECTION_DIAGNOSIS, _SECTION_INVITE, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
-    "setup": (_SECTION_SETUP, _SECTION_PERFORMANCE, _SECTION_ALWAYS_ON, _SECTION_SCHEDULE, _SECTION_ALERTS,
+    "setup": (_SECTION_SETUP, _SECTION_MIGRATE, _SECTION_PERFORMANCE, _SECTION_ALWAYS_ON, _SECTION_SCHEDULE, _SECTION_ALERTS,
               _SECTION_UPDATES),
     "advanced": (_SECTION_ADVANCED, _SECTION_IDENTITY, _SECTION_ALL_PROPERTIES),
     "worlds": (_SECTION_WORLDS,),
     "players": (_SECTION_PLAYERS,),
+    "users": (_SECTION_USERS,),
     "mods": (_SECTION_MODS,),
-    "remote": (_SECTION_REMOTE, _SECTION_INVITE),
+    "remote": (_SECTION_REMOTE, _SECTION_BEDROCK, _SECTION_INVITE),
     "backups": (_SECTION_BACKUPS,),
     "console": (_SECTION_DIAGNOSIS, _SECTION_CONSOLE_FULL, _SECTION_LOGS),
 }
@@ -97,7 +101,8 @@ def _render_dashboard_page(section: str) -> HTMLResponse:
     nav_links = []
     for key, label, _title, _sub in _DASHBOARD_NAVIGATION:
         current = ' active" aria-current="page' if key == normalized else ""
-        nav_links.append(f'<a href="/dashboard/{key}" class="nav-link{current}">{_icon(key)}<span>{label}</span></a>')
+        owner_only = "" if key == "overview" else " data-owner-only"  # friends only get the overview (FEAT-10)
+        nav_links.append(f'<a href="/dashboard/{key}" class="nav-link{current}"{owner_only}>{_icon(key)}<span>{label}</span></a>')
     nav_html = "".join(nav_links)
     _key, _label, title, subtitle = next(item for item in _DASHBOARD_NAVIGATION if item[0] == normalized)
     body_html = "".join(_DASHBOARD_PAGES[normalized])
@@ -111,6 +116,10 @@ def _render_dashboard_page(section: str) -> HTMLResponse:
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title} · EZ Minecraft Server</title>
     <link rel="stylesheet" href="/dashboard.css?v={ASSET_VERSION}" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0d0e10" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   </head>
   <body data-page="{normalized}">
     <div class="app-shell">

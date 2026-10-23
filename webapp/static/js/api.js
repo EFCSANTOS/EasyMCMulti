@@ -3,6 +3,8 @@
 
 const appState = {
   username: '',
+  role: 'owner',
+  canStop: true,
   config: {},
   status: {},
   latestVersionList: [],

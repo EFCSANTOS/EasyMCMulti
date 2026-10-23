@@ -11,6 +11,7 @@ from core import cloudflared, config_store, notifier, playit
 from webapp import common
 from webapp.auth import password_is_weak
 from webapp.services import Services, require_auth
+from webapp.validation import validate_config_update
 
 
 def register(app: FastAPI, s: Services) -> None:
@@ -103,6 +104,24 @@ def register(app: FastAPI, s: Services) -> None:
         playit.save_config(secret, address)
         runtime.playit_state = "running"
         runtime.playit_address = address
+        if config.get("bedrock_enabled"):
+            ensure_bedrock_tunnel(secret, config, should_abort)
+
+    def ensure_bedrock_tunnel(secret: str, config: dict[str, Any], should_abort: Any = None) -> None:
+        """The Bedrock (UDP) tunnel for Geyser (FEAT-18). A failure is shown, but never stops the Java tunnel."""
+        try:
+            bedrock = playit.ensure_bedrock_tunnel(secret, int(config.get("bedrock_port", 19132)), playit_log,
+                                                   should_abort=should_abort)
+        except Exception as exc:
+            runtime.bedrock_error = f"Bedrock tunnel: {exc}"
+            playit_log(runtime.bedrock_error)
+            return
+        runtime.bedrock_error = ""
+        current = playit.load_config()
+        playit.save_config(secret, current.get("address", ""), bedrock_address=bedrock)
+        playit_log(f"Bedrock players join at {bedrock}")
+
+    s.ensure_bedrock_tunnel = ensure_bedrock_tunnel
 
     def schedule_playit_restart(secret: str) -> None:
         """Restart the agent after common.PLAYIT_RETRY_SEC; replaces any restart already pending."""
@@ -251,14 +270,23 @@ def register(app: FastAPI, s: Services) -> None:
         append_console_line(f"[cloudflare] {line}")
 
     def remote_info(message: str = "") -> dict[str, Any]:
+        config = common._effective_config()
         return {
-            "enabled": bool(common._effective_config().get("remote_dashboard")),
+            "enabled": bool(config.get("remote_dashboard")),
             "state": runtime.web_tunnel_state,
             "url": runtime.web_tunnel_url or "",
             "error": runtime.web_tunnel_error,
             "weak_password": password_is_weak(),
+            "mode": "named" if named_mode(config) else "quick",
+            "hostname": str(config.get("remote_hostname") or ""),
+            "token_set": bool(cloudflared.load_token()),
             "message": message,
         }
+
+    def named_mode(config: dict[str, Any]) -> bool:
+        """Use the owner's named tunnel (FEAT-17) only when it is fully set up."""
+        return (config.get("remote_mode") == "named" and bool(config.get("remote_hostname"))
+                and bool(cloudflared.load_token()))
 
     def start_web_tunnel() -> None:
         if runtime.web_tunnel is not None and runtime.web_tunnel.is_running():
@@ -306,9 +334,16 @@ def register(app: FastAPI, s: Services) -> None:
             timer.daemon = True
             timer.start()
 
-        tunnel = cloudflared.QuickTunnel(on_url=on_url, on_output=on_output, on_exit=on_exit)
-        runtime.web_tunnel = tunnel
-        tunnel.start(binary, common.WEB_PORT)
+        config = common._effective_config()
+        if named_mode(config):
+            tunnel = cloudflared.NamedTunnel(str(config["remote_hostname"]), on_url=on_url, on_output=on_output,
+                                             on_exit=on_exit)
+            runtime.web_tunnel = tunnel
+            tunnel.start(binary, cloudflared.load_token())
+        else:
+            tunnel = cloudflared.QuickTunnel(on_url=on_url, on_output=on_output, on_exit=on_exit)
+            runtime.web_tunnel = tunnel
+            tunnel.start(binary, common.WEB_PORT)
 
     def start_web_tunnel_safely() -> None:
         try:
@@ -336,6 +371,35 @@ def register(app: FastAPI, s: Services) -> None:
     @app.get("/api/remote-dashboard")
     def remote_dashboard_status(_: str = Depends(require_auth)) -> dict[str, Any]:
         return remote_info()
+
+    @app.post("/api/remote-dashboard/named")
+    def configure_named_tunnel(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        """{mode, hostname, token?}: the owner's own Cloudflare tunnel (FEAT-17). Empty token keeps the saved
+        one; token null forgets it. Restarts the link when it is on."""
+        config = common._effective_config()
+        hostname = str(payload.get("hostname", config.get("remote_hostname", "")) or "").strip().lower()
+        hostname = hostname.removeprefix("https://").removeprefix("http://").rstrip("/")
+        update = validate_config_update({"remote_mode": payload.get("mode", config.get("remote_mode", "quick")),
+                                         "remote_hostname": hostname}, common._host_ram_mb())
+        token = payload.get("token")
+        if token is None and "token" in payload:
+            cloudflared.forget_token()
+        elif token:
+            try:
+                cloudflared.save_token(str(token))
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        config.update(update)
+        if config["remote_mode"] == "named" and not (config.get("remote_hostname") and cloudflared.load_token()):
+            raise HTTPException(status_code=400, detail="Enter the tunnel token and the public hostname you set up "
+                                                        "in Cloudflare.")
+        config_store.save(config)
+        if config.get("remote_dashboard"):
+            stop_web_tunnel()
+            runtime.web_tunnel_state = "starting"
+            threading.Thread(target=start_web_tunnel_safely, name="cloudflared", daemon=True).start()
+        mode = "your own address" if config["remote_mode"] == "named" else "a random trycloudflare.com link"
+        return remote_info(f"Remote access now uses {mode}.")
 
     @app.post("/api/remote-dashboard")
     def remote_dashboard_toggle(payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:

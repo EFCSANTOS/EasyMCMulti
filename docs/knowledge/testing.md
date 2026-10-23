@@ -1,10 +1,20 @@
 # Testing
 
 ## Layout
-`tests/test_webapp_smoke.py` (+ `tests/fixtures/logs/` for FEAT-08); sets env vars at import; `TestClient(create_app())`.
-Run: `.venv\Scripts\python.exe -m pytest -q tests/test_webapp_smoke.py`. Last run 2026-10-22:
-190 passed (~34 s, `.venv` Python 3.14.7; the updater tests create real git repos, so `git` must be
-on PATH). Dev deps: `pip install -r requirements-dev.txt`. No `conftest.py`, `pytest.ini` or CI workflow exists.
+Since QUAL-02 (2026-10-23): `tests/support.py` (env vars, one `app = create_app()` + `client`,
+helpers like `_start`/`_wait_idle`/`_login`, constants like `AUTH`, and all shared fixtures;
+`__all__` exports underscore helpers too), `tests/conftest.py` (re-exports the fixtures; autouse
+`no_network` and `fresh_runtime`), and one file per area: `test_pages`, `test_auth`, `test_console`,
+`test_config`, `test_lifecycle`, `test_diagnosis`, `test_backups`, `test_worlds`, `test_mods`,
+`test_players`, `test_remote`, `test_alerts`, `test_updater`, `test_platform`, plus `test_core`
+(unit tests of `core/`). Each test file starts with `from support import *`. Real-format log
+snippets: `tests/fixtures/logs/`. `pytest.ini` sets `testpaths` and the `network` marker.
+Run: `.venv\Scripts\python.exe -m pytest -q` — random order (`pytest-randomly`; reproduce with
+`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-23: 225 passed
+(~30 s; the updater tests create real git repos, so `git` must be on PATH; every file also passes
+on its own). Dev deps: `pip install -r requirements-dev.txt`. CI: `.github/workflows/tests.yml`
+(Ubuntu + Windows, Python 3.13: pytest, `node --check` on the dashboard scripts, `bash -n` on
+the shell scripts) on every push/PR to development, release and main.
 
 ## Patching
 Routers use shared helpers as `common.NAME`, so monkeypatch `common_module` (`webapp.common`) for
@@ -12,8 +22,14 @@ Routers use shared helpers as `common.NAME`, so monkeypatch `common_module` (`we
 `psutil`, timeouts (`CRASH_RESTART_DELAY_SEC`, `PLAYIT_RETRY_SEC`, `WEB_TUNNEL_RETRY_SEC`) and
 `_host_ram_mb`; core functions are patched on their `core` module (`downloaders.prepare`, …).
 
-## Data isolation
-Autouse fixture `isolated_data_dir` redirects `paths.DATA_DIR/JAVA_DIR/SERVERS_DIR`,
+## Isolation (autouse fixtures)
+- `no_network` (conftest): `socket.connect`/`getaddrinfo` fail fast for anything but loopback, so
+  `public_ip()` → "unavailable", versions → `FALLBACK_VERSIONS`, Modrinth/Mojang/Discord calls must
+  be faked. Mark a test `@pytest.mark.network` to allow real access.
+- `fresh_runtime` (conftest): every test starts from a new `RuntimeState` (copied over the shared
+  object, which the routers' closures hold) and `services.reset_notifications()` (alert throttles,
+  pending friend join/leave batches) — no test depends on what an earlier one left.
+- `isolated_data_dir` redirects `paths.DATA_DIR/JAVA_DIR/SERVERS_DIR`,
 `config_store._FILE` and `playit._CONFIG_FILE` to `tmp_path`, so tests no longer touch the real
 `EZ_Server_Data/`. Any new module-level path constant derived from `paths.DATA_DIR` must be added to
 this fixture. It also clears `app.state.sessions`, `app.state.login_limiter` and the shared
@@ -23,15 +39,14 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 `playit_config.json` — a real install may still contain leftovers such as `motd: "Advanced test"`,
 `server_port: 25566`, or a `demo-secret` PlayIt config.)
 
-## Hidden dependencies
-- **Network**: `/api/status` calls `api.ipify.org` (10 s timeout; `"unavailable"` on failure; cached
-  5 min per process); `/api/versions/vanilla` hits Mojang (falls back to `FALLBACK_VERSIONS`).
-- **Order-dependent**: one module-level `app`/`client` and shared `app.state.runtime`.
-  `test_server_lifecycle_start_and_stop` relies on the `DummyProcess` left in `runtime.process` by the
-  previous test (start → "already running"). Run alone, it would perform a real Java/server download
-  and launch (into the temp data dir).
-- `test_admin_action_routes_exist_for_dashboard_buttons` runs before any start, so it only exercises
-  the 409 branch (command mapping is untested).
+## Notes
+- Background timers (crash/tunnel retries) can outlive their test and fire in a later one: assert
+  the outcome ("a new tunnel replaced the crashed one"), not exact instance counts. CI prints the
+  `--randomly-seed` in its header to reproduce an order-dependent failure.
+- One shared `app`/`client` per session (cheap and keeps the `common_module` patch targets simple);
+  isolation comes from the autouse fixtures above.
+- `test_admin_action_routes_exist_for_dashboard_buttons` exercises only the 409 branch (no server);
+  the command mapping is covered by the FIX-05 tests with a fake server.
 
 ## Covered
 - `/health` → `{status:"ok"}`.
@@ -56,11 +71,29 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Bedrock (FEAT-18, `test_bedrock.py`): Geyser config edit (old `remote:` / new `java:` layouts,
+  idempotent, missing file); Bedrock tunnel request is `minecraft-bedrock` over UDP; PlayIt config keeps
+  the Bedrock address; switch installs/removes (Floodgate for Paper via GeyserMC); address on invite and
+  status page; a refused Bedrock tunnel doesn't stop the Java one; `.`-prefixed whitelist names.
+- Named tunnel (FEAT-17, `test_remote.py`): `NamedTunnel` command line with the token only in the
+  environment; named mode gives the same address on each start (fake tunnel); settings validation.
+- App manifest (FEAT-16, `test_pages.py`): content type, standalone + start URL, icon sizes match the
+  PNG headers, unknown icon names 404, every page links the manifest.
+- Friends (FEAT-10, `test_users.py`): table-driven 403 over `app.routes` for a friend session
+  (`FRIEND_ROUTES` lists the deliberate exceptions); friend start/chat/backup and stop gating;
+  account create/reset/remove with sign-out; owner env account; friend WS refused; hashes only.
+- Migration (FEAT-09, `test_migrate.py`, `fabric_1_21_1` fixture fakes Modrinth and downloads):
+  plan (worlds, files, compatible/missing mods, downgrade, loader change); the full move; missing
+  mods/downgrade/running → 409; existing target worlds kept aside.
 - Storage (FEAT-15, `storage_tree` fixture): breakdown sizes and flags, Java need from server
   versions; deletes refused for the active dir, backups, unknown ids and while running; low-space
   alert once until recovered.
-- Known flake: one unidentified failure seen once in ~10 full runs while headless Edge was busy;
-  not reproducible since (QUAL-02 restructures the suite).
+- Order independence (QUAL-02): random order found two hidden dependencies — the alert throttle and
+  a pending friends batch surviving between tests — fixed by `fresh_runtime`; the earlier one-off
+  failure was most likely one of these.
+- `core/` units (`test_core.py`): `required_java` table, version sorting and NeoForge mapping,
+  `update_properties` round trip, `import_zip` (world root, dimensions, escaping members), `netinfo`
+  fallbacks without network.
 - Identity (FEAT-14): icon checks from raw PNG headers (size, type, 64 KB); extra properties round
   trip, managed/locked/bad keys and multi-line values → 422, null removes; MOTD `§` written as
   `\u00a7` with the owner's `\n` intact; `MANAGED` equals the Settings form's keys.

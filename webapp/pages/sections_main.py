@@ -79,7 +79,7 @@ _SECTION_METRICS = """
 """
 
 _COMMAND_FORM = """
-          <form id="command-form" class="command-form">
+          <form id="command-form" class="command-form" data-owner-only>
             <span class="prompt" aria-hidden="true">&gt;</span>
             <input id="command-input" name="command" placeholder="Type a server command, e.g. say hello" autocomplete="off" aria-label="Server command" />
             <button type="submit" class="btn btn-primary btn-sm">Send</button>
@@ -90,9 +90,9 @@ _SECTION_CONSOLE_PREVIEW = f"""
         <section id="console" class="card">
           <div class="card-header">
             <h2>Console</h2>
-            <a class="link" href="/dashboard/console">Open full console {_icon("arrow")}</a>
+            <a class="link" href="/dashboard/console" data-owner-only>Open full console {_icon("arrow")}</a>
           </div>
-          <pre id="console-output" class="console console-short">Waiting for logs...</pre>
+          <pre id="console-output" class="console console-short" data-owner-only>Waiting for logs...</pre>
           {_COMMAND_FORM}
           <form id="chat-form" class="command-form">
             <span class="prompt" aria-hidden="true">say</span>
@@ -233,6 +233,43 @@ _SECTION_ALWAYS_ON = f"""
           <div class="form-actions">
             <p class="hint">To start the dashboard itself on boot, see "Run 24/7" in the README.</p>
             <button id="always-on-save-button" class="btn btn-primary" type="button">Save</button>
+          </div>
+        </section>
+"""
+
+_SECTION_MIGRATE = """
+        <section id="migrate" class="card">
+          <div class="card-header">
+            <div>
+              <h2>Move to another version</h2>
+              <p class="card-sub">Upgrade Minecraft (or change loader) and bring your worlds, whitelist, operators, bans,
+                icon and compatible mods along. The current version stays as it is, so you can switch back.</p>
+            </div>
+          </div>
+          <form id="migrate-form" class="form-grid">
+            <div class="field">
+              <label for="migrate-loader">Loader</label>
+              <select id="migrate-loader">
+                <option value="vanilla">Vanilla</option>
+                <option value="paper">Paper (plugins)</option>
+                <option value="fabric">Fabric (mods)</option>
+                <option value="forge">Forge (mods)</option>
+                <option value="neoforge">NeoForge (mods)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="migrate-version">Version</label>
+              <select id="migrate-version"></select>
+            </div>
+            <div class="field field-action">
+              <button class="btn btn-ghost" type="submit">Check</button>
+            </div>
+          </form>
+          <div id="migrate-plan" class="stack-sm" hidden>
+            <ul id="migrate-plan-list" class="plain-list"></ul>
+            <div class="form-actions">
+              <button id="migrate-run-button" class="btn btn-primary" type="button">Move worlds and settings</button>
+            </div>
           </div>
         </section>
 """

@@ -5,13 +5,15 @@ import os
 from typing import Any
 
 from fastapi import HTTPException, Depends, FastAPI, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from webapp.services import Services, require_auth
-from webapp.auth import SESSION_COOKIE, SESSION_TTL_SEC, check_login, is_https
+from webapp import common
+from webapp.services import Services, require_user
+from webapp.auth import SESSION_COOKIE, SESSION_TTL_SEC, User, check_login, is_https
 from webapp.pages.layout import SCRIPTS, STATIC_DIR, _render_dashboard_page
 
 _WEBAPP_DIR = os.path.dirname(os.path.dirname(__file__))
+APP_ICONS = {"icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"}
 
 
 def register(app: FastAPI, s: Services) -> None:
@@ -30,11 +32,11 @@ def register(app: FastAPI, s: Services) -> None:
     def api_login(payload: dict[str, Any], request: Request, response: Response) -> dict[str, Any]:
         username = str(payload.get("username") or "").strip()
         password = str(payload.get("password") or "")
-        check_login(request, app.state.login_limiter, username, password, app.state.on_lockout)
-        token = app.state.sessions.create(username)
+        role = check_login(request, app.state.login_limiter, username, password, app.state.on_lockout)
+        token = app.state.sessions.create(username, role)
         response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL_SEC, httponly=True, samesite="strict",
                             secure=is_https(request), path="/")
-        return {"username": username}
+        return {"username": username, "role": role}
 
     @app.post("/api/logout")
     def api_logout(request: Request, response: Response) -> dict[str, Any]:
@@ -43,8 +45,10 @@ def register(app: FastAPI, s: Services) -> None:
         return {"message": "Signed out."}
 
     @app.get("/api/session")
-    def api_session(username: str = Depends(require_auth)) -> dict[str, Any]:
-        return {"username": username}
+    def api_session(user: User = Depends(require_user)) -> dict[str, Any]:
+        """Who is signed in and what the dashboard should show them (FEAT-10)."""
+        can_stop = user.is_owner or bool(common._effective_config().get("friends_can_stop"))
+        return {"username": user, "role": user.role, "can_stop": can_stop}
 
     @app.get("/dashboard")
     def dashboard() -> RedirectResponse:
@@ -53,6 +57,29 @@ def register(app: FastAPI, s: Services) -> None:
     @app.get("/dashboard/{section}")
     def dashboard_section(section: str) -> HTMLResponse:
         return _render_dashboard_page(section)
+
+    # ---------- Installable app (FEAT-16): manifest + icons, public like the other shells ----------
+    @app.get("/manifest.webmanifest")
+    def web_manifest() -> JSONResponse:
+        manifest = {
+            "name": "EZ Minecraft Server", "short_name": "EZ MC", "id": "/dashboard/overview",
+            "start_url": "/dashboard/overview", "scope": "/", "display": "standalone",
+            "background_color": "#0d0e10", "theme_color": "#0d0e10",
+            "description": "Start, watch and manage your Minecraft server.",
+            "icons": [
+                {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                {"src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            ],
+        }
+        return JSONResponse(manifest, media_type="application/manifest+json")
+
+    @app.get("/icons/{name}")
+    def app_icon(name: str) -> FileResponse:
+        if name not in APP_ICONS:
+            raise HTTPException(status_code=404, detail="Not found.")
+        return FileResponse(os.path.join(STATIC_DIR, "icons", name), media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
 
     @app.get("/dashboard.css")
     def dashboard_css() -> FileResponse:

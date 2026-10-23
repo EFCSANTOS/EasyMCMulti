@@ -13,11 +13,11 @@ import time
 from types import SimpleNamespace
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 
 from core import fsutil, netinfo, notifier
 from webapp import common
-from webapp.auth import LoginLimiter, SessionStore, authenticate
+from webapp.auth import LoginLimiter, SessionStore, User, authenticate
 from webapp.state import RuntimeState
 from webapp.websocket_manager import WebSocketManager
 
@@ -28,10 +28,20 @@ class Services(SimpleNamespace):
     notify: Any
 
 
-def require_auth(request: Request) -> str:
-    """Session cookie (browser) or HTTP Basic (scripts); both share the failed-login lockout."""
+def require_user(request: Request) -> User:
+    """Any signed-in user, owner or friend (FEAT-10). Session cookie (browser) or HTTP Basic
+    (scripts); both share the failed-login lockout. Only for the routes friends may use."""
     state = request.app.state
     return authenticate(request, state.sessions, state.login_limiter, state.on_lockout)
+
+
+def require_auth(request: Request) -> User:
+    """The owner only. Every route uses this unless it was deliberately opened to friends, so new
+    routes are owner-only by default."""
+    user = require_user(request)
+    if not user.is_owner:
+        raise HTTPException(status_code=403, detail="Only the server owner can do that.")
+    return user
 
 
 def create_services(app: FastAPI) -> Services:
@@ -171,6 +181,14 @@ def create_services(app: FastAPI) -> Services:
                 notifier.ping_heartbeat(url)
             time.sleep(common.HEARTBEAT_INTERVAL_SEC)
 
+    def reset_notifications() -> None:
+        """Forget alert throttles and pending friend join/leave batches (tests start clean)."""
+        last_alert_at.clear()
+        with players_lock:
+            pending_players["joined"].clear()
+            pending_players["left"].clear()
+
     return Services(app=app, runtime=runtime, append_console_line=append_console_line, notify=notify,
+                    reset_notifications=reset_notifications,
                     wait_for_console=wait_for_console, notify_friends=notify_friends, player_event=player_event,
                     flush_player_events=flush_player_events, heartbeat_loop=heartbeat_loop)

@@ -576,6 +576,96 @@ Core details (`core/playit.py`):
   space recovers. Backups page → Storage card (free/total, list, Delete with a confirm that says what
   is lost).
 
+## 31. Move to another version (FEAT-09)
+- `core/migrate.py::plan(old_sdir, old_loader, old_version, new_loader, new_version, new_sdir)`:
+  `downgrade` (`_version_key` compare), `loader_change`, `worlds` (every generated world folder +
+  dimension folders), `files` (`ez-worlds.json`, whitelist/ops/banned lists, `server-icon.png`),
+  `mods` — same modded loader: one `POST /v2/version_files/update` for the target version →
+  `compatible` (download info) / `missing`; Paper → plugins `carried` as they are; loader change →
+  nothing carries over — `replaces` (folders already in the target dir), `size`, `free`,
+  `enough_space` (> 1.1 × size + 200 MB).
+- `apply()`: copies (never moves) the worlds and files; target folders that already exist are
+  renamed `<folder>-pre-migrate-<ts>` first; downloads compatible mods (SHA-1 checked) and records
+  them; copies carried plugins.
+- Routes (`routes/migrate.py`): `POST /api/server/migrate/plan {loader, version}` (400 same
+  version, 502 Modrinth down); `POST /api/server/migrate {loader, version, skip_missing?,
+  allow_downgrade?}` → 409 while running, for a downgrade without `allow_downgrade`, without enough
+  space, or with missing mods without `skip_missing`; else **202** lifecycle job "migrating":
+  `backups.create(old, active, "auto-pre-migrate")` (core call: the job already holds the lock) →
+  `ensure_server_installed(new)` → `apply` → save config (loader/version) → message about the slow
+  first start (or, for a downgrade, that the world may not load).
+- UI: Server setup → "Move to another version" (loader, version list from `/api/versions`, Check →
+  plan list with warnings, Move → confirm → background job with the usual progress/toast).
+
+## 32. Friend accounts (FEAT-10)
+- Roles: **owner** = the `EZ_WEBAPP_USERNAME`/`PASSWORD` account (never stored, can't be locked out
+  by the users file); **friend** = accounts in `EZ_Server_Data/users.json`
+  (`core/users.py`: `{username: {role, salt, hash, created}}`, `hashlib.scrypt` n=2^14 r=8 p=1,
+  `hmac.compare_digest`; unknown names still pay one scrypt so timing doesn't reveal them).
+- `auth.login_role()` → "owner" / "friend" / None; `check_login` returns the role; sessions store
+  `(username, role)`; `authenticate()` returns `auth.User` — a `str` (the username) with `.role`
+  and `.is_owner`.
+- Dependencies (`services.py`): `require_auth` = **owner only** (403 "Only the server owner can do
+  that."), used by every route unless opened on purpose; `require_user` = any role, used only by
+  `GET /api/session`, `GET /api/status`, the metrics routes, `POST /api/server/start` (a friend's
+  payload is ignored: they can't change settings), `POST /api/server/chat`,
+  `POST /api/server/backup`, and stop/restart through `require_can_stop` (owner, or a friend when
+  config `friends_can_stop` is on). `/ws/console` is owner-only. Friend actions log
+  `[dashboard] <name> started the server` etc.
+- Owner routes (`routes/users.py`): `GET /api/users`, `POST /api/users {username}` (2–32 chars
+  `[A-Za-z0-9_.-]`, not the owner's name, unique) → generated 12-char password shown once,
+  `POST /api/users/{name}/reset` → new password + `sessions.delete_user`, `DELETE /api/users/{name}`
+  → removed + signed out everywhere.
+- UI: `/api/session` → `{username, role, can_stop}`. Friends: `bootFriend()` — only the overview
+  (other pages redirect), `body.is-friend` hides every `[data-owner-only]` element (nav items except
+  Overview, invite card, diagnosis, console output and command box) and, without `can_stop`,
+  `[data-stop-control]` (Stop/Restart); only status, metrics, chat and backup load. Owner: Friends
+  page (create, new password, remove, "Friends can stop and restart" switch).
+
+## 33. Installable app (FEAT-16)
+- `GET /manifest.webmanifest` (public, `application/manifest+json`): name, short name "EZ MC",
+  `display: standalone`, `start_url`/`id` `/dashboard/overview`, theme/background `#0d0e10`, icons
+  192/512 (`any`) and 512 `maskable`. `GET /icons/{name}` serves only the four PNGs in
+  `static/icons/` (grass block drawn by a stdlib script; regenerate rather than hand-edit).
+- Every page and `/login` link the manifest, `theme-color` and the apple-touch-icon. No service
+  worker: current Chrome/Edge don't need one to install, and caching would only risk stale state.
+- Installing needs https (the Cloudflare link) or localhost; the Remote access page says so.
+
+## 34. Own-domain dashboard link (FEAT-17)
+- `remote_mode`: `quick` (default: `QuickTunnel`, random trycloudflare.com link) or `named`.
+  Named is used only when `remote_hostname` is set **and** a token is saved
+  (`remote.py::named_mode`): `cloudflared.NamedTunnel(hostname)` runs
+  `cloudflared tunnel --no-autoupdate run` with the token in `TUNNEL_TOKEN` (not on the command line)
+  and reports `https://<hostname>` once "Registered tunnel connection" appears — the same address
+  after every restart. The hostname is set up in the Cloudflare dashboard; this app never calls the
+  Cloudflare API.
+- Token: `EZ_Server_Data/cloudflare_tunnel.json` (atomic; `TOKEN_PATTERN`), never returned —
+  `GET /api/remote-dashboard` adds `mode`, `hostname`, `token_set`.
+- `POST /api/remote-dashboard/named {mode, hostname?, token?}`: hostname normalised (scheme and
+  trailing slash removed, lower case) and validated (422); empty token keeps the saved one, `null`
+  forgets it; malformed token → 400; named without hostname+token → 400; restarts the link when on.
+- UI: Remote access → "Use your own domain" (steps, link type, hostname, token). Tailscale/ZeroTier
+  is documented in the README only.
+
+## 35. Bedrock crossplay (FEAT-18)
+- `core/geyser.py` (Paper, Fabric, NeoForge): `install()` — Geyser from Modrinth (with required
+  dependencies, e.g. Fabric API); Floodgate from Modrinth on Fabric/NeoForge but from GeyserMC's
+  download server on Paper (`FLOODGATE_SPIGOT_URL` → `plugins/floodgate-spigot.jar`; Modrinth has
+  no Paper build). `uninstall()` removes just those two (dependencies stay). `configure(sdir,
+  loader, port)` edits Geyser's `config.yml` line by line: `bedrock: port` and `auth-type: floodgate`
+  under `remote:` (older) or `java:` (newer); idempotent; False until Geyser has written the file on
+  its first start. `launch_server` calls it on every start when `bedrock_enabled`.
+- PlayIt: `ensure_bedrock_tunnel()` = `_ensure_tunnel(..., "minecraft-bedrock", port_type="udp")`
+  → `domain:port`; saved as `bedrock_address` in `playit_config.json` (`save_config` keeps it unless
+  the key changes). `start_agent_and_tunnels` ensures it after the Java tunnel when crossplay is on;
+  a failure only sets `runtime.bedrock_error`. **The Bedrock tunnel type hasn't been tried against a
+  real PlayIt account yet.**
+- `GET /api/bedrock` → `{supported, loader, enabled, busy, port, address, configured, error}` (read
+  only); `POST /api/bedrock {enabled}`: on → 400 for vanilla/Forge, else background install
+  (`bedrock_busy`) → `bedrock_enabled` + tunnel if the agent runs; off → uninstall + disabled.
+- Bedrock address: Remote access card, invite text ("Bedrock (phone/console): …") and the public
+  status page. Whitelist form "Bedrock player" adds Floodgate's `.` prefix (spaces → `_`).
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`

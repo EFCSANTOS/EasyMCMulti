@@ -1200,6 +1200,23 @@ select[aria-invalid="true"] {
   }
 }
 
+.plain-list {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.plain-list .is-warning {
+  color: var(--warning);
+}
+
+/* Friend accounts (FEAT-10): owner-only controls disappear; stop/restart unless the owner allows them. */
+.is-friend [data-owner-only],
+.is-friend.no-stop [data-stop-control] {
+  display: none !important;
+}
+
 /* Small heading inside a card (e.g. "Discord" in the Alerts card). */
 .subhead {
   margin: 1.5rem 0 0.35rem;

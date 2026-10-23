@@ -207,6 +207,40 @@ _SECTION_REMOTE = f"""
               Anyone with the link can try to sign in; after 5 wrong passwords that address is locked out
               for 15 minutes. Use a long, unique password.
             </div>
+            <p class="hint">On a phone, open the link and choose <strong>Install app</strong> (Android) or
+              <strong>Add to Home Screen</strong> (iPhone) to get the dashboard as an app. Installing needs this
+              https link; it doesn't work on the plain http:// LAN address.</p>
+            <details id="named-tunnel" class="advanced-smtp">
+              <summary>Use your own domain (same address after every restart)</summary>
+              <ol class="plain-list">
+                <li>Put a domain on a free Cloudflare account.</li>
+                <li>In Cloudflare: Zero Trust → Networks → Tunnels → Create a tunnel (Cloudflared). Copy the token
+                  from the install command (the long text starting with <code>eyJ</code>).</li>
+                <li>Add a public hostname, e.g. <code>mc.example.com</code>, pointing to
+                  <code>http://localhost:8000</code> (the dashboard's port).</li>
+                <li>Paste both here and save.</li>
+              </ol>
+              <form id="named-tunnel-form" class="form-grid">
+                <div class="field">
+                  <label for="remote-mode">Link type</label>
+                  <select id="remote-mode">
+                    <option value="quick">Random link (no account)</option>
+                    <option value="named">My own domain</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="remote-hostname">Public hostname</label>
+                  <input id="remote-hostname" placeholder="mc.example.com" autocomplete="off" />
+                </div>
+                <div class="field field-wide">
+                  <label for="remote-token">Tunnel token</label>
+                  <input id="remote-token" type="password" autocomplete="off" placeholder="eyJ…" />
+                </div>
+                <div class="field field-action">
+                  <button class="btn btn-primary" type="submit">Save</button>
+                </div>
+              </form>
+            </details>
           </div>
           <div class="card">
             <div class="card-header">

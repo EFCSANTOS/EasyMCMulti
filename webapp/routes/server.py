@@ -9,9 +9,10 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 
-from core import activity, config_store, diagnose, downloaders, hostenv, java_manager, players
+from core import activity, config_store, diagnose, downloaders, geyser, hostenv, java_manager, players
 from webapp import common
-from webapp.services import Services, require_auth
+from webapp.auth import User
+from webapp.services import Services, require_auth, require_user
 from webapp.validation import require_chat, require_command, require_player, validate_config_update
 
 
@@ -228,6 +229,8 @@ def register(app: FastAPI, s: Services) -> None:
 
         target_dir = ensure_server_installed(config)
         runtime.set_state("starting", "starting")
+        if config.get("bedrock_enabled") and geyser.supported(loader):
+            geyser.configure(target_dir, loader, int(config.get("bedrock_port", geyser.DEFAULT_PORT)))
         common.update_properties(target_dir, **common._server_properties_from_config(config))
 
         java_exe = java_manager.ensure_java(java_manager.required_java(version),
@@ -274,9 +277,22 @@ def register(app: FastAPI, s: Services) -> None:
             process.kill()
             common._wait_for_exit(process, 10)
 
+    def audit(user: User, action: str) -> None:
+        """Friend actions are logged so the owner can see who did what (FEAT-10)."""
+        if not user.is_owner:
+            append_console_line(f"[dashboard] {user} {action}")
+
+    def require_can_stop(user: User = Depends(require_user)) -> User:
+        if not user.is_owner and not common._effective_config().get("friends_can_stop"):
+            raise HTTPException(status_code=403, detail="Only the server owner can stop or restart the server.")
+        return user
+
     @app.post("/api/server/start")
     def start_server(response: Response, payload: dict[str, Any] | None = None,
-                     _: str = Depends(require_auth)) -> dict[str, Any]:
+                     user: User = Depends(require_user)) -> dict[str, Any]:
+        if not user.is_owner:
+            payload = None  # friends start the server as it is; they can't change its settings
+        audit(user, "started the server")
         if server_running():
             return {"state": runtime.state, "operation": runtime.operation, "message": "Server already running."}
         save_payload(payload)
@@ -285,7 +301,8 @@ def register(app: FastAPI, s: Services) -> None:
         return accepted(response, "Starting the server…")
 
     @app.post("/api/server/stop")
-    def stop_server(_: str = Depends(require_auth)) -> dict[str, Any]:
+    def stop_server(user: User = Depends(require_can_stop)) -> dict[str, Any]:
+        audit(user, "stopped the server")
         if not runtime.lifecycle.acquire(blocking=False):
             raise busy_error()
         try:
@@ -299,12 +316,13 @@ def register(app: FastAPI, s: Services) -> None:
         return launch_server()
 
     @app.post("/api/server/restart")
-    def restart_server(response: Response, _: str = Depends(require_auth)) -> dict[str, Any]:
+    def restart_server(response: Response, user: User = Depends(require_can_stop)) -> dict[str, Any]:
+        audit(user, "restarted the server")
         start_lifecycle_job("restarting", restart_job, "Server restart failed")
         return accepted(response, "Restarting the server…")
 
     @app.post("/api/server/chat")
-    def send_chat(payload: dict[str, Any], username: str = Depends(require_auth)) -> dict[str, Any]:
+    def send_chat(payload: dict[str, Any], username: User = Depends(require_user)) -> dict[str, Any]:
         """Say something in game as "[Dashboard] <user>: <message>" (FEAT-11)."""
         message = require_chat(payload.get("message"))
         if runtime.process is None or not runtime.process.is_running():

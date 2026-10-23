@@ -365,6 +365,70 @@ function bindInvite() {
   });
 }
 
+// ---------- Bedrock crossplay (FEAT-18) ----------
+let bedrockPoll = null;
+
+function renderBedrock(info) {
+  const toggle = document.getElementById('bedrock-enabled');
+  if (!toggle) return;
+  if (document.activeElement !== toggle) toggle.checked = Boolean(info.enabled);
+  toggle.disabled = !info.supported || info.busy;
+  let status = '';
+  if (!info.supported) status = 'Choose Paper, Fabric or NeoForge in Server setup to use this.';
+  else if (info.busy) status = 'Installing Geyser and Floodgate…';
+  else if (info.enabled && !info.configured) status = 'Start the server once so Geyser creates its settings, then restart it.';
+  else if (info.enabled) status = `Geyser listens on UDP port ${info.port}.`;
+  if (info.enabled && !info.address) status += ' The Bedrock address appears here once the PlayIt tunnel is running.';
+  document.getElementById('bedrock-status').textContent = status;
+  document.getElementById('bedrock-address-row').hidden = !info.address;
+  setField('bedrock_address', info.address || '—');
+  const error = document.getElementById('bedrock-error');
+  error.hidden = !info.error;
+  error.textContent = info.error || '';
+  clearTimeout(bedrockPoll);
+  if (info.busy) bedrockPoll = setTimeout(loadBedrock, 2000);
+}
+
+async function loadBedrock() {
+  if (!document.getElementById('bedrock-enabled')) return;
+  try {
+    renderBedrock(await fetchJson('/api/bedrock'));
+  } catch (error) {
+    // shown again on the next visit
+  }
+}
+
+async function toggleBedrock(toggle) {
+  const enabled = toggle.checked;
+  await runAction(null, null, async () => {
+    try {
+      const info = await fetchJson('/api/bedrock', 'POST', { enabled });
+      renderBedrock(info);
+      return info.message;
+    } catch (error) {
+      toggle.checked = !enabled;
+      throw error;
+    }
+  });
+}
+
+// ---------- Own-domain link (FEAT-17) ----------
+async function saveNamedTunnel(event) {
+  event.preventDefault();
+  const token = document.getElementById('remote-token');
+  const body = {
+    mode: document.getElementById('remote-mode').value,
+    hostname: document.getElementById('remote-hostname').value.trim(),
+  };
+  if (token.value.trim()) body.token = token.value.trim(); // empty keeps the saved token
+  await runAction(event.submitter, 'Saving…', async () => {
+    const info = await fetchJson('/api/remote-dashboard/named', 'POST', body);
+    token.value = '';
+    renderRemoteDashboard(info);
+    return info.message;
+  });
+}
+
 // ---------- Remote dashboard (Cloudflare) ----------
 const REMOTE_LABELS = { off: 'Off', starting: 'Starting…', running: 'Online', error: 'Problem' };
 
@@ -386,6 +450,13 @@ function renderRemoteDashboard(info) {
   const errorBox = document.getElementById('remote-dashboard-error');
   errorBox.hidden = !(info.enabled && info.error);
   errorBox.textContent = info.error || '';
+
+  const mode = document.getElementById('remote-mode');
+  if (mode && document.activeElement !== mode) mode.value = info.mode || 'quick';
+  const hostname = document.getElementById('remote-hostname');
+  if (hostname && document.activeElement !== hostname && !hostname.value) hostname.value = info.hostname || '';
+  const token = document.getElementById('remote-token');
+  if (token) token.placeholder = info.token_set ? 'Saved (paste a new token to replace it)' : 'eyJ…';
 
   const weakPassword = document.getElementById('remote-dashboard-weak-password');
   if (weakPassword) weakPassword.hidden = !(info.enabled && info.weak_password);

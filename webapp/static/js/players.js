@@ -56,6 +56,62 @@ function renderPlayers(data) {
   'Nobody is banned.');
 }
 
+// ---------- Friend accounts (FEAT-10, owner only) ----------
+function showNewCredentials(data) {
+  if (!data.password) return;
+  setField('new_user_credentials', `${location.origin}/login  ·  ${data.username}  ·  ${data.password}`);
+  document.getElementById('user-new-password').hidden = false;
+}
+
+function renderUsers(data) {
+  const list = document.getElementById('user-list');
+  if (!list) return;
+  renderItems(list, data.users || [], (user) => itemRow(user.username, null,
+    `Friend since ${new Date(user.created * 1000).toLocaleDateString()}`, [
+      rowButton('New password', 'btn-ghost', (b) => changeUser(`/api/users/${encodeURIComponent(user.username)}/reset`, 'POST', b)),
+      rowButton('Remove', 'btn-danger', (b) => {
+        if (window.confirm(`Remove ${user.username}? They are signed out and can't sign in again.`)) {
+          changeUser(`/api/users/${encodeURIComponent(user.username)}`, 'DELETE', b);
+        }
+      }),
+    ]), 'No friend accounts yet.');
+  const toggle = document.getElementById('friends-can-stop');
+  if (toggle && document.activeElement !== toggle) toggle.checked = Boolean(data.friends_can_stop);
+}
+
+async function changeUser(url, method, button, body = null) {
+  await runAction(button, null, async () => {
+    const data = await fetchJson(url, method, body);
+    renderUsers(data);
+    showNewCredentials(data);
+    return data.message;
+  });
+}
+
+async function loadUsers() {
+  if (!document.getElementById('user-list')) return;
+  try {
+    renderUsers(await fetchJson('/api/users'));
+  } catch (error) {
+    setStatus(`Friend accounts unavailable: ${error.message}`, 'error');
+  }
+}
+
+function bindUsers() {
+  on('user-add-form', 'submit', async (event) => {
+    event.preventDefault();
+    const input = document.getElementById('user-add-name');
+    await changeUser('/api/users', 'POST', event.submitter, { username: input.value.trim() });
+    input.value = '';
+  });
+  on('friends-can-stop', 'change', async (event, toggle) => {
+    await runAction(null, null, async () => {
+      await fetchJson('/api/config', 'PUT', { friends_can_stop: toggle.checked });
+      return toggle.checked ? 'Friends can now stop and restart the server.' : 'Friends can only start the server.';
+    });
+  });
+}
+
 // ---------- Activity (playtime + players online by hour) ----------
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -167,7 +223,11 @@ function bindPlayers() {
   on('whitelist-add-form', 'submit', async (event) => {
     event.preventDefault();
     const input = document.getElementById('whitelist-name');
-    if (await changePlayerList('whitelist', { action: 'add', name: input.value.trim() }, event.submitter)) input.value = '';
+    const bedrock = document.getElementById('whitelist-bedrock');
+    // Floodgate gives Bedrock players a "." prefix (FEAT-18); gamertag spaces become underscores.
+    let name = input.value.trim();
+    if (bedrock && bedrock.checked && !name.startsWith('.')) name = `.${name.replace(/ /g, '_')}`;
+    if (await changePlayerList('whitelist', { action: 'add', name }, event.submitter)) input.value = '';
   });
   on('ops-add-form', 'submit', async (event) => {
     event.preventDefault();

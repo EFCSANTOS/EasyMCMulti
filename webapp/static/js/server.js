@@ -87,6 +87,80 @@ async function onLoaderChange() {
   populateVersions(saved || appState.latestVersionList[0]);
 }
 
+// ---------- Move to another version (FEAT-09) ----------
+let migratePlan = null;
+
+async function loadMigrateVersions() {
+  const loader = document.getElementById('migrate-loader');
+  const versions = document.getElementById('migrate-version');
+  if (!loader || !versions) return;
+  try {
+    const data = await fetchJson(`/api/versions/${encodeURIComponent(loader.value)}`);
+    versions.replaceChildren(...data.versions.map((version) => {
+      const option = el('option', null, version);
+      option.value = version;
+      return option;
+    }));
+  } catch (error) {
+    versions.replaceChildren();
+  }
+  document.getElementById('migrate-plan').hidden = true;
+}
+
+function planLine(text, warning = false) {
+  return el('li', warning ? 'is-warning' : null, text);
+}
+
+function renderMigratePlan(plan) {
+  migratePlan = plan;
+  const list = document.getElementById('migrate-plan-list');
+  const lines = [];
+  const target = `${plan.to.loader} ${plan.to.version}`;
+  lines.push(planLine(plan.worlds.length
+    ? `Copy ${plan.worlds.length} world folder(s) (${formatBytes(plan.size)}) to ${target}.`
+    : `No generated worlds to copy; ${target} starts fresh.`));
+  if (plan.files.length) lines.push(planLine(`Copy ${plan.files.join(', ')}.`));
+  if (plan.mods.compatible.length) lines.push(planLine(`Install ${plan.mods.compatible.length} mod(s) for ${plan.to.version}: ${plan.mods.compatible.map((m) => m.title).join(', ')}.`));
+  if (plan.mods.carried.length) lines.push(planLine(`Copy ${plan.mods.carried.length} plugin(s) as they are.`));
+  if (plan.mods.missing.length) lines.push(planLine(`No ${plan.to.version} version yet for: ${plan.mods.missing.map((m) => m.title).join(', ')}. They will be left out.`, true));
+  if (plan.loader_change) lines.push(planLine('Different loader: mods and plugins do not carry over; the world does.', true));
+  if (plan.downgrade) lines.push(planLine('This is an older version. Worlds opened in a newer version usually break in an older one.', true));
+  if (plan.replaces.length) lines.push(planLine(`${plan.replaces.join(', ')} already exist there and will be kept aside, not overwritten.`, true));
+  if (!plan.enough_space) lines.push(planLine('Not enough free space: free some on the Backups page first.', true));
+  lines.push(planLine('A backup of the current world is made first.'));
+  list.replaceChildren(...lines);
+  document.getElementById('migrate-plan').hidden = false;
+  document.getElementById('migrate-run-button').disabled = !plan.enough_space;
+}
+
+async function checkMigration(event) {
+  event.preventDefault();
+  await runAction(event.submitter, 'Checking…', async () => {
+    renderMigratePlan(await fetchJson('/api/server/migrate/plan', 'POST', {
+      loader: document.getElementById('migrate-loader').value,
+      version: document.getElementById('migrate-version').value,
+    }));
+    return null;
+  });
+}
+
+async function runMigration(button) {
+  const plan = migratePlan;
+  if (!plan) return;
+  const question = plan.downgrade
+    ? `Copy your worlds to the OLDER version ${plan.to.version}? They may not load there. The current version stays untouched.`
+    : `Move to ${plan.to.loader} ${plan.to.version}? The server folder for the current version stays untouched.`;
+  if (!window.confirm(question)) return;
+  await runAction(button, null, async () => {
+    const response = await fetchJson('/api/server/migrate', 'POST', {
+      loader: plan.to.loader, version: plan.to.version, skip_missing: true, allow_downgrade: plan.downgrade,
+    });
+    trackOperation(response);
+    document.getElementById('migrate-plan').hidden = true;
+    return response.message;
+  });
+}
+
 // ---------- Performance presets and RAM advice ----------
 const PERFORMANCE_PRESETS = {
   phone: { label: 'Phone / low-power', ram: 2048, view: 6, sim: 4 },
