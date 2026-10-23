@@ -29,7 +29,7 @@
   `/health`), `system` (metrics, status, console history, config, versions), `server` (install +
   lifecycle jobs — `start_lifecycle_job`, `busy_error`, `launch_server`, `launch_when_free`,
   `install_server`, `request_stop`, `stop_and_wait`, `restart_job`, `server_running` — commands,
-  admin), `backups`, `mods` (+ Modrinth), `worlds`, `diagnosis` (crash diagnosis + log viewer), `players` (whitelist/ops/bans), `identity` (icon + all properties), `storage` (disk use + cleanup), `public` (invite + `/s/<token>` status page), `remote` (PlayIt + Cloudflare), `updates`
+  admin), `backups`, `mods` (+ Modrinth), `worlds`, `diagnosis` (crash diagnosis + log viewer), `players` (whitelist/ops/bans), `identity` (icon + all properties), `storage` (disk use + cleanup), `migrate` (version moves), `public` (invite + `/s/<token>` status page), `remote` (PlayIt + Cloudflare), `updates`
   (self-update + alert settings).
 - `background.py` — `run_in_background`, `autostart` (also starts `heartbeat_loop` and
   `scheduler_loop`), `shutdown`.
@@ -41,7 +41,7 @@
   `ASSET_VERSION`).
 
 ### `core/` additions (after the audit)
-- `storage.py` (disk use and cleanup, FEAT-15), `activity.py` (playtime log, FEAT-12), `mod_updates.py` (mod update check/update/rollback, FEAT-07), `diagnose.py` (crash rule table, FEAT-08), `backups.py` (backup names/retention, FEAT-01),
+- `migrate.py` (version moves, FEAT-09), `storage.py` (disk use and cleanup, FEAT-15), `activity.py` (playtime log, FEAT-12), `mod_updates.py` (mod update check/update/rollback, FEAT-07), `diagnose.py` (crash rule table, FEAT-08), `backups.py` (backup names/retention, FEAT-01),
   `fsutil.py` (atomic writes, FIX-03), `players.py` (whitelist/ops/bans JSON, UUIDs, refusal
   parsing, FEAT-02), `modpack.py` (`.mrpack` build, loader version detection, FEAT-04).
 

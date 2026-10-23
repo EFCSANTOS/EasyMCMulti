@@ -18,7 +18,8 @@ EZ_Server_Data/
   java/jre-<feature>/      Temurin JRE per Java major (java_manager._install_dir)
   servers/<loader>-<version>/  one dir per loader+version; spaces → "_" (paths.server_dir)
 ```
-Switching loader/version in config switches to a different server dir (and world).
+Switching loader/version in config switches to a different server dir (and world); Server setup →
+"Move to another version" (FEAT-09) copies worlds, lists, icon and compatible mods across first.
 
 **Atomic writes (FIX-03).** Every settings/metadata file — `launcher_config.json`,
 `notify_config.json`, `playit_config.json`, `ez-worlds.json`, `.ez-modrinth.json`,

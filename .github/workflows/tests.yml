@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Tests (hermetic, random order)
-        run: python -m pytest -q
+        run: python -m pytest -rf  # not -q: the header shows the --randomly-seed to reproduce failures
       - name: JavaScript syntax
         shell: bash
         run: for file in webapp/static/js/*.js; do node --check "$file"; done

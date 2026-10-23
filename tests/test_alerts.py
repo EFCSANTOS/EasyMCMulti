@@ -156,7 +156,9 @@ def test_playit_agent_restarts_pause_after_repeated_exits(fake_playit, sent_emai
     assert "Another instance is already running" in status["error"]
     assert any("auto-restart paused" in subject for subject, _ in sent_emails)
 
-    assert client.post("/api/playit/start", auth=auth).json()["state"] == "running"  # manual start re-arms
+    manual = client.post("/api/playit/start", auth=auth)  # a manual start re-arms automatic restarts
+    assert manual.status_code == 200, manual.text
+    assert manual.json()["state"] == "running"
     assert client.get("/api/playit/status", auth=auth).json()["setup"] == "idle"
 
 

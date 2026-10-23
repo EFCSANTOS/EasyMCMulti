@@ -1200,6 +1200,17 @@ select[aria-invalid="true"] {
   }
 }
 
+.plain-list {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.plain-list .is-warning {
+  color: var(--warning);
+}
+
 /* Small heading inside a card (e.g. "Discord" in the Alerts card). */
 .subhead {
   margin: 1.5rem 0 0.35rem;
