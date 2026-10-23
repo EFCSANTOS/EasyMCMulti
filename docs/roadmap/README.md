@@ -37,7 +37,7 @@ Things deliberately left out are listed in [not-doing.md](not-doing.md).
 ## Code quality
 | ID | Title | Priority | Effort | Depends on |
 |---|---|---|---|---|
-| [QUAL-02](quality/QUAL-02-test-suite-and-ci.md) | Test suite structure, `core/` unit tests and CI | P2 | M | — |
+| — | All code-quality items have shipped (QUAL-01, QUAL-02). | | | |
 
 ## Suggested order
 1. **Make remote access safe and installs reliable** — done: FIX-01 (login sessions + lockout),
