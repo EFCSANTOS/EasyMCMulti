@@ -38,6 +38,10 @@
     account, automatic. Trade-offs: random link that changes on restart; quick tunnels have no
     uptime guarantee. Shipped with the existing Basic auth by owner decision; sessions +
     lockout followed in FIX-01.
+28. Stable remote address (FEAT-17, 2026-10-23): an owner-made Cloudflare named tunnel (token +
+    hostname pasted in) rather than provisioning through the Cloudflare API, which would need an
+    account token with broad permissions; quick tunnels stay the zero-setup default. Private
+    networks (Tailscale/ZeroTier) need no code, so they are documented only.
 27. Server lifecycle runs in the background (FIX-02 / FIX-04, 2026-10-22): requests return 202 and
     the dashboard follows `/api/status`, because the Cloudflare link drops requests after ~100 s and
     a "failed" install the owner retries would race the first. One non-reentrant lifecycle lock,
