@@ -38,6 +38,16 @@ DEFAULTS = {
     "notify_updates": True,
     "notify_security": True,
     "notify_backup": True,
+    # Device health: high CPU/RAM use and high temperature, each sent by email, Discord or both.
+    "notify_usage": True,
+    "notify_temperature": True,
+    "channels_usage": "both",
+    "channels_temperature": "both",
+    "alert_cpu_percent": 90,
+    "alert_ram_percent": 90,
+    "alert_usage_minutes": 5,
+    "alert_temp_c": 80,
+    "alert_battery_c": 45,
     "heartbeat_url": "",
     # Discord webhooks (secret URLs) and what the friends channel gets.
     "discord_owner_url": "",
@@ -51,6 +61,15 @@ SECRET_KEYS = ("smtp_password", "discord_owner_url", "discord_friends_url")
 PUBLIC_KEYS = [key for key in DEFAULTS if key not in SECRET_KEYS]
 DISCORD_WEBHOOK = re.compile(r"^https://(?:(?:ptb|canary)\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$")
 DISCORD_MAX_LENGTH = 2000
+CHANNELS = ("both", "email", "discord")
+# Limits the dashboard accepts: key -> (lowest, highest).
+LIMITS = {
+    "alert_cpu_percent": (10, 100),
+    "alert_ram_percent": (10, 100),
+    "alert_usage_minutes": (1, 120),
+    "alert_temp_c": (30, 120),
+    "alert_battery_c": (25, 80),
+}
 
 
 def load_config():
@@ -80,6 +99,16 @@ def save_config(update):
             if key.startswith("discord_") and not DISCORD_WEBHOOK.match(str(value).strip()):
                 raise ValueError("That is not a Discord webhook URL (Server settings → Integrations → Webhooks → Copy URL).")
             value = str(value).strip()
+        elif key.startswith("channels_") and value not in CHANNELS:
+            raise ValueError("Choose where alerts go: email, Discord or both.")
+        elif key in LIMITS:
+            low, high = LIMITS[key]
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                raise ValueError("Alert limits must be whole numbers.") from None
+            if not low <= value <= high:
+                raise ValueError(f"That alert limit must be between {low} and {high}.")
         config[key] = value
     config["smtp_port"] = int(config.get("smtp_port") or 587)
     paths.ensure_dirs()
@@ -95,6 +124,12 @@ def public_config():
     data["discord_owner_set"] = bool(config.get("discord_owner_url"))
     data["discord_friends_set"] = bool(config.get("discord_friends_url"))
     return data
+
+
+def channels(config, category):
+    """(email, discord) allowed for `category`: "both" unless the category has its own choice."""
+    choice = config.get(f"channels_{category}", "both")
+    return choice in ("both", "email"), choice in ("both", "discord")
 
 
 def email_ready(config):

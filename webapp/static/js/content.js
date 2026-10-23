@@ -408,6 +408,39 @@ async function exportModpack(button) {
   });
 }
 
+// One jar at a time with a short gap: browsers drop downloads started in the same instant.
+async function downloadEach(urls) {
+  for (const url of urls) {
+    const link = el('a');
+    link.href = url;
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+}
+
+async function downloadModJars(button) {
+  await runAction(button, 'Finding the mods players need…', async () => {
+    const data = await fetchJson('/api/modpack/jars');
+    const list = document.getElementById('modpack-jars');
+    list.replaceChildren(...data.jars.map((jar) => {
+      const link = el('a', '', jar.name);
+      link.href = `/api/modpack/jars/${encodeURIComponent(jar.name)}`;
+      link.download = jar.name;
+      const item = el('li');
+      item.append(link, el('span', 'hint', formatBytes(jar.size)));
+      return item;
+    }));
+    list.hidden = !data.jars.length;
+    await downloadEach(data.jars.map((jar) => `/api/modpack/jars/${encodeURIComponent(jar.name)}`));
+    let message = `Sent ${data.jars.length} jar(s). If some are missing, click them in the list.`;
+    if (data.excluded.length) message += ` Left out (server-only): ${data.excluded.join(', ')}.`;
+    return message;
+  });
+}
+
 // ---------- Worlds ----------
 function formatSize(bytes) {
   return bytes ? formatBytes(bytes) : '';

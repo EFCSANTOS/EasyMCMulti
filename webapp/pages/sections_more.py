@@ -15,8 +15,12 @@ _SECTION_MODS = f"""
               </div>
               <div class="card-tools">
                 <button id="modpack-export-button" class="btn btn-primary btn-sm" type="button">{_icon("archive")} Export pack (.mrpack)</button>
+                <button id="modpack-jars-button" class="btn btn-ghost btn-sm" type="button">{_icon("download")} Download jars</button>
               </div>
             </div>
+            <p class="hint">No Modrinth App or Prism? "Download jars" sends each mod as its own .jar (no zip) to drop
+              into the game's <code>mods</code> folder. Allow multiple downloads if the browser asks.</p>
+            <ul id="modpack-jars" class="file-list" hidden></ul>
             <p class="hint">Server-only mods are left out. With the public status page on, friends can download the
               pack there too, so you don't have to send it.</p>
           </div>

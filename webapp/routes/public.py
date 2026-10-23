@@ -159,3 +159,16 @@ def register(app: FastAPI, s: Services) -> None:
             raise HTTPException(status_code=404, detail="Not found.") from None
         return FileResponse(path, media_type="application/x-modrinth-modpack+zip", filename=summary["filename"],
                             headers={"Cache-Control": "no-store"})
+
+    @app.get("/s/{token}/mods.json")
+    def public_client_jars(token: str) -> dict[str, Any]:
+        checked_token(token)
+        try:
+            return {"jars": s.client_jars()["jars"]}
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Not found.") from None
+
+    @app.get("/s/{token}/mods/{name}")
+    def public_client_jar(token: str, name: str) -> FileResponse:
+        checked_token(token)
+        return s.client_jar_response(name, **{"Cache-Control": "no-store"})

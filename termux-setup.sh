@@ -39,8 +39,9 @@ say "Installing system packages (Python, Java, build tools)..."
 # proot: provides termux-chroot, which lets the PlayIt agent resolve DNS on Android.
 # termux-services: runs the dashboard as a background service for 24/7 mode.
 # cloudflared: the optional https link to the dashboard (Remote access page).
+# termux-api: battery temperature for the dashboard and heat alerts (also needs the Termux:API app).
 apt-get "${APT_OPTS[@]}" install python git "$JAVA_PACKAGE" rust binutils proot termux-tools termux-services \
-  cloudflared </dev/null
+  cloudflared termux-api </dev/null
 
 say "Fetching the app into $APP_DIR..."
 if [ -d "$APP_DIR/.git" ]; then

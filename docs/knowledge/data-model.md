@@ -10,7 +10,11 @@ EZ_Server_Data/
   playit_config.json       {"secret", "address"} (playit._CONFIG_FILE) — plaintext secret
   cloudflared-<os>-<arch>  Cloudflare tunnel binary, downloaded on Windows/Linux (cloudflared.ensure_binary)
   notify_config.json       alert settings (notifier._CONFIG_FILE) — plaintext SMTP app password and Discord
-                           webhook URLs; last_link
+                           webhook URLs; last_link; device health alerts: notify_usage,
+                           notify_temperature, channels_usage / channels_temperature
+                           ("both" | "email" | "discord"), alert_cpu_percent (90),
+                           alert_ram_percent (90), alert_usage_minutes (5), alert_temp_c (80),
+                           alert_battery_c (45)
   cloudflare_tunnel.json   {"token"} for the owner's named tunnel (FEAT-17) — secret
   users.json               friend accounts {username: {role, salt, hash, created}} (core/users.py, FEAT-10)
   activity.jsonl           player joins/leaves/server stops, one JSON per line (core/activity.py, FEAT-12)
