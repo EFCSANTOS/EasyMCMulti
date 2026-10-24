@@ -1,4 +1,4 @@
-"""Worlds: list, create, upload, switch, rename, delete, download."""
+"""Worlds: list, create, upload, switch, rename, delete, download, carry player progress over."""
 from __future__ import annotations
 
 import os
@@ -10,13 +10,14 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, Uploa
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from core import config_store, paths, worlds
+from core import backups, config_store, paths, player_transfer, worlds
 from webapp import common
 from webapp.services import Services, require_auth
 
 
 def register(app: FastAPI, s: Services) -> None:
     runtime = s.runtime
+    append_console_line = s.append_console_line
 
     def worlds_payload(message: str = "") -> dict[str, Any]:
         config = common._effective_config()
@@ -24,7 +25,7 @@ def register(app: FastAPI, s: Services) -> None:
         return {
             "worlds": worlds.list_worlds(common._server_dir_for_config(config), active),
             "active": active,
-            "s.server_running": s.server_running(),
+            "server_running": s.server_running(),
             "message": message,
         }
 
@@ -136,3 +137,50 @@ def register(app: FastAPI, s: Services) -> None:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return FileResponse(archive, media_type="application/zip", filename=f"{folder}.zip",
                             background=BackgroundTask(os.remove, archive))
+
+    @app.get("/api/worlds/{folder}/players")
+    def world_players(folder: str, _: str = Depends(require_auth)) -> dict[str, Any]:
+        sdir = checked_world(folder)
+        try:
+            return {"players": player_transfer.list_players(sdir, folder),
+                    "mod_data": player_transfer.mod_data(sdir, folder)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/worlds/{folder}/transfer")
+    def transfer_players(folder: str, payload: dict[str, Any], _: str = Depends(require_auth)) -> dict[str, Any]:
+        """Copy player progress from payload["source"] into this world (players and mod data chosen in the payload)."""
+        sdir = checked_world(folder)
+        source = str(payload.get("source", ""))
+        if not worlds.valid_folder(source):
+            raise HTTPException(status_code=400, detail="Choose the world to copy players from.")
+        chosen = payload.get("players")
+        if chosen is not None and not (isinstance(chosen, list) and all(isinstance(u, str) for u in chosen)):
+            raise HTTPException(status_code=400, detail="Invalid player list.")
+        parts = payload.get("parts", list(player_transfer.PARTS))
+        extras = payload.get("mod_data", [])
+        if not isinstance(parts, list) or not isinstance(extras, list):
+            raise HTTPException(status_code=400, detail="Invalid request.")
+        if s.server_running():
+            raise HTTPException(status_code=409, detail="Stop the server before copying player data: it rewrites "
+                                                        "player files while running.")
+        if not runtime.lifecycle.acquire(blocking=False):
+            raise s.busy_error()
+        try:
+            plan = player_transfer.prepare(sdir, source, folder, chosen, [str(p) for p in parts],
+                                           bool(payload.get("to_spawn", True)), [str(e) for e in extras])
+            # Holding the lifecycle lock: back up with core.backups directly (the FEAT-01 helper takes the lock).
+            append_console_line(f"[transfer] backing up '{folder}' first")
+            backups.create(sdir, folder, "auto-pre-transfer")
+            result = player_transfer.apply(plan, log=lambda line: append_console_line(f"[transfer] {line}"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"Copying player data failed: {exc}") from exc
+        finally:
+            runtime.lifecycle.release()
+        message = f"Copied progress for {result['players']} player(s)"
+        if result["extras"]:
+            message += f" and {len(result['extras'])} mod data item(s)"
+        message += ". A backup of the world was made first."
+        return worlds_payload(message) | {"transfer": result}

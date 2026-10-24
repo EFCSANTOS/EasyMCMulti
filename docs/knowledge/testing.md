@@ -183,6 +183,10 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
   zip-slip rejection with cleanup), endpoints create → activate (writes `level_name`/`level_seed`,
   `level-name` property) → rename → delete (active refused), upload/download round trip, switching
   while running restarts the server, backups of the active world + pre-restore rename.
+- Player transfer (`test_player_transfer.py`): NBT round trip (every tag type, modified UTF-8),
+  player list + mod-data candidates, move to spawn (old and 1.21.9+ `level.dat` spawn) keeping
+  inventory / `ForgeCaps`, chosen players / parts / mod data, refusals that leave the target
+  untouched, endpoints (backup first, no backup for a bad request, 409 while running).
 - Mod browser (`fake_modrinth` fixture fakes `modrinth._get` and `download`): browse without query
   (sort + server-side facets), categories filter, install with a required dependency (optional
   skipped), installed `project_ids`, details plain text, remove, vanilla 400. A live read-only

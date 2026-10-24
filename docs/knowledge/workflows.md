@@ -377,6 +377,7 @@ Core details (`core/playit.py`):
   (quiet save first if running, §11); restore accepts any members under valid world folder names
   and renames each existing folder to `<folder>-pre-restore-<ts>` before extracting.
 - Worlds are per server dir (loader + version), like before.
+- Carrying player progress from one world to another: §37.
 
 ## 20. Mod browser (Mods page)
 - `GET /api/modrinth/search?query&sort&category&offset` → `{hits, total, offset, limit, loader,
@@ -697,6 +698,35 @@ Core details (`core/playit.py`):
   `PUT /api/notifications`; `notifier.save_config` rejects other channel values and limits outside
   `notifier.LIMITS` (400). Termux setup installs `termux-api`; the battery reading also needs the
   Termux:API app.
+
+## 37. Carry player progress between worlds
+- For starting a fresh world but keeping what players earned. `core/player_transfer.py`, card
+  "Carry player progress" on the Worlds page; the old world is only read.
+- What moves, per player (files named by UUID in the source world): `playerdata/<uuid>.dat`
+  (inventory, ender chest, XP, health, effects and whatever mods attach to the player: Forge
+  `ForgeCaps`, NeoForge attachments, Fabric cardinal components, so a worn Traveler's Backpack,
+  Curios / Trinkets slots), other `playerdata/<uuid>.<ext>` files some Forge mods write (not
+  `.dat_old`), `stats/<uuid>.json`, `advancements/<uuid>.json`. Each kind is a switch.
+- Mod data kept in the world rather than on the player (e.g. `data/sophisticatedbackpacks.dat`,
+  `ftbquests/`): `mod_data()` offers every non-vanilla top-level entry and every `data/` entry
+  that isn't vanilla (`_VANILLA_ENTRIES`, `_VANILLA_DATA`: raids, maps, idcounts, structures…);
+  unticked by default; copied over same-named entries. Only listed paths are accepted.
+- Both worlds must be generated (`level.dat`), so it runs after the new world's first start.
+  "Send everyone to the new spawn" (default on) rewrites the player NBT via `core/nbt.py`: `Pos` =
+  the target's spawn (`Data.SpawnX/Y/Z`, or the 1.21.9+ `Data.spawn.pos`), `Dimension` = its
+  dimension (int 0 before 1.16), and drops `_LOCATION_TAGS` (motion, vehicle, bed/anchor respawn,
+  ender pearls, Bukkit/Paper world UUID). Off: player files are copied as they are.
+- `prepare()` validates and reads everything (bad UUID, unknown mod data, damaged player file → 400)
+  before anything is written; `apply()` writes. `transfer()` = both.
+- Endpoints: `GET /api/worlds/{folder}/players` → `{players: [{uuid, name, parts, last_seen}],
+  mod_data: [{path, size}]}` (names from whitelist, ops and `usercache.json`); `POST
+  /api/worlds/{target}/transfer` `{source, players (null = all), parts, mod_data, to_spawn}`: 409
+  while the server runs (it rewrites player files), lifecycle lock (409 busy), then `prepare` →
+  `backups.create(…, "auto-pre-transfer")` of the target → `apply`. Synchronous: only player files
+  and the chosen mod data are copied.
+- `core/nbt.py`: dependency-free NBT codec (gzip or raw), Java modified UTF-8 (null as `C0 80`,
+  characters above U+FFFF as surrogate pairs), atomic `save`. Unchanged data round-trips
+  byte-identical (checked on a real 1.21.7 `level.dat`).
 
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
