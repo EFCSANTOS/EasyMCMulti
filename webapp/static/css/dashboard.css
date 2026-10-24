@@ -684,6 +684,24 @@ select[aria-invalid="true"] {
   accent-color: var(--accent);
 }
 
+/* Tick lists (players and mod data to carry to another world). */
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem 1rem;
+  margin-top: 0.5rem;
+}
+
+.check-grid .inline-check {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.check-grid .hint {
+  display: inline;
+  margin: 0;
+}
+
 /* ---------- Overview ---------- */
 .tiles {
   display: grid;

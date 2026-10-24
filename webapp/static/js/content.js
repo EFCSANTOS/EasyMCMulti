@@ -474,6 +474,7 @@ function renderWorlds(result) {
     if (!world.active) buttons.push(rowButton('Delete', 'btn-danger', (b) => deleteWorld(world, b)));
     return itemRow(worldTitle(world), null, worldMeta(world), buttons);
   }, 'No worlds yet. Start the server once, upload a world, or create a new one.');
+  renderTransferWorlds(result.worlds || []);
 }
 
 async function loadWorlds() {
@@ -582,6 +583,103 @@ async function createWorld(event) {
     renderWorlds(result);
     name.value = '';
     seed.value = '';
+    return result.message;
+  });
+}
+
+// ---------- Carry player progress to another world ----------
+function transferCheck(value, text, note, checked) {
+  const label = el('label', 'inline-check');
+  const box = el('input');
+  box.type = 'checkbox';
+  box.value = value;
+  box.checked = checked;
+  const caption = el('span', null, `${text} `);
+  if (note) caption.appendChild(el('span', 'hint', note));
+  label.append(box, caption);
+  return label;
+}
+
+function fillWorldSelect(select, worldList, wanted) {
+  select.replaceChildren(...worldList.map((world) => {
+    const option = el('option', null, world.active ? `${world.name} (active)` : world.name);
+    option.value = world.folder;
+    return option;
+  }));
+  if (worldList.some((world) => world.folder === wanted)) select.value = wanted;
+}
+
+function renderTransferWorlds(worldList) {
+  const source = document.getElementById('transfer-source');
+  const target = document.getElementById('transfer-target');
+  if (!source || !target) return;
+  // Only generated worlds have player data to read, or a spawn point to send players to.
+  const generated = worldList.filter((world) => world.exists);
+  const newest = [...generated].sort((a, b) => (b.last_played || 0) - (a.last_played || 0));
+  const active = generated.find((world) => world.active);
+  const previousSource = source.value;
+  fillWorldSelect(target, generated, target.value || (active && active.folder));
+  const fallback = newest.find((world) => world.folder !== target.value);
+  fillWorldSelect(source, generated, previousSource || (fallback && fallback.folder));
+  if (source.value !== previousSource || !document.getElementById('transfer-players').childElementCount) {
+    loadTransferPlayers();
+  }
+}
+
+async function loadTransferPlayers() {
+  const source = document.getElementById('transfer-source');
+  const playerList = document.getElementById('transfer-players');
+  const modBlock = document.getElementById('transfer-mod-data-block');
+  if (!source || !playerList) return;
+  if (!source.value) {
+    renderItems(playerList, [], null, 'No generated worlds yet.');
+    modBlock.hidden = true;
+    return;
+  }
+  try {
+    const data = await fetchJson(`/api/worlds/${encodeURIComponent(source.value)}/players`);
+    renderItems(playerList, data.players, (player) => transferCheck(
+      player.uuid, player.name || `Unknown player ${player.uuid.slice(0, 8)}`,
+      player.last_seen ? `played ${relativeTime(player.last_seen)}` : '', true,
+    ), 'Nobody has played in this world yet.');
+    renderItems(document.getElementById('transfer-mod-data'), data.mod_data,
+      (item) => transferCheck(item.path, item.path, formatSize(item.size), false), '');
+    modBlock.hidden = !data.mod_data.length;
+  } catch (error) {
+    renderItems(playerList, [], null, `Players unavailable: ${error.message}`);
+    modBlock.hidden = true;
+  }
+}
+
+function checkedValues(containerId) {
+  return Array.from(document.querySelectorAll(`#${containerId} input:checked`)).map((box) => box.value);
+}
+
+async function transferPlayers(event) {
+  event.preventDefault();
+  const source = document.getElementById('transfer-source');
+  const target = document.getElementById('transfer-target');
+  if (!source.value || !target.value) {
+    setStatus('Both worlds must have been generated: start the server on the new world once first.', 'error');
+    return;
+  }
+  if (source.value === target.value) {
+    setStatus('Choose two different worlds.', 'error');
+    return;
+  }
+  const parts = [['transfer-playerdata', 'playerdata'], ['transfer-stats', 'stats'], ['transfer-advancements', 'advancements']]
+    .filter(([id]) => document.getElementById(id).checked).map(([, part]) => part);
+  const players = checkedValues('transfer-players');
+  const modData = checkedValues('transfer-mod-data');
+  const into = target.options[target.selectedIndex].text;
+  if (!window.confirm(`Copy ${players.length} player(s) into "${into}"? Their data there is replaced. A backup of "${into}" is made first.`)) return;
+  await runAction(event.submitter, 'Copying player progress…', async () => {
+    const result = await fetchJson(`/api/worlds/${encodeURIComponent(target.value)}/transfer`, 'POST', {
+      source: source.value, players, parts, mod_data: modData,
+      to_spawn: document.getElementById('transfer-to-spawn').checked,
+    });
+    renderWorlds(result);
+    loadBackups();
     return result.message;
   });
 }
