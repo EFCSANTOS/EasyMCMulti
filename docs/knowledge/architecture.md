@@ -41,7 +41,7 @@
   `ASSET_VERSION`).
 
 ### `core/` additions (after the audit)
-- `temperatures.py` (device sensors), `geyser.py` (Bedrock crossplay, FEAT-18), `users.py` (friend accounts, scrypt, FEAT-10), `migrate.py` (version moves, FEAT-09), `storage.py` (disk use and cleanup, FEAT-15), `activity.py` (playtime log, FEAT-12), `mod_updates.py` (mod update check/update/rollback, FEAT-07), `diagnose.py` (crash rule table, FEAT-08), `backups.py` (backup names/retention, FEAT-01),
+- `temperatures.py` (device sensors), `geyser.py` (Bedrock crossplay, FEAT-18), `users.py` (friend accounts, scrypt, FEAT-10), `migrate.py` (version moves, FEAT-09), `player_transfer.py` + `nbt.py` (carry player progress between worlds), `storage.py` (disk use and cleanup, FEAT-15), `activity.py` (playtime log, FEAT-12), `mod_updates.py` (mod update check/update/rollback, FEAT-07), `diagnose.py` (crash rule table, FEAT-08), `backups.py` (backup names/retention, FEAT-01),
   `fsutil.py` (atomic writes, FIX-03), `players.py` (whitelist/ops/bans JSON, UUIDs, refusal
   parsing, FEAT-02), `modpack.py` (`.mrpack` build, loader version detection, FEAT-04).
 

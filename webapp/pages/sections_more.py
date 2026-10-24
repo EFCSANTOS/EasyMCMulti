@@ -132,6 +132,50 @@ _SECTION_WORLDS = f"""
               </div>
             </form>
           </div>
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>Carry player progress</h2>
+                <p class="card-sub">Starting a fresh world? Bring inventories, stats and advancements over from an old one.
+                  The old world is only read, never changed.</p>
+              </div>
+            </div>
+            <form id="transfer-form" class="stack">
+              <div class="form-grid">
+                <div class="field">
+                  <label for="transfer-source">From</label>
+                  <select id="transfer-source"></select>
+                </div>
+                <div class="field">
+                  <label for="transfer-target">Into</label>
+                  <select id="transfer-target"></select>
+                </div>
+              </div>
+              <div class="switch-list">
+                {_switch("transfer-playerdata", "Inventories and player data", "Inventory, ender chest, XP, health, effects and the items mods attach to the player, such as a worn Traveler's Backpack or Curios / Trinkets slots.", True)}
+                {_switch("transfer-stats", "Statistics", "Blocks mined, distance walked, mobs killed…", True)}
+                {_switch("transfer-advancements", "Advancements", "Unlocked advancements and recipes.", True)}
+                {_switch("transfer-to-spawn", "Send everyone to the new spawn", "Old coordinates point at different terrain in the new world. Beds and respawn anchors are reset.", True)}
+              </div>
+              <div>
+                <span class="switch-label">Players</span>
+                <div id="transfer-players" class="check-grid"></div>
+              </div>
+              <div id="transfer-mod-data-block" hidden>
+                <span class="switch-label">Mod data kept in the world</span>
+                <span class="hint">Some mods keep player items in the world rather than on the player, such as Sophisticated
+                  Backpacks (<code>data/sophisticatedbackpacks.dat</code>) or Traveler's Backpack's death backups
+                  (<code>backpacks</code>). Tick only what you need: data tied to places
+                  (waystones, claims) still points at the old terrain. Items with the same name in the new world are replaced.</span>
+                <div id="transfer-mod-data" class="check-grid"></div>
+              </div>
+              <div class="form-actions">
+                <span class="hint">Do this once the new world exists: switch to it, start the server once, then stop it.
+                  The new world is backed up first.</span>
+                <button class="btn btn-primary" type="submit">Copy player progress</button>
+              </div>
+            </form>
+          </div>
         </section>
 """
 

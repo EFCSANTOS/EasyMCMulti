@@ -38,6 +38,12 @@
     account, automatic. Trade-offs: random link that changes on restart; quick tunnels have no
     uptime guarantee. Shipped with the existing Basic auth by owner decision; sessions +
     lockout followed in FIX-01.
+29. Player progress between worlds (2026-10-24): copied after the new world is generated, never
+    seeded into an ungenerated folder, because the new spawn point (needed to place players on
+    solid ground) only exists in its `level.dat`. Players go to spawn by default since old
+    coordinates are meaningless in new terrain. Own small NBT codec instead of a package (nbtlib)
+    to keep the Termux install dependency-free. World-level mod data is opt-in per file: there is
+    no general way to tell player items from location-bound data (waystones, claims).
 28. Stable remote address (FEAT-17, 2026-10-23): an owner-made Cloudflare named tunnel (token +
     hostname pasted in) rather than provisioning through the Cloudflare API, which would need an
     account token with broad permissions; quick tunnels stay the zero-setup default. Private

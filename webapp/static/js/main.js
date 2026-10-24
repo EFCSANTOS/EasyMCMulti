@@ -73,6 +73,8 @@ function bindEvents() {
   on('world-refresh-button', 'click', () => loadWorlds());
   on('world-upload-input', 'change', (event, input) => uploadWorld(input));
   on('world-create-form', 'submit', (event) => createWorld(event));
+  on('transfer-source', 'change', () => loadTransferPlayers());
+  on('transfer-form', 'submit', (event) => transferPlayers(event));
   bindPlayers();
   bindIdentity();
   bindUsers();
