@@ -707,15 +707,22 @@ Core details (`core/playit.py`):
   `ForgeCaps`, NeoForge attachments, Fabric cardinal components, so a worn Traveler's Backpack,
   Curios / Trinkets slots), other `playerdata/<uuid>.<ext>` files some Forge mods write (not
   `.dat_old`), `stats/<uuid>.json`, `advancements/<uuid>.json`. Each kind is a switch.
+- Two save layouts (`_part_dir`): older worlds use top-level `playerdata/`, `stats/`,
+  `advancements/`; newer ones `players/data|stats|advancements` with terrain under
+  `dimensions/minecraft/overworld` (either marks the newer layout). Each world is read and written in
+  its own layout, so old → new works. Checked on a real modded Fabric world (DataVersion 5023): the
+  worn Traveler's Backpack lives in the player file under `fabric:attachments`; its `backpacks/<uuid>/`
+  folder holds death backups and is offered as mod data.
 - Mod data kept in the world rather than on the player (e.g. `data/sophisticatedbackpacks.dat`,
   `ftbquests/`): `mod_data()` offers every non-vanilla top-level entry and every `data/` entry
-  that isn't vanilla (`_VANILLA_ENTRIES`, `_VANILLA_DATA`: raids, maps, idcounts, structures…);
+  that isn't vanilla (`_VANILLA_ENTRIES`, `_VANILLA_DATA`: raids, maps, idcounts, structures,
+  `data/minecraft/`, Fabric's `data/fabric/` registry sync…);
   unticked by default; copied over same-named entries. Only listed paths are accepted.
 - Both worlds must be generated (`level.dat`), so it runs after the new world's first start.
   "Send everyone to the new spawn" (default on) rewrites the player NBT via `core/nbt.py`: `Pos` =
   the target's spawn (`Data.SpawnX/Y/Z`, or the 1.21.9+ `Data.spawn.pos`), `Dimension` = its
   dimension (int 0 before 1.16), and drops `_LOCATION_TAGS` (motion, vehicle, bed/anchor respawn,
-  ender pearls, Bukkit/Paper world UUID). Off: player files are copied as they are.
+  last death location, ender pearls, Bukkit/Paper world UUID). Off: player files are copied as they are.
 - `prepare()` validates and reads everything (bad UUID, unknown mod data, damaged player file → 400)
   before anything is written; `apply()` writes. `transfer()` = both.
 - Endpoints: `GET /api/worlds/{folder}/players` → `{players: [{uuid, name, parts, last_seen}],

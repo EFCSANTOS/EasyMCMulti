@@ -164,7 +164,8 @@ _SECTION_WORLDS = f"""
               <div id="transfer-mod-data-block" hidden>
                 <span class="switch-label">Mod data kept in the world</span>
                 <span class="hint">Some mods keep player items in the world rather than on the player, such as Sophisticated
-                  Backpacks (<code>data/sophisticatedbackpacks.dat</code>). Tick only what you need: data tied to places
+                  Backpacks (<code>data/sophisticatedbackpacks.dat</code>) or Traveler's Backpack's death backups
+                  (<code>backpacks</code>). Tick only what you need: data tied to places
                   (waystones, claims) still points at the old terrain. Items with the same name in the new world are replaced.</span>
                 <div id="transfer-mod-data" class="check-grid"></div>
               </div>

@@ -121,6 +121,44 @@ def test_player_transfer_moves_players_to_the_new_spawn_and_keeps_their_items(tm
     assert (sdir / "old" / "playerdata" / f"{STEVE}.dat").read_bytes() == before  # the old world is only read
 
 
+def test_player_transfer_handles_the_newer_players_folder_layout(tmp_path):
+    """Newer worlds keep player files in players/data|stats|advancements and terrain in dimensions/."""
+    sdir = tmp_path / "server"
+    old, new, fresh = sdir / "old", sdir / "new", sdir / "fresh"
+    _level_dat(old / "level.dat")
+    tree = _player_tree() | {"LastDeathLocation": (nbt.COMPOUND, {"pos": (nbt.INT_ARRAY, [1, 2, 3])})}
+    (old / "players" / "data").mkdir(parents=True)
+    nbt.save(str(old / "players" / "data" / f"{STEVE}.dat"), "", tree)
+    (old / "players" / "stats").mkdir()
+    (old / "players" / "stats" / f"{STEVE}.json").write_text("{}", encoding="utf-8")
+    (old / "backpacks" / STEVE).mkdir(parents=True)  # Traveler's Backpack death backups
+    (old / "backpacks" / STEVE / "travelersbackpack.standard_1.dat").write_bytes(b"backup")
+    for target in (new, fresh):
+        _level_dat(target / "level.dat", new_format=True)
+        (target / "dimensions" / "minecraft" / "overworld").mkdir(parents=True)  # generated, nobody joined yet
+
+    assert [(p["uuid"], p["parts"]) for p in player_transfer.list_players(str(sdir), "old")] == [
+        (STEVE, ["playerdata", "stats"])]
+    assert "backpacks" in [m["path"] for m in player_transfer.mod_data(str(sdir), "old")]
+    player_transfer.transfer(str(sdir), "old", "new", extras=["backpacks"], log=lambda line: None)
+    moved = _tree(new / "players" / "data" / f"{STEVE}.dat")
+    assert moved["ForgeCaps"] == tree["ForgeCaps"] and "LastDeathLocation" not in moved
+    assert (new / "players" / "stats" / f"{STEVE}.json").exists() and not (new / "playerdata").exists()
+    assert (new / "backpacks" / STEVE / "travelersbackpack.standard_1.dat").read_bytes() == b"backup"
+
+    player_transfer.transfer(str(sdir), "new", "fresh", log=lambda line: None)  # and from a newer world
+    assert (fresh / "players" / "data" / f"{STEVE}.dat").exists()
+
+
+def test_player_transfer_copies_old_layout_worlds_into_newer_ones(tmp_path):
+    sdir = _worlds(tmp_path / "server")
+    (sdir / "new" / "dimensions" / "minecraft" / "overworld").mkdir(parents=True)
+    player_transfer.transfer(str(sdir), "old", "new", log=lambda line: None)
+    assert (sdir / "new" / "players" / "data" / f"{STEVE}.dat").exists()
+    assert (sdir / "new" / "players" / "data" / f"{STEVE}.baub").exists()
+    assert (sdir / "new" / "players" / "advancements" / f"{STEVE}.json").exists()
+
+
 def test_player_transfer_copies_chosen_players_parts_and_mod_data(tmp_path):
     sdir = _worlds(tmp_path / "server")
     (sdir / "new" / "data").mkdir()

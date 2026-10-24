@@ -1,10 +1,12 @@
 """Carry player progress from one world to another: inventories, stats, advancements, mod data.
 
 For a fresh world that keeps what players earned. Everything per player lives in the source world
-folder under <uuid> names: playerdata/<uuid>.dat (inventory, ender chest, XP, health, effects and
-the inventories mods attach to the player, such as a worn Traveler's Backpack, Curios or Trinkets
-slots), stats/<uuid>.json and advancements/<uuid>.json. Some Forge mods keep extra
-playerdata/<uuid>.<ext> files next to it; they travel too.
+folder under <uuid> names: the player file <uuid>.dat (inventory, ender chest, XP, health, effects
+and the inventories mods attach to the player, such as a worn Traveler's Backpack, Curios or
+Trinkets slots), stats/<uuid>.json and advancements/<uuid>.json. Some Forge mods keep extra
+<uuid>.<ext> files next to the player file; they travel too. Older worlds keep these in playerdata/,
+stats/ and advancements/; newer ones under players/data, players/stats and players/advancements.
+Each world is read and written in its own layout.
 
 The target must already be generated (its level.dat gives the spawn point) and the server stopped.
 By default players are moved to the new world's spawn and their bed / respawn point is cleared,
@@ -20,6 +22,10 @@ from . import fsutil, nbt, players, worlds
 
 PARTS = ("playerdata", "stats", "advancements")
 _PART_EXT = {"playerdata": ".dat", "stats": ".json", "advancements": ".json"}
+_LAYOUTS = {
+    "old": {"playerdata": ("playerdata",), "stats": ("stats",), "advancements": ("advancements",)},
+    "new": {"playerdata": ("players", "data"), "stats": ("players", "stats"), "advancements": ("players", "advancements")},
+}
 UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 # Player tags tied to where the player was in the old world; dropped when moving them to spawn.
@@ -28,6 +34,7 @@ _LOCATION_TAGS = (
     "current_explosion_impact_pos",
     "SpawnX", "SpawnY", "SpawnZ", "SpawnForced", "SpawnAngle", "SpawnDimension", "respawn",  # bed / anchor
     "SpawnWorld", "WorldUUIDLeast", "WorldUUIDMost",  # Bukkit/Paper: which world folder the player is in
+    "LastDeathLocation",  # recovery compass target
 )
 # World folder entries that are terrain or vanilla bookkeeping, never offered as mod data.
 _VANILLA_ENTRIES = {"region", "entities", "poi", "data", "playerdata", "stats", "advancements", "players",
@@ -35,7 +42,8 @@ _VANILLA_ENTRIES = {"region", "entities", "poi", "data", "playerdata", "stats", 
                     "paper-world.yml"}
 _VANILLA_DATA = re.compile(
     r"^(raids(_end|_nether)?|idcounts|chunks|random_sequences|villages(_end|_nether)?|map_\d+"
-    r"|Fortress|Mineshaft|Monument|EndCity|Temple|Village|Mansion|Stronghold|structure_.*|minecraft)(\.dat)?$")
+    r"|Fortress|Mineshaft|Monument|EndCity|Temple|Village|Mansion|Stronghold|structure_.*|minecraft"
+    r"|fabric)(\.dat)?$")  # fabric: the loader's registry sync, belongs to the world it was made for
 
 
 def _world_dir(sdir, folder):
@@ -45,6 +53,13 @@ def _world_dir(sdir, folder):
     if not os.path.isfile(os.path.join(path, "level.dat")):
         raise ValueError(f"The world '{folder}' has not been generated yet: switch to it and start the server once.")
     return path
+
+
+def _part_dir(wdir, part):
+    """Folder holding one kind of player file in this world (players/... in newer worlds)."""
+    new = (os.path.isdir(os.path.join(wdir, "players", "data"))
+           or os.path.isdir(os.path.join(wdir, "dimensions", "minecraft", "overworld")))
+    return os.path.join(wdir, *_LAYOUTS["new" if new else "old"][part])
 
 
 def _known_names(sdir):
@@ -64,7 +79,7 @@ def list_players(sdir, folder):
     wdir = _world_dir(sdir, folder)
     found = {}
     for part, ext in _PART_EXT.items():
-        part_dir = os.path.join(wdir, part)
+        part_dir = _part_dir(wdir, part)
         if not os.path.isdir(part_dir):
             continue
         for name in os.listdir(part_dir):
@@ -74,7 +89,7 @@ def list_players(sdir, folder):
     names = _known_names(sdir)
     result = []
     for uuid, parts in found.items():
-        player_file = os.path.join(wdir, "playerdata", uuid + ".dat")
+        player_file = os.path.join(_part_dir(wdir, "playerdata"), uuid + ".dat")
         result.append({"uuid": uuid, "name": names.get(uuid.lower(), ""), "parts": [p for p in PARTS if p in parts],
                        "last_seen": os.path.getmtime(player_file) if os.path.isfile(player_file) else None})
     return sorted(result, key=lambda p: (not p["name"], p["name"].lower(), p["uuid"]))
@@ -157,7 +172,7 @@ def prepare(sdir, source, target, uuids=None, parts=PARTS, to_spawn=True, extras
     writes = []  # (source path, target path, NBT to write instead of copying or None)
     for uuid in chosen:
         if "playerdata" in parts:
-            player_dir = os.path.join(src, "playerdata")
+            player_dir, target_dir = _part_dir(src, "playerdata"), _part_dir(dst, "playerdata")
             main = os.path.join(player_dir, uuid + ".dat")
             if os.path.isfile(main):
                 tree = None
@@ -168,14 +183,14 @@ def prepare(sdir, source, target, uuids=None, parts=PARTS, to_spawn=True, extras
                         raise ValueError(f"The player file of {available[uuid]['name'] or uuid} is damaged: {exc}") from exc
                     _move_to_spawn(root, spawn)
                     tree = (name, root)
-                writes.append((main, os.path.join(dst, "playerdata", uuid + ".dat"), tree))
+                writes.append((main, os.path.join(target_dir, uuid + ".dat"), tree))
             for name in sorted(os.listdir(player_dir)) if os.path.isdir(player_dir) else []:
                 if name.startswith(uuid + ".") and name not in (uuid + ".dat", uuid + ".dat_old") and not name.endswith(".tmp"):
-                    writes.append((os.path.join(player_dir, name), os.path.join(dst, "playerdata", name), None))
+                    writes.append((os.path.join(player_dir, name), os.path.join(target_dir, name), None))
         for part in ("stats", "advancements"):
-            path = os.path.join(src, part, uuid + ".json")
+            path = os.path.join(_part_dir(src, part), uuid + ".json")
             if part in parts and os.path.isfile(path):
-                writes.append((path, os.path.join(dst, part, uuid + ".json"), None))
+                writes.append((path, os.path.join(_part_dir(dst, part), uuid + ".json"), None))
 
     return {"source": source, "target": target, "src": src, "dst": dst, "writes": writes, "extras": extras,
             "players": len(chosen), "parts": parts, "to_spawn": bool(spawn)}
