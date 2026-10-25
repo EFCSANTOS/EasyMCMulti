@@ -131,7 +131,12 @@ Notes for phones:
 
 - Minecraft 1.17 – 1.21.x is supported (Java 17/21 from Termux). 1.16 and older need Java 8, which Termux does not provide.
 - Give the server 1536–2048 MB in **Server setup**; a phone needs about 3 GB free RAM.
-- Keep Termux running and exclude it from Android battery optimization. `ezmc` holds a wake lock while running.
+- **Stop Android's deep sleep from pausing the server.** `ezmc` holds Termux's wake lock (and the
+  dashboard takes it again every 5 minutes), but Android ignores it while Termux is battery-optimized:
+  with the screen off the phone sleeps and nobody can connect until the screen comes on. Run
+  `ezmc battery` and allow Termux to run in the background (Settings → Apps → Termux → Battery →
+  Unrestricted). Xiaomi, Samsung, Huawei, OnePlus: also allow Autostart and take Termux out of
+  "Sleeping apps". If the phone still sleeps, the Overview shows a warning and you get an alert.
 - Android 12+ may kill the server with `[Process completed (signal 9)]` (the "phantom process
   killer"). On Android 14+ turn on **Developer options → Disable child process restrictions**; on
   Android 12–13 run once from a PC: `adb shell settings put global settings_enable_monitor_phantom_procs false`.

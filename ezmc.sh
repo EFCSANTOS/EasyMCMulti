@@ -8,6 +8,7 @@
 #   ezmc status     show whether the background dashboard is running
 #   ezmc logs       follow the background dashboard's log (Ctrl+C to leave)
 #   ezmc run        run in this terminal even when 24/7 mode is installed
+#   ezmc battery    let Termux run with the screen off (stops Android's deep sleep from pausing it)
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -114,8 +115,22 @@ case "${1:-start}" in
   run)
     exec bash "$APP_DIR/run.sh"
     ;;
+  battery)
+    # The wake lock alone isn't enough: Doze ignores it while Termux is battery-optimized.
+    echo "Android will ask whether Termux may always run in the background: choose Allow."
+    am start -a android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS -d package:com.termux >/dev/null 2>&1 \
+      || am start -a android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS >/dev/null 2>&1 \
+      || echo "Could not open it. Go to Settings > Apps > Termux > Battery > Unrestricted."
+    termux-wake-lock 2>/dev/null || true
+    cat <<'EOF'
+If nothing appeared: Settings > Apps > Termux > Battery > Unrestricted (or "Don't optimize").
+Xiaomi, Samsung, Huawei, OnePlus...: also allow Autostart for Termux and remove it from
+"Sleeping apps" / "Deep sleeping apps". Keep the phone charging, and don't tap "Release wakelock"
+in Termux's notification.
+EOF
+    ;;
   *)
-    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

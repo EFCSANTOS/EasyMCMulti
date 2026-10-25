@@ -39,6 +39,7 @@ def register(app: FastAPI, s: Services) -> None:
             public_address=public_address,
             playit={"state": common._playit_state(runtime, playit_cfg),
                     "address": playit_cfg.get("address") or public_address},
+            device_sleep=s.sleep_summary(),
         )
         return payload
 

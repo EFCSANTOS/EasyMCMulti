@@ -49,6 +49,12 @@ WEB_PORT = int(os.getenv("EZ_WEBAPP_PORT", "8000"))
 WEB_TUNNEL_RETRY_SEC = 15
 # Alerts: the same alert is emailed at most once per ALERT_REPEAT_SEC; heartbeat every HEARTBEAT_INTERVAL_SEC.
 ALERT_REPEAT_SEC = 600
+# Deep sleep (phones): check every POWER_CHECK_SEC; a sleep this long is reported; the alert waits
+# for Wi-Fi to come back; Termux's wake lock is taken again every WAKE_LOCK_REFRESH_SEC.
+POWER_CHECK_SEC = 30
+SLEEP_REPORT_SEC = 60
+SLEEP_ALERT_DELAY_SEC = 30
+WAKE_LOCK_REFRESH_SEC = 300
 PLAYIT_RETRY_SEC = 30
 # More than PLAYIT_CRASH_LIMIT agent exits within PLAYIT_CRASH_WINDOW_SEC pause automatic restarts.
 PLAYIT_CRASH_LIMIT = 3
