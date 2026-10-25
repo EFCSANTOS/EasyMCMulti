@@ -10,7 +10,7 @@ helpers like `_start`/`_wait_idle`/`_login`, constants like `AUTH`, and all shar
 (unit tests of `core/`). Each test file starts with `from support import *`. Real-format log
 snippets: `tests/fixtures/logs/`. `pytest.ini` sets `testpaths` and the `network` marker.
 Run: `.venv\Scripts\python.exe -m pytest -q` — random order (`pytest-randomly`; reproduce with
-`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-23: 235 passed
+`-p randomly --randomly-seed=N`, disable with `-p no:randomly`). Last run 2026-10-25: 248 passed (1 skipped on Windows)
 (~30 s; the updater tests create real git repos, so `git` must be on PATH; every file also passes
 on its own). Dev deps: `pip install -r requirements-dev.txt`. CI: `.github/workflows/tests.yml`
 (Ubuntu + Windows, Python 3.13: pytest, `node --check` on the dashboard scripts, `bash -n` on
@@ -71,6 +71,9 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - WS: unauth rejected; auth streams.
 - Start-before-install ordering (monkeypatched); property mapping; lifecycle start→command→stop;
   restart waits for the old process to stop before starting a new one.
+- Deep sleep (`test_power.py`): `SleepWatch` arithmetic; a 10-minute sleep is recorded, alerted
+  (with the fix steps), shown in `/api/status` and dismissable; the wake lock is re-taken at start and
+  after sleeping; naps under a minute ignored; battery-setting endpoint (off-phone 400, `am` failure).
 - Device health (`test_health.py`): temperatures from fake `/sys` zones + battery and from
   `termux-battery-status` (cached); metrics include them; CPU alert only after N minutes, once, margin
   before "back to normal"; RAM and heat (device + battery) alerts; per-alert channels (email only /

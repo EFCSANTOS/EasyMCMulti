@@ -96,6 +96,8 @@ function bindEvents() {
   on('alerts-discord-owner-remove', 'click', (event, button) => removeWebhook('discord_owner_url', button));
   on('alerts-discord-friends-remove', 'click', (event, button) => removeWebhook('discord_friends_url', button));
   on('modpack-export-button', 'click', (event, button) => exportModpack(button));
+  on('sleep-battery-button', 'click', (event, button) => openBatterySettings(button));
+  on('sleep-dismiss-button', 'click', (event, button) => dismissSleepWarning(button));
   on('modpack-jars-button', 'click', (event, button) => downloadModJars(button));
   bindInvite();
 

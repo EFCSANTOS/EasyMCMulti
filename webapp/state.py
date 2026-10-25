@@ -79,6 +79,8 @@ class RuntimeState:
     bedrock_error: str = ""
     bedrock_busy: bool = False
     crash_times: list[float] = field(default_factory=list)
+    # Deep sleeps noticed by the power check: (wall time when noticed, seconds asleep).
+    sleep_events: list[tuple[float, float]] = field(default_factory=list)
     # Outcome of the last background lifecycle job (create/start/restart/world switch), for the UI.
     operation_error: str = ""
     operation_message: str = ""
