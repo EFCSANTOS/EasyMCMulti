@@ -16,7 +16,7 @@ def register(app: FastAPI, s: Services) -> None:
     runtime = s.runtime
     append_console_line = s.append_console_line
     watch = power.SleepWatch(read=lambda: power.asleep_total())  # looked up per call so tests can fake it
-    last_wake_lock = [0.0]
+    last_wake_lock: list[float | None] = [None]  # None: take it on the first check
 
     def describe(seconds: float) -> str:
         minutes = round(seconds / 60)
@@ -45,7 +45,8 @@ def register(app: FastAPI, s: Services) -> None:
             timer.daemon = True
             timer.start()
         now = time.monotonic()
-        if termux and (slept >= common.SLEEP_REPORT_SEC or now - last_wake_lock[0] >= common.WAKE_LOCK_REFRESH_SEC):
+        due = last_wake_lock[0] is None or now - last_wake_lock[0] >= common.WAKE_LOCK_REFRESH_SEC
+        if termux and (slept >= common.SLEEP_REPORT_SEC or due):
             # Taken by run.sh at start; take it again in case it was released (notification button, Termux restart).
             last_wake_lock[0] = now
             if not power.acquire_wake_lock():
@@ -72,7 +73,7 @@ def register(app: FastAPI, s: Services) -> None:
 
     def reset_power() -> None:
         watch.__init__(read=lambda: power.asleep_total())
-        last_wake_lock[0] = 0.0
+        last_wake_lock[0] = None
 
     s.power_tick = power_tick
     s.reset_power = reset_power

@@ -23,7 +23,9 @@ def can_detect_sleep():
 
 def asleep_total():
     """Seconds this device has spent suspended since it booted."""
-    return time.clock_gettime(time.CLOCK_BOOTTIME) - time.clock_gettime(time.CLOCK_MONOTONIC)
+    # Monotonic first: the later boottime read can only add the microseconds in between, never go negative.
+    monotonic = time.clock_gettime(time.CLOCK_MONOTONIC)
+    return max(0.0, time.clock_gettime(time.CLOCK_BOOTTIME) - monotonic)
 
 
 class SleepWatch:
