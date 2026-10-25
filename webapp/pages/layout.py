@@ -22,7 +22,7 @@ from webapp.pages.sections_more import _SECTION_CONSOLE_FULL  # noqa: F401
 from webapp.pages.sections_more import _SECTION_MODS  # noqa: F401
 from webapp.pages.sections_more import _SECTION_REMOTE  # noqa: F401
 from webapp.pages.sections_more import _SECTION_WORLDS  # noqa: F401
-from webapp.pages.sections_diagnosis import _SECTION_DIAGNOSIS, _SECTION_LOGS
+from webapp.pages.sections_diagnosis import _SECTION_DIAGNOSIS, _SECTION_LOGS, _SECTION_SLEEP
 from webapp.pages.sections_identity import _SECTION_ALL_PROPERTIES, _SECTION_IDENTITY
 from webapp.pages.sections_invite import _SECTION_BEDROCK, _SECTION_INVITE
 from webapp.pages.sections_players import _SECTION_PLAYERS
@@ -79,7 +79,7 @@ _TOPBAR_CONTROLS = f"""
 
 
 _DASHBOARD_PAGES: dict[str, tuple[str, ...]] = {
-    "overview": (_SECTION_OVERVIEW_TILES, _SECTION_DIAGNOSIS, _SECTION_INVITE, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
+    "overview": (_SECTION_OVERVIEW_TILES, _SECTION_SLEEP, _SECTION_DIAGNOSIS, _SECTION_INVITE, _SECTION_METRICS, _SECTION_CONSOLE_PREVIEW),
     "setup": (_SECTION_SETUP, _SECTION_MIGRATE, _SECTION_PERFORMANCE, _SECTION_ALWAYS_ON, _SECTION_SCHEDULE, _SECTION_ALERTS,
               _SECTION_UPDATES),
     "advanced": (_SECTION_ADVANCED, _SECTION_IDENTITY, _SECTION_ALL_PROPERTIES),

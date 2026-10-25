@@ -292,6 +292,7 @@ function renderStatus(status) {
   setField('player_names', names.length ? names.join(', ') : 'No one online');
   setField('lan_join', lan ? `${lan}:${port}` : '—');
   setField('public_join', publicIp && publicIp !== 'unavailable' ? `${publicIp}:${port}` : 'Unavailable');
+  renderSleep(status.device_sleep);
 
   const banner = document.getElementById('install-banner');
   if (banner) {
@@ -302,6 +303,33 @@ function renderStatus(status) {
       document.getElementById('install-progress-bar').style.width = `${Math.round(status.install_progress || 0)}%`;
     }
   }
+}
+
+// Deep sleep in the last 24 hours (phones): the server was unreachable meanwhile.
+function renderSleep(sleep) {
+  const card = document.getElementById('sleep-warning');
+  if (!card) return;
+  card.hidden = !(sleep && sleep.count);
+  if (card.hidden) return;
+  const minutes = (seconds) => `${Math.max(1, Math.round(seconds / 60))} min`;
+  const last = new Date(sleep.last_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const what = sleep.phone ? 'phone' : 'computer';
+  document.getElementById('sleep-title').textContent = `The ${what} fell asleep`;
+  document.getElementById('sleep-detail').textContent = sleep.count === 1
+    ? `For ${minutes(sleep.last_seconds)}, noticed at ${last}. Nobody could reach the server meanwhile.`
+    : `${sleep.count} times in the last 24 hours (${minutes(sleep.total_seconds)} in total; last ${minutes(sleep.last_seconds)}, noticed at ${last}).`;
+  document.getElementById('sleep-phone-steps').hidden = !sleep.phone;
+}
+
+async function openBatterySettings(button) {
+  await runAction(button, null, async () => (await fetchJson('/api/power/battery-settings', 'POST')).message);
+}
+
+async function dismissSleepWarning(button) {
+  await runAction(button, null, async () => {
+    renderSleep(await fetchJson('/api/power/dismiss', 'POST'));
+    return 'Dismissed. It comes back if the phone falls asleep again.';
+  });
 }
 
 function operationRunning(status) {

@@ -735,6 +735,27 @@ Core details (`core/playit.py`):
   characters above U+FFFF as surrogate pairs), atomic `save`. Unchanged data round-trips
   byte-identical (checked on a real 1.21.7 `level.dat`).
 
+## 37. Deep sleep on phones (wake lock, sleep detection)
+- Problem: `termux-wake-lock` alone doesn't keep a phone awake. Doze ignores the wake lock while
+  Termux is battery-optimized (and some brands freeze background apps anyway), so with the screen off
+  the phone suspends: server, tunnels and dashboard stop answering until the screen comes on. Only the
+  owner can exempt Termux (Settings → Apps → Termux → Battery → Unrestricted).
+- `core/power.py`: `SleepWatch` compares `CLOCK_BOOTTIME` (counts suspend) with `CLOCK_MONOTONIC`
+  (doesn't); the growth of the gap between checks = time asleep. `acquire_wake_lock()` re-runs
+  `termux-wake-lock` (no-op while held). `open_battery_settings()` → `am start` of
+  `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` for `com.termux`, falling back to the optimization list.
+- `webapp/routes/power.py::power_loop` (started by autostart; returns at once without
+  `CLOCK_BOOTTIME` unless Termux): every `POWER_CHECK_SEC` (30) → a sleep ≥ `SLEEP_REPORT_SEC` (60) is
+  appended to `runtime.sleep_events`, logged `[power]` and sent as a "server" alert after
+  `SLEEP_ALERT_DELAY_SEC` (30, Wi-Fi reconnects first) with the fix steps. On Termux the wake lock is
+  taken again every `WAKE_LOCK_REFRESH_SEC` (300) and right after a sleep.
+- `/api/status` → `device_sleep` `{count, total_seconds, last_at, last_seconds, phone}` (last 24 h);
+  the Overview shows the "The phone fell asleep" card (`#sleep-warning`) with the steps,
+  "Open the setting on the phone" (`POST /api/power/battery-settings`, 400 off-phone, 502 if `am`
+  failed) and "Dismiss" (`POST /api/power/dismiss` clears the events). `GET /api/power` = the summary.
+- Termux scripts: `ezmc battery` opens the same setting, re-takes the wake lock and prints the
+  vendor steps; `termux-setup.sh` runs it at the end of the install.
+
 ## 15. Termux (Android) install
 `termux-setup.sh` (README: `pkg install -y curl`, download, `bash termux-setup.sh`; piping into bash
 also works). All package/git/pip commands run non-interactively with stdin from `/dev/null`
@@ -752,6 +773,6 @@ and Termux:Boot script `~/.termux/boot/ezmc-boot` (`termux-wake-lock` + source
 `run.sh` loads `.env`, takes `termux-wake-lock`, prints the LAN URL and **`exec`s** uvicorn on
 `EZ_WEBAPP_PORT` (so runit/Ctrl+C signals reach the app's shutdown). `ezmc.sh`: `start` (service
 `sv up`, or foreground without a service), `stop` (`sv down` + `termux-wake-unlock`), `restart`,
-`status`, `logs` (`tail -F`), `run`; starts runsvdir via start-services.sh if not running.
+`status`, `logs` (`tail -F`), `run`, `battery` (§37); starts runsvdir via start-services.sh if not running.
 Re-running the setup updates code/deps and keeps `.env`. Termux:Boot itself must be installed and
 opened once by the user (separate APK).

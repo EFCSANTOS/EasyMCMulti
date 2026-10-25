@@ -15,6 +15,32 @@ _SECTION_DIAGNOSIS = """
         </section>
 """
 
+# Phones: the device fell into deep sleep and the server was unreachable (webapp/routes/power.py).
+_SECTION_SLEEP = """
+        <section id="sleep-warning" class="card callout-card" data-owner-only hidden>
+          <div class="card-header">
+            <div>
+              <h2 id="sleep-title">The phone fell asleep</h2>
+              <p id="sleep-detail" class="card-sub"></p>
+            </div>
+            <div class="card-tools">
+              <button id="sleep-dismiss-button" class="btn btn-ghost btn-sm" type="button">Dismiss</button>
+            </div>
+          </div>
+          <div id="sleep-phone-steps">
+            <p>Android paused Termux to save battery, so the server, the tunnel and this dashboard stopped answering
+              until the screen came on. Fix it once on the phone:</p>
+            <ol class="steps">
+              <li>Settings → Apps → Termux → Battery → <strong>Unrestricted</strong> (or "Don't optimize").</li>
+              <li>Xiaomi, Samsung, Huawei, OnePlus…: also allow <strong>Autostart</strong> and turn off "Put unused
+                apps to sleep" / "Deep sleeping apps" for Termux.</li>
+              <li>Keep the phone on the charger, and leave Termux's notification alone ("Release wakelock" lets it sleep).</li>
+            </ol>
+            <button id="sleep-battery-button" class="btn btn-primary btn-sm" type="button">Open the setting on the phone</button>
+          </div>
+        </section>
+"""
+
 _SECTION_LOGS = f"""
         <section id="logs" class="card">
           <div class="card-header">
