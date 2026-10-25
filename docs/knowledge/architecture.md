@@ -29,7 +29,7 @@
   `/health`), `system` (metrics, status, console history, config, versions), `server` (install +
   lifecycle jobs — `start_lifecycle_job`, `busy_error`, `launch_server`, `launch_when_free`,
   `install_server`, `request_stop`, `stop_and_wait`, `restart_job`, `server_running` — commands,
-  admin), `backups`, `mods` (+ Modrinth), `worlds`, `diagnosis` (crash diagnosis + log viewer), `players` (whitelist/ops/bans), `identity` (icon + all properties), `storage` (disk use + cleanup), `migrate` (version moves), `users` (friend accounts), `bedrock` (crossplay switch), `health` (CPU/RAM/temperature alerts), `public` (invite + `/s/<token>` status page), `remote` (PlayIt + Cloudflare), `updates`
+  admin), `backups`, `mods` (+ Modrinth), `worlds`, `diagnosis` (crash diagnosis + log viewer), `players` (whitelist/ops/bans), `identity` (icon + all properties), `storage` (disk use + cleanup), `migrate` (version moves), `users` (friend accounts), `bedrock` (crossplay switch), `health` (CPU/RAM/temperature alerts), `power` (phone deep sleep), `public` (invite + `/s/<token>` status page), `remote` (PlayIt + Cloudflare), `updates`
   (self-update + alert settings).
 - `background.py` — `run_in_background`, `autostart` (also starts `heartbeat_loop` and
   `scheduler_loop`), `shutdown`.
@@ -41,7 +41,7 @@
   `ASSET_VERSION`).
 
 ### `core/` additions (after the audit)
-- `temperatures.py` (device sensors), `geyser.py` (Bedrock crossplay, FEAT-18), `users.py` (friend accounts, scrypt, FEAT-10), `migrate.py` (version moves, FEAT-09), `player_transfer.py` + `nbt.py` (carry player progress between worlds), `storage.py` (disk use and cleanup, FEAT-15), `activity.py` (playtime log, FEAT-12), `mod_updates.py` (mod update check/update/rollback, FEAT-07), `diagnose.py` (crash rule table, FEAT-08), `backups.py` (backup names/retention, FEAT-01),
+- `temperatures.py` (device sensors), `power.py` (wake lock, deep-sleep detection), `geyser.py` (Bedrock crossplay, FEAT-18), `users.py` (friend accounts, scrypt, FEAT-10), `migrate.py` (version moves, FEAT-09), `player_transfer.py` + `nbt.py` (carry player progress between worlds), `storage.py` (disk use and cleanup, FEAT-15), `activity.py` (playtime log, FEAT-12), `mod_updates.py` (mod update check/update/rollback, FEAT-07), `diagnose.py` (crash rule table, FEAT-08), `backups.py` (backup names/retention, FEAT-01),
   `fsutil.py` (atomic writes, FIX-03), `players.py` (whitelist/ops/bans JSON, UUIDs, refusal
   parsing, FEAT-02), `modpack.py` (`.mrpack` build, loader version detection, FEAT-04).
 
@@ -180,7 +180,7 @@ Supported hosts: Windows (primary), Linux and Termux on Android (added 2026-10-2
 - Forge/NeoForge modern launch uses `libraries/**/win_args.txt` on Windows, `unix_args.txt` elsewhere
   (`downloaders._find_args_file`).
 - Android blocks `/proc/stat`: CPU shows 0; memory comes from `/proc/meminfo`
-  (`app._memory_usage`). Android may also suspend Termux; `run.sh` takes a wake lock.
+  (`app._memory_usage`). Android may also suspend Termux; `run.sh` takes a wake lock, which only holds once Termux is exempt from battery optimization (workflows §37).
 - PlayIt on Termux uses the Linux binary wrapped in `termux-chroot` (`playit.agent_command`).
 - Android 12+ "phantom process killer" can SIGKILL Termux child processes (Java, PlayIt agent);
   the user must disable it (README Android notes). The app cannot work around it.

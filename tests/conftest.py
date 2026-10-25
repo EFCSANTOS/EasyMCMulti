@@ -40,4 +40,5 @@ def fresh_runtime():
     app.state.runtime.__dict__.update(RuntimeState().__dict__)
     app.state.services.reset_notifications()
     app.state.services.reset_health()
+    app.state.services.reset_power()
     yield

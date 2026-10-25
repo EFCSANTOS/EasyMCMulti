@@ -158,10 +158,14 @@ fi
 cat <<'EOF'
 
 Tips:
-  * Exclude Termux from battery optimization in Android settings.
   * Android 12+ may kill the server ("signal 9"): see "Android notes" in the README.
   * Phones need ~3 GB free RAM for a small server; set Memory to 1536-2048 MB in Server setup.
 EOF
+
+# Without this the phone deep-sleeps with the screen off and the server stops answering: Doze
+# ignores Termux's wake lock while Termux is battery-optimized.
+say "Let Termux run with the screen off"
+bash ezmc.sh battery || true
 
 if [ "$always_on" = yes ]; then
   bash ezmc.sh start
