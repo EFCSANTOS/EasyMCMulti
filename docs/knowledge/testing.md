@@ -92,6 +92,10 @@ IP). (Before 2026-10-22 the suite overwrote the real `launcher_config.json` and
 - Migration (FEAT-09, `test_migrate.py`, `fabric_1_21_1` fixture fakes Modrinth and downloads):
   plan (worlds, files, compatible/missing mods, downgrade, loader change); the full move; missing
   mods/downgrade/running → 409; existing target worlds kept aside.
+- Fabric loader update (`test_loader_updates.py`, `fabric_26_2` fixture fakes Fabric meta and
+  the download): newest stable loader per game, status → update → rollback, a bad download leaves
+  the server as it was, refusals (running, not Fabric, nothing to roll back), offline status,
+  `server.jar.previous` in Storage.
 - Storage (FEAT-15, `storage_tree` fixture): breakdown sizes and flags, Java need from server
   versions; deletes refused for the active dir, backups, unknown ids and while running; low-space
   alert once until recovered.
