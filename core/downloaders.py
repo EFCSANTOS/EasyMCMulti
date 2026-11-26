@@ -91,9 +91,18 @@ def fabric_versions():
     return [g["version"] for g in games if g["stable"]]
 
 
-def fabric_server_url(game_version):
-    loaders = requests.get(f"{FABRIC_META}/versions/loader", timeout=30).json()
-    loader = next(l["version"] for l in loaders if l["stable"])
+def fabric_latest_loader(game_version):
+    """Newest stable Fabric loader built for game_version (newest of any kind if none is stable yet)."""
+    entries = requests.get(f"{FABRIC_META}/versions/loader/{game_version}", timeout=30).json()
+    loaders = [e["loader"] for e in entries if isinstance(e, dict) and e.get("loader")]
+    if not loaders:
+        raise RuntimeError(f"No Fabric loader for Minecraft {game_version} yet.")
+    stable = [l for l in loaders if l.get("stable")]
+    return max(stable or loaders, key=lambda l: _version_key(l["version"]))["version"]
+
+
+def fabric_server_url(game_version, loader_version=None):
+    loader = loader_version or fabric_latest_loader(game_version)
     installers = requests.get(f"{FABRIC_META}/versions/installer", timeout=30).json()
     installer = next(i["version"] for i in installers if i["stable"])
     # Fabric serves a ready-to-run server .jar directly.

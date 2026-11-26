@@ -15,7 +15,7 @@ import zipfile
 
 import requests
 
-from . import fsutil, paths
+from . import downloaders, fsutil, loader_updates, paths
 from .modrinth import API, HEADERS
 
 PACK_FILE = "ez-modpack.mrpack"
@@ -45,16 +45,12 @@ def _library_versions(sdir, *parts):
 def loader_version(loader, sdir, mc_version):
     """Installed loader version (e.g. Fabric "0.16.10", Forge "47.3.0", NeoForge "21.1.73"), or ""."""
     if loader == "fabric":
+        # The launcher jar names the loader that runs; libraries/ keeps older ones after a loader update.
+        recorded = loader_updates.jar_loader_version(os.path.join(sdir, "server.jar"))
+        if recorded:
+            return recorded
         found = _library_versions(sdir, "net", "fabricmc", "fabric-loader")
-        if found:
-            return found[-1]
-        try:  # before the first start: the launcher jar records the loader it will download
-            with zipfile.ZipFile(os.path.join(sdir, "server.jar")) as jar:
-                text = jar.read("install.properties").decode("utf-8", "replace")
-            match = re.search(r"^fabric-loader-version=(.+)$", text, re.MULTILINE)
-            return match.group(1).strip() if match else ""
-        except (OSError, KeyError, zipfile.BadZipFile):
-            return ""
+        return max(found, key=downloaders._version_key) if found else ""
     if loader == "forge":
         found = _library_versions(sdir, "net", "minecraftforge", "forge")
         prefix = f"{mc_version}-"

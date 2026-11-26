@@ -269,6 +269,15 @@ _SECTION_MIGRATE = """
                 icon and compatible mods along. The current version stays as it is, so you can switch back.</p>
             </div>
           </div>
+          <div id="loader-update" class="stack-sm" hidden>
+            <h3>Fabric loader</h3>
+            <p id="loader-update-status" class="hint">Checking the Fabric loader…</p>
+            <div class="btn-row">
+              <button id="loader-update-button" class="btn btn-primary btn-sm" type="button" hidden>Update loader</button>
+              <button id="loader-rollback-button" class="btn btn-ghost btn-sm" type="button" hidden>Roll back</button>
+              <button id="loader-check-button" class="btn btn-ghost btn-sm" type="button">Check again</button>
+            </div>
+          </div>
           <form id="migrate-form" class="form-grid">
             <div class="field">
               <label for="migrate-loader">Loader</label>
