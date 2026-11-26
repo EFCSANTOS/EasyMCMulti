@@ -613,6 +613,22 @@ Core details (`core/playit.py`):
   first start (or, for a downgrade, that the world may not load).
 - UI: Server setup → "Move to another version" (loader, version list from `/api/versions`, Check →
   plan list with warnings, Move → confirm → background job with the usual progress/toast).
+- **Fabric loader update (same Minecraft version)** — `core/loader_updates.py`. A Fabric
+  `server.jar` is a launcher that pins its loader in `install.properties`, and `prepare()` never
+  re-downloads an installed jar, so without this a server keeps its first loader forever.
+  `downloaders.fabric_latest_loader(game)` = newest *stable* entry of `GET
+  /v2/versions/loader/<game>` (newest of any kind when none is stable; also used by fresh installs
+  through `fabric_server_url(game, loader=None)`). `update()` downloads to `server.jar.download`,
+  checks its `install.properties` names the expected loader, moves the old jar to
+  `server.jar.previous`, then swaps; `rollback()` swaps the two back. The new loader's libraries are
+  fetched by the launcher on the next start; old ones stay in `libraries/`, so
+  `modpack.loader_version` reads the jar first. Routes: `GET /api/server/loader` (`supported`,
+  `current`, `latest`, `update_available`, `previous`, `error` when Fabric meta is unreachable);
+  `POST /api/server/loader/update` / `.../rollback` → 400 not Fabric, 409 no server.jar / running /
+  nothing to roll back, else **202** lifecycle jobs "updating loader" (backs up the active world
+  first, `auto-pre-loader-update`) / "rolling back loader". UI: a "Fabric loader" block at the top
+  of "Move to another version". Storage lists `server.jar.previous` (`previousjar:<dir>`) as
+  deletable.
 
 ## 32. Friend accounts (FEAT-10)
 - Roles: **owner** = the `EZ_WEBAPP_USERNAME`/`PASSWORD` account (never stored, can't be locked out

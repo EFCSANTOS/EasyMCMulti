@@ -83,6 +83,9 @@ function bindEvents() {
   on('migrate-loader', 'change', () => loadMigrateVersions());
   on('migrate-form', 'submit', (event) => checkMigration(event));
   on('migrate-run-button', 'click', (event, button) => runMigration(button));
+  on('loader-update-button', 'click', (event, button) => updateLoader(button));
+  on('loader-rollback-button', 'click', (event, button) => rollbackLoader(button));
+  on('loader-check-button', 'click', () => loadLoaderStatus());
   on('storage-refresh-button', 'click', () => loadStorage(true));
   on('mod-updates-check', 'click', (event, button) => checkModUpdates(button));
   on('mod-updates-all', 'click', (event, button) => applyModUpdates(null, button));
@@ -147,6 +150,7 @@ async function boot() {
   await loadConfig();
   await loadHostInfo();
   loadMigrateVersions();
+  loadLoaderStatus();
   renderMotdPreview();
   loadServerIcon();
   await loadStatus();
