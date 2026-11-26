@@ -161,6 +161,57 @@ async function runMigration(button) {
   });
 }
 
+// ---------- Fabric loader update (same Minecraft version) ----------
+let loaderInfo = null;
+
+async function loadLoaderStatus() {
+  const box = document.getElementById('loader-update');
+  if (!box) return;
+  const status = document.getElementById('loader-update-status');
+  const update = document.getElementById('loader-update-button');
+  const rollback = document.getElementById('loader-rollback-button');
+  try {
+    loaderInfo = await fetchJson('/api/server/loader');
+  } catch (error) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = !loaderInfo.supported;
+  if (!loaderInfo.supported) return;
+  const info = loaderInfo;
+  let text;
+  if (!info.current) text = 'Create the server first; it gets the newest Fabric loader.';
+  else if (info.update_available) text = `Fabric loader ${info.current} is installed; ${info.latest} is available for Minecraft ${info.version}. Mods keep working in most updates; a backup is made first.`;
+  else if (info.latest) text = `Fabric loader ${info.current} is the newest for Minecraft ${info.version}.`;
+  else text = `Fabric loader ${info.current} is installed.`;
+  if (info.error) text += ` ${info.error}`;
+  if (info.previous) text += ` Rolling back returns to ${info.previous}.`;
+  status.textContent = text;
+  status.classList.toggle('hint-error', Boolean(info.error));
+  update.hidden = !info.update_available;
+  rollback.hidden = !info.previous;
+}
+
+async function loaderAction(button, path, question) {
+  if (!window.confirm(question)) return;
+  await runAction(button, null, async () => {
+    const response = await fetchJson(path, 'POST');
+    trackOperation(response);
+    return response.message;
+  });
+}
+
+function updateLoader(button) {
+  const info = loaderInfo || {};
+  return loaderAction(button, '/api/server/loader/update',
+    `Update the Fabric loader from ${info.current} to ${info.latest}? The server must be stopped; the world is backed up first.`);
+}
+
+function rollbackLoader(button) {
+  const info = loaderInfo || {};
+  return loaderAction(button, '/api/server/loader/rollback', `Go back to Fabric loader ${info.previous}?`);
+}
+
 // ---------- Performance presets and RAM advice ----------
 const PERFORMANCE_PRESETS = {
   phone: { label: 'Phone / low-power', ram: 2048, view: 6, sim: 4 },
@@ -347,6 +398,7 @@ function reportFinishedOperation(previous, status) {
   if (!operationRunning(previous) || operationRunning(status)) return;
   if (status.operation_error) setStatus(status.operation_error, 'error');
   else if (status.operation_message) setStatus(status.operation_message);
+  loadLoaderStatus(); // installs, migrations and loader updates change the installed loader
 }
 
 async function loadStatus() {

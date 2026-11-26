@@ -94,6 +94,13 @@ def _scan(active_dir, now):
                         items.append({"id": f"installer:{name}", "kind": "installer", "name": f"{name}/installer.jar",
                                       "detail": "Loader installer, not needed once installed", "size": size,
                                       "deletable": True})
+                    elif entry.is_file() and entry.name == "server.jar.previous":
+                        size = entry.stat().st_size
+                        listed_size += size
+                        items.append({"id": f"previousjar:{name}", "kind": "installer",
+                                      "name": f"{name}/server.jar.previous",
+                                      "detail": "Loader kept by an update, only needed to roll back", "size": size,
+                                      "deletable": True})
             special = backups_size + listed_size
             old_logs = []
             logs_dir = os.path.join(sdir, "logs")
@@ -162,6 +169,8 @@ def delete(item_id, active_dir, now=None):
         shutil.rmtree(os.path.join(paths.SERVERS_DIR, server, folder))
     elif kind == "installer":
         os.remove(os.path.join(paths.SERVERS_DIR, ref, "installer.jar"))
+    elif kind == "previousjar":
+        os.remove(os.path.join(paths.SERVERS_DIR, ref, "server.jar.previous"))
     elif kind == "oldlogs":
         logs_dir = os.path.join(paths.SERVERS_DIR, ref, "logs")
         for log in os.listdir(logs_dir):

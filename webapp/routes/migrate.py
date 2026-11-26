@@ -1,4 +1,4 @@
-"""Move the server to another Minecraft version or loader, bringing worlds and settings (FEAT-09)."""
+"""Move the server to another Minecraft version or loader (FEAT-09), and update the Fabric loader in place."""
 from __future__ import annotations
 
 import os
@@ -7,7 +7,7 @@ from typing import Any
 import requests
 from fastapi import Depends, FastAPI, HTTPException, Response
 
-from core import backups, config_store, migrate
+from core import backups, config_store, loader_updates, migrate
 from webapp import common
 from webapp.services import Services, require_auth
 from webapp.validation import validate_config_update
@@ -82,3 +82,69 @@ def register(app: FastAPI, s: Services) -> None:
         s.start_lifecycle_job("migrating", job, "Moving to the new version failed", state="installing")
         response.status_code = 202
         return {"state": runtime.state, "operation": runtime.operation, "message": f"Moving to {label}…"}
+
+    # ---------- Fabric loader update (same Minecraft version) ----------
+    def loader_target() -> tuple[dict[str, Any], str]:
+        config = common._effective_config()
+        if not loader_updates.supported(str(config.get("loader"))):
+            raise HTTPException(status_code=400, detail="Loader updates are only available for Fabric servers.")
+        sdir = common._server_dir_for_config(config)
+        if not os.path.isfile(os.path.join(sdir, loader_updates.JAR)):
+            raise HTTPException(status_code=409, detail="Create the server first.")
+        return config, sdir
+
+    @app.get("/api/server/loader")
+    def loader_status(_: str = Depends(require_auth)) -> dict[str, Any]:
+        config = common._effective_config()
+        loader, version = str(config.get("loader")), str(config.get("version"))
+        if not loader_updates.supported(loader):
+            return {"supported": False, "loader": loader, "version": version}
+        sdir = common._server_dir_for_config(config)
+        result: dict[str, Any] = {"supported": True, "loader": loader, "version": version,
+                                  "current": loader_updates.jar_loader_version(os.path.join(sdir, loader_updates.JAR)),
+                                  "previous": loader_updates.jar_loader_version(os.path.join(sdir, loader_updates.PREVIOUS)),
+                                  "latest": "", "update_available": False, "error": ""}
+        try:
+            result.update(loader_updates.status(sdir, version))
+        except (requests.RequestException, RuntimeError, ValueError) as exc:
+            result["error"] = f"Fabric is not reachable to check for a newer loader: {exc}"
+        return result
+
+    def loader_job(config: dict[str, Any], sdir: str, action: str) -> Any:
+        log = lambda line: append_console_line(f"[loader] {line}")  # noqa: E731
+
+        def job() -> str:
+            if action == "update":
+                active = common._active_world(config)
+                if os.path.isdir(os.path.join(sdir, active)):
+                    log("backing up the current world first")
+                    backups.create(sdir, active, "auto-pre-loader-update")
+                old, new = loader_updates.update(sdir, str(config.get("version")), log=log)
+                runtime.set_state("stopped", "idle")
+                return f"Fabric loader updated from {old} to {new}. If a mod fails to start, roll back."
+            now, back_to = loader_updates.rollback(sdir, log=log)
+            runtime.set_state("stopped", "idle")
+            return f"Fabric loader rolled back from {now or 'the new one'} to {back_to}."
+        return job
+
+    @app.post("/api/server/loader/update")
+    def update_loader(response: Response, _: str = Depends(require_auth)) -> dict[str, Any]:
+        config, sdir = loader_target()
+        if s.server_running():
+            raise HTTPException(status_code=409, detail="Stop the server before updating the loader.")
+        s.start_lifecycle_job("updating loader", loader_job(config, sdir, "update"), "Updating the Fabric loader failed",
+                              state="installing")
+        response.status_code = 202
+        return {"state": runtime.state, "operation": runtime.operation, "message": "Updating the Fabric loader…"}
+
+    @app.post("/api/server/loader/rollback")
+    def rollback_loader(response: Response, _: str = Depends(require_auth)) -> dict[str, Any]:
+        config, sdir = loader_target()
+        if s.server_running():
+            raise HTTPException(status_code=409, detail="Stop the server before changing the loader.")
+        if not os.path.isfile(os.path.join(sdir, loader_updates.PREVIOUS)):
+            raise HTTPException(status_code=409, detail="There is no previous Fabric loader to go back to.")
+        s.start_lifecycle_job("rolling back loader", loader_job(config, sdir, "rollback"),
+                              "Rolling back the Fabric loader failed", state="installing")
+        response.status_code = 202
+        return {"state": runtime.state, "operation": runtime.operation, "message": "Rolling back the Fabric loader…"}
